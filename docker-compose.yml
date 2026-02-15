@@ -1,0 +1,101 @@
+version: '3.8'
+
+# ==============================================================================
+# OpenClaw Agent Fleet — Docker Compose Configuration
+# ==============================================================================
+# Local development environment for the HOA Funding Agent Fleet
+#
+# Services:
+# - redis: State management and task queuing
+# - server: Express backend API (optional: run locally instead)
+#
+# Usage:
+#   docker-compose up -d redis    # Start Redis only
+#   docker-compose up             # Start all services
+#   docker-compose down           # Stop all services
+#   docker-compose logs -f redis  # View Redis logs
+
+services:
+  # ==========================================================================
+  # Redis — Distributed state management
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: openclaw-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - openclaw-network
+
+  # ==========================================================================
+  # Server — Express backend (OPTIONAL - can run locally with npm run dev)
+  # ==========================================================================
+  # Uncomment to run server in Docker instead of locally
+  #
+  # server:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.server
+  #   container_name: openclaw-server
+  #   ports:
+  #     - "3001:3001"
+  #   environment:
+  #     - NODE_ENV=development
+  #     - REDIS_URL=redis://redis:6379
+  #     - DB_PATH=/data/clawops.db
+  #   volumes:
+  #     - ./server:/app/server:ro
+  #     - ./data:/data
+  #     - ./openclaw-skills:/openclaw-skills:ro
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - openclaw-network
+  #   restart: unless-stopped
+
+  # ==========================================================================
+  # Redis Commander — Web UI for Redis (development only)
+  # ==========================================================================
+  # Uncomment to enable Redis web UI at http://localhost:8081
+  #
+  # redis-commander:
+  #   image: rediscommander/redis-commander:latest
+  #   container_name: openclaw-redis-commander
+  #   environment:
+  #     - REDIS_HOSTS=local:redis:6379
+  #   ports:
+  #     - "8081:8081"
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - openclaw-network
+  #   restart: unless-stopped
+
+# ==============================================================================
+# Volumes — Persistent storage
+# ==============================================================================
+volumes:
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/data/redis
+      o: bind
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  openclaw-network:
+    driver: bridge

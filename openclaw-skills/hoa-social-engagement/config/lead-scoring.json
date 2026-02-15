@@ -1,0 +1,81 @@
+{
+  "high_intent_signals": [
+    "mentions a specific project (roof, siding, paving, elevator, building envelope, plumbing, concrete, pool)",
+    "mentions a dollar amount or budget for a project",
+    "mentions reserve shortfall, underfunded reserves, or reserve study gap",
+    "asks about HOA loan rates, terms, qualifications, or process",
+    "mentions upcoming board vote on financing or special assessment",
+    "identifies themselves as board president, treasurer, secretary, or property manager",
+    "asks for lender recommendations or HOA financing referrals",
+    "mentions they are comparing loan options or getting quotes",
+    "expresses frustration with special assessment and asks about alternatives"
+  ],
+  "medium_intent_signals": [
+    "comments on our content with a relevant question",
+    "mentions deferred maintenance or aging infrastructure",
+    "asks general questions about HOA finances or budgeting",
+    "participates in HOA financing or reserve fund discussions",
+    "identifies as a community association manager"
+  ],
+  "low_intent_signals": [
+    "likes or shares our content without commenting",
+    "follows our page"
+  ],
+  "scoring": {
+    "high_intent_match": 10,
+    "medium_intent_match": 5,
+    "low_intent_match": 1,
+    "threshold_for_outreach_draft": 10
+  },
+  "filters": {
+    "exclude_homeowner_complaints": true,
+    "exclude_patterns": [
+      "my HOA is terrible",
+      "my HOA board is incompetent",
+      "HOAs are a scam",
+      "I hate my HOA",
+      "our HOA fees are too high",
+      "homeowner complaining about board decisions"
+    ],
+    "require_decision_maker_signals": [
+      "board member",
+      "board president",
+      "board treasurer",
+      "board secretary",
+      "property manager",
+      "community association manager",
+      "CAM",
+      "PM",
+      "HOA manager",
+      "board vote",
+      "our board is considering"
+    ]
+  },
+  "geographic_tagging": {
+    "enabled": true,
+    "detect_states": true,
+    "states": [
+      "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+      "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+      "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+      "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+      "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
+    ]
+  },
+  "response_guidelines": {
+    "high_intent": {
+      "approach": "Answer question first, then subtle one-liner CTA",
+      "max_cta_lines": 1,
+      "tone": "helpful, never pushy",
+      "always_include_original_comment": true
+    },
+    "medium_intent": {
+      "approach": "Helpful response only, NO CTA",
+      "purpose": "Build credibility, not ready to convert yet",
+      "tone": "genuinely helpful, advisory"
+    },
+    "low_intent": {
+      "approach": "No response needed, log for tracking only"
+    }
+  }
+}

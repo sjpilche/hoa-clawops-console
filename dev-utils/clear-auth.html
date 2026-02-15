@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Clear Auth State</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #1a1a1a;
+      color: #00ff00;
+      padding: 40px;
+      text-align: center;
+    }
+    button {
+      background: #ff0000;
+      color: white;
+      padding: 20px 40px;
+      font-size: 20px;
+      border: none;
+      cursor: pointer;
+      margin: 20px;
+    }
+    button:hover {
+      background: #cc0000;
+    }
+    #status {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧹 Clear ClawOps Auth State</h1>
+  <p>This will clear all authentication data from your browser.</p>
+  <button onclick="clearAuth()">CLEAR AUTH DATA</button>
+  <div id="status"></div>
+
+  <script>
+    function clearAuth() {
+      const status = document.getElementById('status');
+
+      // Clear localStorage
+      const items = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        items.push(key);
+      }
+
+      status.innerHTML = '<h2>Clearing...</h2>';
+      status.innerHTML += '<p>Items found: ' + items.join(', ') + '</p>';
+
+      localStorage.clear();
+      sessionStorage.clear();
+
+      status.innerHTML += '<h2>✅ CLEARED!</h2>';
+      status.innerHTML += '<p>Now close this tab and go back to the app:</p>';
+      status.innerHTML += '<p><a href="http://localhost:5175" style="color: cyan; font-size: 20px;">http://localhost:5175</a></p>';
+    }
+  </script>
+</body>
+</html>

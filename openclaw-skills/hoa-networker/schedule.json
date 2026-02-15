@@ -1,0 +1,64 @@
+{
+  "schedules": [
+    {
+      "id": "lg-networker-reddit",
+      "name": "Reddit Scan",
+      "description": "Scan Reddit for HOA financing discussions every 2 hours",
+      "cron": "0 */2 * * *",
+      "agent_id": "hoa-networker",
+      "prompt": "Scan r/HOA, r/condoassociation, and r/realestate for engagement opportunities related to HOA financing, special assessments, capital projects, or reserve funding. Score each post for relevance (1-100) and return the top 10 opportunities. For each, include: post title, summary, author, URL, age, relevance score, and reason for relevance.",
+      "enabled": true,
+      "priority": "high"
+    },
+    {
+      "id": "lg-networker-facebook",
+      "name": "Facebook Groups Scan",
+      "description": "Scan Facebook HOA groups 5x daily",
+      "cron": "0 6,10,14,18,22 * * *",
+      "agent_id": "hoa-networker",
+      "prompt": "Scan Facebook HOA groups for engagement opportunities related to HOA financing, special assessments, capital projects, or reserve funding. Focus on groups where board members and property managers discuss funding decisions. Score each post for relevance (1-100) and return the top 10 opportunities.",
+      "enabled": true,
+      "priority": "high"
+    },
+    {
+      "id": "lg-networker-linkedin",
+      "name": "LinkedIn Scan",
+      "description": "Scan LinkedIn CAI groups 2x daily on weekdays",
+      "cron": "0 8,16 * * 1-5",
+      "agent_id": "hoa-networker",
+      "prompt": "Scan LinkedIn Community Association Institute (CAI) groups and property management professional pages for engagement opportunities. Look for discussions about HOA financing, reserve studies, special assessments, or capital project funding. Score each post for relevance (1-100) and return the top 10 opportunities.",
+      "enabled": true,
+      "priority": "medium"
+    },
+    {
+      "id": "lg-networker-forums",
+      "name": "Forums Scan",
+      "description": "Scan BiggerPockets and Quora daily",
+      "cron": "0 9 * * *",
+      "agent_id": "hoa-networker",
+      "prompt": "Scan BiggerPockets HOA forums and Quora for HOA financing questions. Look for discussions about special assessments, HOA loans, capital project funding, or reserve funding. Score each post for relevance (1-100) and return the top 10 opportunities.",
+      "enabled": true,
+      "priority": "medium"
+    },
+    {
+      "id": "lg-networker-post",
+      "name": "Post Approved Responses",
+      "description": "Check for approved responses and post them every 30 minutes",
+      "cron": "*/30 * * * *",
+      "agent_id": "hoa-networker",
+      "prompt": "Check the engagement queue for responses with status 'approved'. For each approved response, post it to the appropriate platform (Reddit, Facebook, LinkedIn, etc.) with proper formatting and UTM tracking. After successful posting, update the status to 'posted' and record the posted_at timestamp. Handle any errors gracefully and update the status accordingly.",
+      "enabled": true,
+      "priority": "high"
+    },
+    {
+      "id": "lg-networker-track",
+      "name": "Engagement Tracking",
+      "description": "Update engagement metrics for posted responses daily",
+      "cron": "0 20 * * *",
+      "agent_id": "hoa-networker",
+      "prompt": "For all responses posted in the last 30 days, check their current engagement metrics (likes/upvotes, replies/comments, clicks from UTM tracking). Update the database with current metrics. Identify hot leads (high relevance + strong engagement + decision-maker signals) and send alerts via Telegram for immediate follow-up.",
+      "enabled": true,
+      "priority": "medium"
+    }
+  ]
+}

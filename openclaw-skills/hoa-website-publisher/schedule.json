@@ -1,0 +1,8 @@
+{
+  "cron": "0 9 */2 * *",
+  "timezone": "America/New_York",
+  "description": "Publish article to HOA website every other day",
+  "message": "Generate and publish today's article to the HOA Project Funding website. Follow your full process: check existing content, pick today's category, research a topic, write the article, publish via webhook, and verify.",
+  "timeout_seconds": 600,
+  "enabled": true
+}

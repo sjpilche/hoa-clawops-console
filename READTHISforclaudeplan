@@ -1,0 +1,1117 @@
+# HOA Project Funding — Marketing Machine Master Plan
+
+> **Purpose**: This document is a complete execution blueprint for Claude Code in VS Code.
+> Follow it section by section. Each phase builds on the previous one.
+> The goal: build a fully automated marketing machine that drives qualified leads to hoaprojectfunding.com.
+
+---
+
+## Context & Architecture Overview
+
+### What Already Exists
+- **hoaprojectfunding.com** — Live site, accepts applications, "3 simple steps" intake, promises 48-72hr preliminary decisions, multi-lender bid model
+- **ClawOps Console** — Chat-centric command center for OpenClaw browser automation agents (React 18 + Vite + Express + SQLite). All 6 dev phases complete, currently in Phase 0 security hardening
+- **OpenClaw Agent** — Browser automation agent application in development
+- **Marketing team** — Being assembled
+
+### What We're Building
+A **Marketing Automation Machine** — an integrated system of:
+1. **SEO Content Engine** — Trigger-based content that captures high-intent searches
+2. **Lead Capture & Qualification Pipeline** — Two-stage intake with pre-qual scoring
+3. **CRM & Workflow Automation** — HubSpot Free + n8n/Make for deterministic lead routing
+4. **Partner Distribution System** — Outreach tooling for management companies, reserve study firms, contractors
+5. **Nurture & Follow-Up System** — Email/SMS sequences with CAN-SPAM/TCPA compliance
+6. **Analytics & Feedback Loops** — Every funded project becomes content, every rejection becomes "what to fix" education
+7. **OpenClaw Agent Integration** — Browser agents that automate repetitive marketing ops tasks
+
+### Target Market (by the numbers)
+- 365,000+ U.S. community associations
+- 28.2 million housing units, 75.5 million residents
+- 2.5 million volunteer board/committee members
+- 60,000-65,000 community association managers
+- 9,000-10,000 management companies
+- 30-40% of associations are self-managed (highest pain, least support)
+
+### Priority Geographies
+1. **California** (~50,700 associations) — SB 326 deadlines, reserve study cadence (Civil Code §5550)
+2. **Florida** (~49,800 associations) — SIRS funding, milestone inspections (post-Surfside legislation)
+3. **Texas** (~22,300 associations) — Large installed base, growing market
+
+---
+
+## Phase 1: SEO Content Engine (Days 1-7)
+
+### Objective
+Build a static site generator or content management system that produces high-quality, trigger-based SEO pages. These pages target the **moments when boards are forced to act** — not generic "HOA loan" queries.
+
+### Architecture Decision
+Create a **Next.js-based content hub** (or Astro if pure static is preferred) that:
+- Lives at a subdomain or path on hoaprojectfunding.com (e.g., `/resources/`, `/guides/`)
+- Generates SEO-optimized pages from structured content templates
+- Includes schema markup (FAQ, HowTo, Article) for rich snippets
+- Has proper internal linking to main site's intake form
+
+### Content Template System
+
+Create a reusable content template engine with these page types:
+
+#### Template 1: Compliance Trigger Pages
+```
+Structure:
+- H1: [State] [Regulation] Funding Guide for HOAs
+- What is [regulation]? (plain English, 2-3 paragraphs)
+- Key deadlines and requirements (table format)
+- Financial impact on your association (cost ranges)
+- Funding options comparison (loan vs special assessment vs reserves)
+- How HOA Project Funding helps (CTA to pre-qual)
+- FAQ section (5-8 questions, schema-marked)
+- Related resources (internal links)
+```
+
+**Pages to generate (Priority 1 — publish in first 30 days):**
+
+1. `florida-sirs-funding-guide` — Florida Structural Integrity Reserve Study financing
+   - Tie to requirements effective Dec 31, 2024 and reserve restrictions
+   - Target keywords: "SIRS funding", "structural integrity reserve study financing", "Florida condo reserve funding"
+
+2. `florida-milestone-inspection-funding` — Florida milestone inspection financing
+   - Tie to statutory milestone inspection obligations (§553.899)
+   - Target keywords: "milestone inspection financing", "Florida building inspection funding"
+
+3. `california-sb326-inspection-funding` — California SB 326 balcony/exterior inspection funding
+   - Tie to SB 326 requirements and January 1, 2025 deadline
+   - Target keywords: "SB 326 funding", "balcony inspection financing California", "exterior elevated elements"
+
+4. `california-reserve-study-funding-gap` — California reserve study funding gap solutions
+   - Tie to Civil Code §5550 three-year cadence
+   - Target keywords: "reserve study funding gap", "California HOA underfunded reserves"
+
+#### Template 2: Project-Type Financing Pages
+```
+Structure:
+- H1: [Project Type] Financing for HOAs & Condos
+- Why [project] costs spike (real data/ranges)
+- How HOA loans work for [project type]
+- What lenders evaluate (delinquencies, liquidity, assessment changes)
+- Loan vs special assessment comparison for [project]
+- Timeline: from board vote to funded project
+- CTA to pre-qual
+- Case study snippet (anonymized)
+```
+
+**Pages to generate (Priority 1):**
+
+5. `hoa-roof-replacement-financing` — Roof replacement financing
+6. `hoa-elevator-replacement-funding` — Elevator replacement funding
+7. `condo-street-resurfacing-loan` — Street/parking resurfacing loans
+8. `hoa-pool-renovation-financing` — Pool renovation financing
+9. `condo-waterproofing-structural-repair-funding` — Waterproofing & structural repair
+
+#### Template 3: Decision-Framing Pages
+```
+Structure:
+- H1: [Decision Question] — What Your Board Needs to Know
+- The real trade-offs (not sales copy — genuine education)
+- Scenario comparison table (loan vs assessment vs hybrid)
+- What lenders actually look at
+- Board readiness checklist
+- Member communication template snippet
+- CTA to pre-qual
+```
+
+**Pages to generate (Priority 1):**
+
+10. `hoa-loan-vs-special-assessment` — THE comparison page (highest intent keyword cluster)
+    - Target: "HOA loan vs special assessment", "should HOA take out loan", "special assessment alternative"
+
+11. `how-hoa-loans-work` — Educational deep-dive
+    - Target: "how do HOA loans work", "HOA loan collateral", "do homeowners guarantee HOA loan"
+
+12. `hoa-loan-readiness-checklist` — Board prep resource
+    - Downloadable PDF checklist (lead magnet)
+    - Target: "HOA loan requirements", "HOA loan documents needed"
+
+### Technical Implementation
+
+```
+/content-engine/
+├── templates/
+│   ├── compliance-trigger.tsx    # Template for regulation-driven pages
+│   ├── project-financing.tsx     # Template for project-type pages
+│   ├── decision-framing.tsx      # Template for comparison/education pages
+│   └── components/
+│       ├── PreQualCTA.tsx        # Consistent call-to-action component
+│       ├── LenderEvalTable.tsx   # "What lenders evaluate" standardized table
+│       ├── ComparisonTable.tsx   # Loan vs assessment comparison
+│       ├── FAQSchema.tsx         # FAQ with JSON-LD schema markup
+│       ├── ReadinessChecklist.tsx # Interactive checklist component
+│       └── StateSelector.tsx     # "Find your state's requirements"
+├── content/
+│   ├── florida/
+│   │   ├── sirs-funding.md
+│   │   └── milestone-inspection.md
+│   ├── california/
+│   │   ├── sb326-funding.md
+│   │   └── reserve-study-gap.md
+│   ├── projects/
+│   │   ├── roof-replacement.md
+│   │   ├── elevator-replacement.md
+│   │   ├── street-resurfacing.md
+│   │   ├── pool-renovation.md
+│   │   └── waterproofing-structural.md
+│   └── decisions/
+│       ├── loan-vs-assessment.md
+│       ├── how-hoa-loans-work.md
+│       └── loan-readiness-checklist.md
+├── lib/
+│   ├── seo.ts                   # Meta tags, canonical URLs, sitemap generation
+│   ├── schema.ts                # JSON-LD structured data generators
+│   └── analytics.ts             # GA4 + server-side event helpers
+└── public/
+    └── downloads/
+        └── hoa-loan-readiness-checklist.pdf
+```
+
+### SEO Technical Requirements
+- Generate XML sitemap automatically on build
+- Include Open Graph + Twitter Card meta for all pages
+- Implement canonical URLs to avoid duplicate content
+- Add JSON-LD schema: Article, FAQPage, HowTo as appropriate
+- Internal link every content page to the main intake form
+- Implement breadcrumb navigation with schema markup
+- Page speed: target 90+ Lighthouse score (critical for rankings)
+- Mobile-first responsive design
+
+### State-First Architecture (Anti-Doorway Strategy)
+Do NOT create hundreds of "HOA loans in [city]" pages. Instead:
+- Create state-level hub pages with materially unique statutory/compliance content
+- Each state page must contain: state-specific regulations, local resources, real process differences
+- Only expand to city-level if there's genuinely unique local content
+- This avoids Google's doorway page penalties while still capturing geo intent
+
+---
+
+## Phase 2: Lead Capture & Qualification Pipeline (Days 5-14)
+
+### Objective
+Replace or augment the current intake form with a **two-stage qualification system** that:
+1. Quickly pre-qualifies leads using lender-relevant variables (Stage 1)
+2. Requests full documentation only after pre-qual pass (Stage 2)
+3. Scores and routes leads automatically
+
+### Stage 1: Pre-Qualification Form (5 fields, <60 seconds)
+
+```
+Fields:
+1. State (dropdown — determines compliance triggers and lender routing)
+2. Number of units (numeric — key underwriting variable)
+3. Estimated project cost range (dropdown: <$100K, $100K-$500K, $500K-$1M, $1M-$5M, $5M+)
+4. Project type (dropdown: Roof, Structural/Waterproofing, Paving, Elevator, Pool, Plumbing, Electrical, Other)
+5. Timeline urgency (dropdown: Emergency <30 days, Compliance deadline <6 months, Planning 6-12 months, Exploring options)
+```
+
+**Optional but valuable (show after initial 5):**
+- Current monthly assessment per unit (validates repayment capacity)
+- Approximate delinquency rate (dropdown: <5%, 5-10%, 10-20%, >20%)
+- Board approval status (dropdown: Approved, Pending vote, Exploring)
+
+### Pre-Qual Scoring Algorithm
+
+```javascript
+// Lead scoring logic
+function scorePreQual(data) {
+  let score = 0;
+  let flags = [];
+
+  // Unit count (larger = more attractive to lenders)
+  if (data.units >= 100) score += 30;
+  else if (data.units >= 50) score += 25;
+  else if (data.units >= 20) score += 20;
+  else if (data.units >= 10) score += 15;
+  else { score += 5; flags.push('small-association'); }
+
+  // Project cost (sweet spot for lenders)
+  if (data.costRange === '$100K-$500K') score += 25;
+  else if (data.costRange === '$500K-$1M') score += 30;
+  else if (data.costRange === '$1M-$5M') score += 25;
+  else if (data.costRange === '$5M+') score += 20;
+  else score += 10; // <$100K — may be too small for some lenders
+
+  // Urgency (compliance = highest intent)
+  if (data.urgency === 'compliance-deadline') score += 25;
+  else if (data.urgency === 'emergency') score += 20;
+  else if (data.urgency === 'planning') score += 15;
+  else score += 10;
+
+  // Delinquency (if provided — red flag for lenders)
+  if (data.delinquencyRate === '>20%') { score -= 15; flags.push('high-delinquency'); }
+  else if (data.delinquencyRate === '10-20%') { score -= 5; flags.push('moderate-delinquency'); }
+
+  // State bonus (compliance-trigger states)
+  if (['FL', 'CA'].includes(data.state)) score += 10;
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    tier: score >= 70 ? 'A' : score >= 50 ? 'B' : score >= 30 ? 'C' : 'D',
+    flags,
+    autoRoute: score >= 70 ? 'fast-track' : score >= 50 ? 'standard' : 'nurture'
+  };
+}
+```
+
+### Stage 2: Full Application (post pre-qual pass)
+
+Only shown to leads scoring B-tier or above. Collects:
+- Association name, address, year built
+- Contact info (name, role, email, phone)
+- Current annual budget and reserve balance
+- Most recent reserve study date
+- Document uploads: budget, financial statements, reserve study, inspection reports, board meeting minutes
+- Consent checkboxes: lender data sharing, email/SMS communication (CAN-SPAM/TCPA compliant language)
+
+### Technical Implementation
+
+```
+/lead-pipeline/
+├── components/
+│   ├── PreQualForm.tsx          # Stage 1 — fast, mobile-optimized
+│   ├── FullApplication.tsx      # Stage 2 — document uploads
+│   ├── ScoreDisplay.tsx         # Shows pre-qual result to user
+│   ├── ProgressTracker.tsx      # "Step 1 of 2" visual
+│   └── ConsentLanguage.tsx      # Legal-compliant consent copy
+├── lib/
+│   ├── scoring.ts               # Pre-qual scoring algorithm
+│   ├── routing.ts               # Lead routing logic (which lenders, which workflow)
+│   ├── validation.ts            # Zod schemas for all form inputs
+│   └── storage.ts               # Save progress, handle file uploads
+├── api/
+│   ├── prequal.ts               # POST /api/prequal — score and store
+│   ├── application.ts           # POST /api/application — full submit
+│   └── upload.ts                # POST /api/upload — document handling
+└── emails/
+    ├── prequal-pass.html        # "Great news — you pre-qualify"
+    ├── prequal-nurture.html     # "Here's what to work on before applying"
+    └── application-received.html # "We've received your package"
+```
+
+### Trust Stack (Critical — must exist BEFORE the form)
+
+These elements must appear on the landing page above/around the form:
+
+1. **"How It Works" section** — 3 visual steps: Submit basics → Get pre-qualified → Receive lender bids
+2. **"What data is required and why"** — Transparent explanation tied to bank underwriting needs
+3. **Privacy statement** — Explicit: "Your information is shared only with lenders competing to offer you terms"
+4. **Objection handlers** (above the fold):
+   - "Will homeowners personally guarantee the loan?" → No, the HOA is the borrower
+   - "Do we need membership approval?" → Depends on your bylaws — we'll help you determine this
+   - "We're under time pressure from inspections/compliance" → We fast-track compliance-driven projects
+5. **Social proof** — Process transparency, anonymized timelines, "what lenders look for" checklist
+
+---
+
+## Phase 3: CRM & Workflow Automation (Days 10-21)
+
+### Objective
+Set up a deterministic, auditable workflow system that routes leads from capture to lender submission to outcome tracking.
+
+### CRM: HubSpot Free Setup
+
+**Pipeline Stages:**
+```
+New Lead → Pre-Qual Scored → Pre-Qual Passed → Docs Requested →
+Docs Received → Submitted to Lenders → Offers Received →
+Board Reviewing → Closed Won / Closed Lost / Nurture
+```
+
+**Contact Properties (custom):**
+- `prequal_score` (number)
+- `prequal_tier` (A/B/C/D)
+- `association_state` (dropdown)
+- `unit_count` (number)
+- `project_type` (dropdown)
+- `project_cost_range` (dropdown)
+- `urgency_level` (dropdown)
+- `compliance_trigger` (dropdown: SIRS, Milestone Inspection, SB 326, Reserve Study, None)
+- `delinquency_rate` (dropdown)
+- `board_approval_status` (dropdown)
+- `lender_packet_status` (dropdown: Not Started, In Progress, Complete, Submitted)
+- `lead_source` (dropdown: Organic, Paid Search, Partner Referral, Outbound, Content Download)
+
+**Deal Properties (custom):**
+- `lender_offers_count` (number)
+- `best_rate_offered` (text)
+- `loan_amount` (number)
+- `loan_term` (text)
+- `close_reason` (text — for lost deals: "delinquency", "board vote failed", "chose assessment", etc.)
+
+### Workflow Automation: n8n (self-hosted) or Make
+
+#### Workflow 1: New Lead Processing
+```
+Trigger: New form submission (webhook from PreQual form)
+→ Run scoring algorithm
+→ Create/update HubSpot contact with score + tier
+→ Create HubSpot deal in pipeline
+→ IF score >= 70 (A-tier):
+    → Send "Pre-Qual Passed" email immediately
+    → Create task: "Follow up within 4 hours"
+    → IF compliance_trigger is set → Tag as URGENT
+→ IF score 50-69 (B-tier):
+    → Send "Pre-Qual Passed" email
+    → Create task: "Follow up within 24 hours"
+→ IF score < 50 (C/D-tier):
+    → Send "Nurture" email with readiness checklist
+    → Enroll in nurture sequence
+    → Create task: "Review in 30 days"
+```
+
+#### Workflow 2: Document Collection
+```
+Trigger: Deal moves to "Docs Requested" stage
+→ Send document request email with specific checklist (varies by state)
+→ Generate secure upload link
+→ Track document receipt
+→ On all docs received:
+    → Auto-generate "Lender Intake Packet" (standardized PDF)
+    → Move deal to "Docs Received"
+    → Notify team: "Packet ready for lender submission"
+```
+
+#### Workflow 3: Lender Submission & Tracking
+```
+Trigger: Deal moves to "Submitted to Lenders"
+→ Log submission timestamp
+→ Send applicant "Submitted" confirmation email
+→ Start 48-hour timer
+→ On timer expiry with no offers logged:
+    → Escalate: "Follow up with lenders on [Association Name]"
+→ On offer(s) logged:
+    → Send applicant "Offers Ready" email
+    → Move deal to "Offers Received"
+    → Generate offer comparison summary
+```
+
+#### Workflow 4: Outcome Capture & Content Loop
+```
+Trigger: Deal moves to "Closed Won" OR "Closed Lost"
+→ IF Closed Won:
+    → Capture: loan amount, rate, term, lender, project type, state, unit count
+    → Generate anonymized case study draft
+    → Queue for content team review
+    → Send "Thank you + review request" email (30-day delay)
+    → Tag for testimonial outreach
+→ IF Closed Lost:
+    → Capture close reason
+    → Generate "What to fix" content based on reason
+    → IF reason is fixable (e.g., "need board vote", "need reserve study"):
+        → Enroll in re-engagement sequence with educational content
+```
+
+### Lender Intake Packet Generator
+
+This is a **key differentiator** — automatically assembling a standardized, lender-ready packet.
+
+```
+Packet Contents (auto-generated PDF):
+1. Cover page: Association name, project summary, funding request
+2. Association profile: State, units, year built, occupancy mix
+3. Financial snapshot: Annual budget, reserves, assessments, delinquency rate
+4. Project details: Type, scope, estimated cost, timeline, urgency driver
+5. Document index: List of uploaded documents with dates
+6. Compliance context: If applicable, relevant regulation summary (SIRS, SB 326, etc.)
+7. Attached documents: Budget, financials, reserve study, inspection reports, minutes
+```
+
+```
+/automation/
+├── workflows/
+│   ├── new-lead-processing.json      # n8n workflow definition
+│   ├── document-collection.json      # n8n workflow definition
+│   ├── lender-submission.json        # n8n workflow definition
+│   └── outcome-capture.json          # n8n workflow definition
+├── templates/
+│   ├── lender-packet-generator.ts    # PDF generation for lender packets
+│   ├── email-templates/
+│   │   ├── prequal-pass.html
+│   │   ├── prequal-nurture.html
+│   │   ├── docs-request.html
+│   │   ├── docs-request-florida.html # State-specific variant
+│   │   ├── docs-request-california.html
+│   │   ├── submitted-confirmation.html
+│   │   ├── offers-ready.html
+│   │   ├── closed-won-thanks.html
+│   │   └── nurture-sequence/
+│   │       ├── nurture-01-readiness.html
+│   │       ├── nurture-02-loan-vs-assessment.html
+│   │       ├── nurture-03-what-lenders-evaluate.html
+│   │       ├── nurture-04-board-communication.html
+│   │       └── nurture-05-reapply-cta.html
+│   └── document-checklists/
+│       ├── standard-checklist.md
+│       ├── florida-sirs-checklist.md
+│       └── california-sb326-checklist.md
+├── integrations/
+│   ├── hubspot.ts                    # HubSpot API client
+│   ├── sendgrid.ts                   # Email delivery (or similar)
+│   └── twilio.ts                     # SMS delivery (TCPA compliant)
+└── scoring/
+    ├── prequal-scorer.ts             # Scoring algorithm
+    └── lead-router.ts                # Routing logic
+```
+
+---
+
+## Phase 4: Partner Distribution System (Days 14-30)
+
+### Objective
+Build outreach tooling and co-marketing assets for the three highest-leverage partner channels.
+
+### Partner Channel 1: Property Management Companies (Highest Leverage)
+**Why**: 9,000-10,000 management companies, each managing multiple associations. One partnership = many leads.
+
+**Outreach sequence (5-touch, email-first):**
+```
+Touch 1 (Day 0): Value-first email
+  Subject: "Quick question about [Company] associations needing capital projects"
+  Body: Short, personal. Mention specific state compliance triggers.
+  Attach: "Document Checklist for HOA Loan Readiness" PDF
+
+Touch 2 (Day 3): Follow-up with case study
+  Subject: "How a [XX]-unit HOA funded their roof in 45 days"
+  Body: Anonymized case study. Emphasize manager's workflow stays simple.
+
+Touch 3 (Day 7): Resource share
+  Subject: "[State] compliance funding guide — for your board clients"
+  Body: Link to relevant compliance trigger content page.
+  Position as: "Something you can share with your boards"
+
+Touch 4 (Day 14): Direct ask
+  Subject: "15 min call — partnership for your associations?"
+  Body: Propose partnership structure: we handle financing, you get smoother projects.
+
+Touch 5 (Day 21): Break-up email
+  Subject: "Closing the loop"
+  Body: Final touch, leave door open.
+```
+
+**Co-marketing assets to create:**
+- "Board Communication Kit" — Template letters/emails a manager can send to their board explaining loan vs assessment options
+- "Financing FAQ for Board Meetings" — One-pager a manager can hand out at board meetings
+- "Partner Portal" page concept — Where partners can submit leads and track status
+
+### Partner Channel 2: Reserve Study Firms (Upstream Signal)
+**Why**: They see funding gaps before anyone else. They deliver the report that reveals underfunding.
+
+**Outreach approach:**
+- Lead with California (Civil Code §5550 cadence creates constant pipeline)
+- Offer: "When your study reveals a funding gap, give the board our checklist alongside your report"
+- Co-brand: "[Reserve Study Firm] + HOA Project Funding — From Study to Solution"
+- Create a one-page "Funding Gap? Here's What to Do Next" insert they can include with their reports
+
+### Partner Channel 3: Construction Vendors (Roofing, Structural, Waterproofing, Paving)
+**Why**: Vendors lose projects when boards can't fund them. We solve that.
+
+**Outreach approach:**
+- Lead with: "Stop losing projects to 'we can't afford it' — we pre-qualify HOAs for financing"
+- Offer: "Send us the board's info, we pre-qualify them, you close your project"
+- Co-brand: "[Vendor] + HOA Project Funding — Financing Available" badge for their proposals
+- Create a vendor-specific referral page and tracking code
+
+### Technical Implementation
+
+```
+/partner-system/
+├── outreach/
+│   ├── sequences/
+│   │   ├── management-company-5touch.md    # Email copy for all 5 touches
+│   │   ├── reserve-study-firm-3touch.md    # Email copy
+│   │   └── vendor-contractor-3touch.md     # Email copy
+│   ├── templates/
+│   │   ├── board-communication-kit.docx    # Co-marketing asset
+│   │   ├── financing-faq-one-pager.pdf     # Board meeting handout
+│   │   ├── funding-gap-insert.pdf          # For reserve study firms
+│   │   └── vendor-financing-badge.svg      # "Financing Available" badge
+│   └── lists/
+│       ├── target-management-companies.csv  # To be populated
+│       ├── target-reserve-firms-ca.csv      # To be populated
+│       └── target-vendors.csv               # To be populated
+├── portal/
+│   ├── PartnerPortal.tsx           # Partner-facing lead submission page
+│   ├── PartnerDashboard.tsx        # Track referred leads + status
+│   └── ReferralTracking.ts         # Attribution logic
+└── assets/
+    ├── case-studies/
+    │   ├── case-study-template.md   # Anonymized case study structure
+    │   └── SAMPLE-50unit-roof.md    # Example case study
+    └── checklists/
+        ├── loan-readiness-checklist.pdf
+        └── board-vote-preparation-guide.pdf
+```
+
+---
+
+## Phase 5: Nurture & Follow-Up System (Days 21-35)
+
+### Objective
+Build compliant email/SMS sequences that keep non-ready leads warm and convert them when timing is right.
+
+### Email Nurture Sequences
+
+#### Sequence 1: Post Pre-Qual Nurture (C/D-tier leads)
+```
+Email 1 (Day 0): "Your HOA Loan Readiness Report"
+  — Personalized based on their pre-qual answers
+  — "Here's what lenders will look for from your association"
+  — Link to readiness checklist
+
+Email 2 (Day 7): "HOA Loan vs Special Assessment — What Your Board Should Know"
+  — Link to decision-framing content
+  — Position as education, not sales
+
+Email 3 (Day 14): "What Lenders Actually Evaluate (And How to Prepare)"
+  — Delinquencies, liquidity, assessment history
+  — Practical tips to improve lender attractiveness
+
+Email 4 (Day 28): "How to Present Financing Options at Your Board Meeting"
+  — Board communication template
+  — Meeting agenda snippet
+  — "Ready to get options? Start your pre-qualification"
+
+Email 5 (Day 45): "Quick Check-In: Has Your Project Timeline Changed?"
+  — Simple re-engagement
+  — Link back to pre-qual form
+```
+
+#### Sequence 2: Post Application Follow-Up (awaiting docs)
+```
+Email 1 (Day 0): "We've received your pre-qualification — here's what's next"
+  — Specific document checklist (state-adjusted)
+  — Upload link
+
+Email 2 (Day 3): "Quick tip: gathering your documents faster"
+  — Specific tips for getting reserve study, financials, minutes
+  — "Most associations complete this in 5-7 days"
+
+Email 3 (Day 7): "Checking in — need help with documents?"
+  — Offer phone support
+  — Common sticking points and solutions
+```
+
+#### Sequence 3: Post Funded — Referral & Testimonial
+```
+Email 1 (Day 30 post-close): "How is your [project type] going?"
+  — Check-in, relationship maintenance
+
+Email 2 (Day 45 post-close): "Would you share your experience?"
+  — Testimonial request (short form)
+  — Google review request
+
+Email 3 (Day 60 post-close): "Know another board that needs funding?"
+  — Referral program introduction
+  — "Share with your management company"
+```
+
+### Compliance Requirements (NON-NEGOTIABLE)
+
+**CAN-SPAM (email):**
+- Every email must include: physical mailing address, clear unsubscribe mechanism, honest subject lines
+- Unsubscribe requests honored within 10 business days
+- No purchased email lists — all contacts must have given consent through our forms
+
+**TCPA (SMS/text):**
+- Explicit written consent required before any text messages
+- Consent language must be clear: "By providing your phone number, you agree to receive text messages from HOA Project Funding about your loan inquiry. Reply STOP to unsubscribe. Msg & data rates may apply."
+- Maintain opt-out records
+- No texts before 8am or after 9pm in recipient's time zone
+
+### Technical Implementation
+
+```
+/nurture-system/
+├── sequences/
+│   ├── prequal-nurture/
+│   │   ├── sequence-config.json     # Timing, triggers, segments
+│   │   └── emails/                  # HTML email templates
+│   ├── doc-collection/
+│   │   ├── sequence-config.json
+│   │   └── emails/
+│   └── post-funded/
+│       ├── sequence-config.json
+│       └── emails/
+├── compliance/
+│   ├── consent-language.md          # Approved consent copy
+│   ├── unsubscribe-handler.ts       # Immediate unsubscribe processing
+│   ├── sms-opt-in-tracker.ts        # TCPA consent records
+│   └── sending-hours.ts             # Timezone-aware sending windows
+└── analytics/
+    ├── sequence-metrics.ts          # Open rates, click rates, conversions per sequence
+    └── attribution.ts               # Which sequence/email drove the conversion?
+```
+
+---
+
+## Phase 6: Analytics & Feedback Loops (Days 28-42)
+
+### Objective
+Instrument everything so every dollar spent and every lead generated produces measurable intelligence.
+
+### Analytics Architecture
+
+**Layer 1: Traffic Analytics (GA4)**
+- Page-level tracking for all content pages
+- Event tracking: form starts, pre-qual completions, full application submissions, document uploads
+- UTM parameter tracking for all inbound sources
+- Custom dimensions: state, project type, lead source, partner attribution
+
+**Layer 2: Pipeline Analytics (HubSpot + Custom)**
+- Cost per lead by source (organic, paid, partner, outbound)
+- Cost per QUALIFIED lead (pre-qual pass rate × CPL)
+- Conversion rate by pipeline stage
+- Average time in each pipeline stage
+- Close rate by project type, state, lead source
+- Average loan size by segment
+- Revenue per closed deal
+
+**Layer 3: Content Performance**
+- Organic rankings for target keywords (track weekly)
+- Content → lead attribution (which page generated the lead?)
+- Content engagement: time on page, scroll depth, CTA click rate
+- Content gap analysis: what are people searching that we don't have pages for?
+
+**Layer 4: Partner Performance**
+- Leads per partner
+- Conversion rate per partner
+- Revenue attribution per partner channel
+- Partner engagement: are they actively referring?
+
+### Feedback Loop Automations
+
+```
+Every Closed Won deal triggers:
+→ Add to "Case Study Queue" (anonymized data auto-extracted)
+→ Calculate: cost-per-unit for this project type + state
+→ Update internal benchmarks
+→ Generate "What it cost" data snippet for content pages
+→ Tag content page that originated the lead (attribution loop)
+
+Every Closed Lost deal triggers:
+→ Categorize loss reason
+→ IF reason is "inadequate reserves" → Generate content: "How to Build Reserves Before Borrowing"
+→ IF reason is "board vote failed" → Generate content: "How to Present Financing at Board Meetings"
+→ IF reason is "high delinquency" → Generate content: "Reducing Delinquencies to Qualify for Loans"
+→ Queue rejected lead for re-engagement when conditions change
+
+Monthly automated report:
+→ Top performing content pages (by lead generation)
+→ Pipeline health (deals by stage, velocity, conversion rates)
+→ Partner scoreboard
+→ Keyword ranking changes
+→ Recommended content topics (from search console + loss reasons)
+```
+
+### Technical Implementation
+
+```
+/analytics/
+├── tracking/
+│   ├── ga4-config.ts               # GA4 setup, custom events, dimensions
+│   ├── event-definitions.ts        # Standardized event taxonomy
+│   └── utm-handler.ts              # UTM parameter capture and storage
+├── dashboards/
+│   ├── pipeline-dashboard.tsx       # Real-time pipeline visualization
+│   ├── content-performance.tsx      # Content → lead attribution
+│   ├── partner-scoreboard.tsx       # Partner performance tracking
+│   └── roi-calculator.tsx           # CPL, conversion, revenue metrics
+├── reports/
+│   ├── monthly-report-generator.ts  # Auto-generate monthly report
+│   └── report-template.md           # Monthly report template
+└── feedback-loops/
+    ├── case-study-generator.ts      # Auto-draft from closed-won data
+    ├── content-gap-analyzer.ts      # Identify missing content from search data
+    └── loss-reason-content-mapper.ts # Map loss reasons → content topics
+```
+
+---
+
+## Phase 7: OpenClaw Agent Integration (Days 35-56)
+
+### Objective
+Connect the marketing machine to OpenClaw browser automation agents for tasks that are repetitive, data-heavy, or time-sensitive.
+
+### Agent Tasks to Automate
+
+#### Agent 1: Competitor & Market Monitor
+```
+Schedule: Weekly
+Actions:
+- Scan competitor sites (HOA Loan Services, bank HOA lending pages) for new content/offers
+- Check Google for ranking changes on target keywords
+- Monitor CAI/FCAR for new publications or data
+- Monitor state legislature sites for new HOA-related legislation (FL, CA, TX)
+- Compile weekly intelligence brief
+Output: Markdown report → ClawOps Console → Team notification
+```
+
+#### Agent 2: Partner Prospect Research
+```
+Schedule: On-demand + weekly batch
+Actions:
+- Search for property management companies in target states
+- Extract: company name, website, contact info, portfolio size (if available)
+- Search for reserve study firms in California
+- Search for roofing/structural contractors in FL and CA
+- Enrich with LinkedIn profiles where available
+- Score prospects by portfolio size and location
+Output: CSV → CRM import ready
+```
+
+#### Agent 3: Content Performance Tracker
+```
+Schedule: Daily
+Actions:
+- Check Google Search Console API for ranking data
+- Track positions for all target keywords
+- Identify pages gaining/losing traffic
+- Check for new "People Also Ask" questions in target keyword clusters
+- Flag content opportunities
+Output: Dashboard update + weekly summary
+```
+
+#### Agent 4: Lead Enrichment
+```
+Trigger: New pre-qual submission
+Actions:
+- Look up the association (if identifiable) for public records
+- Check state databases for any compliance filings
+- Cross-reference with Fannie Mae/Freddie Mac condo project eligibility (if available)
+- Enrich CRM record with findings
+Output: Enriched CRM record + enrichment notes
+```
+
+#### Agent 5: Compliance Deadline Monitor
+```
+Schedule: Monthly
+Actions:
+- Monitor Florida DBPR for SIRS/milestone inspection updates
+- Monitor California DRE for reserve study and SB 326 enforcement updates
+- Check for new county-level HOA regulations in target markets
+- Identify associations approaching known deadlines
+Output: Compliance alert report → Priority outreach list
+```
+
+### Technical Implementation
+
+```
+/openclaw-agents/
+├── agents/
+│   ├── competitor-monitor/
+│   │   ├── agent-config.yaml        # OpenClaw agent definition
+│   │   ├── targets.json             # Sites/keywords to monitor
+│   │   └── report-template.md       # Weekly report format
+│   ├── partner-research/
+│   │   ├── agent-config.yaml
+│   │   ├── search-queries.json      # Search patterns by partner type
+│   │   └── enrichment-rules.json    # What data to extract
+│   ├── content-tracker/
+│   │   ├── agent-config.yaml
+│   │   ├── keyword-list.json        # All target keywords
+│   │   └── alert-thresholds.json    # When to flag changes
+│   ├── lead-enrichment/
+│   │   ├── agent-config.yaml
+│   │   ├── lookup-sources.json      # Public databases to check
+│   │   └── enrichment-schema.json   # Standardized output format
+│   └── compliance-monitor/
+│       ├── agent-config.yaml
+│       ├── regulatory-sources.json  # State agency sites to monitor
+│       └── deadline-tracker.json    # Known upcoming deadlines
+├── scheduling/
+│   ├── cron-config.yaml             # Agent run schedules
+│   └── trigger-config.yaml          # Event-driven agent triggers
+└── outputs/
+    ├── reports/                      # Agent output reports
+    └── data/                         # Structured data exports
+```
+
+---
+
+## Phase 8: Paid Acquisition (Days 42-60, budget-permitting)
+
+### Objective
+Only after organic and partner channels are producing data, layer in small-budget Google Ads on proven high-intent keywords.
+
+### Budget: Start at $500-$1,000/month MAX
+
+**At industry benchmarks ($84-$100 CPL), this buys 5-12 leads per month.** The goal isn't volume — it's validation and learning.
+
+### Campaign Structure
+
+```
+Campaign 1: Compliance Triggers (Highest Intent)
+  Ad Group: Florida SIRS
+    Keywords: "SIRS funding", "structural integrity reserve study financing", "Florida condo reserve loan"
+  Ad Group: Florida Milestone
+    Keywords: "milestone inspection financing", "Florida building inspection loan"
+  Ad Group: California SB 326
+    Keywords: "SB 326 funding", "balcony inspection financing"
+
+Campaign 2: Decision Intent
+  Ad Group: Loan vs Assessment
+    Keywords: "HOA loan vs special assessment", "special assessment alternative HOA"
+  Ad Group: Project Financing
+    Keywords: "HOA roof replacement loan", "condo elevator financing"
+
+Campaign 3: Direct Intent (Exact/Phrase Match Only)
+  Ad Group: Core
+    Keywords: "HOA loan", "HOA financing", "condo association loan"
+```
+
+### Landing Pages (one per ad group, minimum)
+Each landing page must:
+- Match the ad's keyword intent precisely
+- Include the trust stack elements from Phase 2
+- Lead to the pre-qual form (not full application)
+- Have GA4 conversion tracking
+- Be mobile-optimized (60%+ of HOA board members search on mobile)
+- Load in <3 seconds
+
+### Negative Keywords (prevent waste)
+```
+-job -jobs -salary -career -resume
+-template -free -sample (careful — some are OK)
+-"property management" (unless targeting that segment)
+-DIY -"how to" (unless on educational pages)
+```
+
+### Success Metrics
+- Target CPL: <$100 (at or below industry benchmark)
+- Target pre-qual completion rate: >15%
+- Target qualified rate: >40% of pre-qual completions
+- Break-even: CPL / close-rate ≤ revenue-per-close
+
+---
+
+## Phase 9: SaaS Foundation (Days 56-90, parallel track)
+
+### Objective
+Begin capturing the data and building the interfaces that will become the SaaS product. This is NOT a separate build — it's capturing what the marketing machine already produces.
+
+### Data Capture (Start Now — Even Before SaaS)
+
+Every interaction in the marketing machine should feed the future SaaS:
+
+```
+Data to capture from Day 1:
+- Association profiles (state, units, age, occupancy, assessments, delinquency)
+- Project profiles (type, scope, cost, timeline, urgency driver)
+- Lender response data (offers received, rates/terms ranges, turnaround time)
+- Outcome data (close/no-close, reasons, final terms)
+- Document metadata (reserve study date, inspection dates, board vote dates)
+- Compliance status (which regulations apply, deadline proximity)
+```
+
+### SaaS MVP Features (Build When Ready)
+
+1. **HOA Funding Readiness Score** — Auto-generated assessment of how lender-ready an association is
+2. **Project Funding Workspace** — Upload docs once, request bids for multiple projects
+3. **Compliance Calendar** — State-specific deadlines and requirements dashboard
+4. **Owner Communication Generator** — Template letters, FAQs, meeting agendas for board-to-owner communication about financing decisions
+5. **Lender Portal** — Standardized bid request interface for participating lenders
+
+### Distribution via Existing Ecosystems
+Target integrations (start with "export lender-ready packet" — minimal integration overhead):
+- TownSq (board/homeowner/manager workflows)
+- Vantaca (community association management)
+- CINC Systems (association management, already has bank partners)
+- Enumerate (community association management)
+
+---
+
+## Execution Summary & Priority Order
+
+```
+WEEK 1-2 (Foundation):
+├── Set up HubSpot Free CRM with custom properties and pipeline stages
+├── Build pre-qual scoring algorithm and form
+├── Create first 6 SEO content pages (compliance triggers + decision pages)
+├── Set up GA4 with custom events
+└── Draft consent language (CAN-SPAM + TCPA compliant)
+
+WEEK 2-3 (Pipeline):
+├── Build full application form (Stage 2)
+├── Create lender intake packet generator (PDF)
+├── Set up n8n/Make workflows (new lead processing, document collection)
+├── Build email templates (pre-qual pass, nurture, docs request)
+└── Launch first nurture sequence
+
+WEEK 3-4 (Distribution):
+├── Create partner outreach sequences (management companies first)
+├── Build co-marketing assets (Board Communication Kit, checklists)
+├── Publish remaining SEO pages (project types)
+├── Begin outreach: 50-100 management companies
+└── Begin outreach: 20 reserve study firms (CA)
+
+WEEK 4-6 (Scale & Automate):
+├── Configure OpenClaw agents (competitor monitor, partner research)
+├── Build analytics dashboards
+├── Launch second nurture sequence (post-funded referral)
+├── Begin outreach: 20 contractors (roofing/structural)
+└── Set up feedback loop automations (case study generator, content gap analyzer)
+
+WEEK 6-8 (Optimize & Paid):
+├── Analyze first 30 days of data
+├── Optimize content based on Search Console data
+├── Launch Google Ads test ($500-$1,000 budget)
+├── Create ad-specific landing pages
+└── Refine scoring algorithm based on real conversion data
+
+WEEK 8-12 (SaaS Foundation & Scale):
+├── Begin SaaS data capture layer
+├── Expand state-specific content libraries (TX, IL, NY, etc.)
+├── Scale partner outreach based on what's working
+├── Build partner portal (lead submission + tracking)
+└── Evaluate SaaS MVP features based on accumulated data
+```
+
+---
+
+## File Structure (Complete Project)
+
+```
+/hoa-marketing-machine/
+├── README.md                        # This plan
+├── package.json
+├── .env.example                     # All required environment variables
+│
+├── content-engine/                  # Phase 1: SEO Content
+│   ├── templates/
+│   ├── content/
+│   ├── lib/
+│   └── public/
+│
+├── lead-pipeline/                   # Phase 2: Lead Capture
+│   ├── components/
+│   ├── lib/
+│   ├── api/
+│   └── emails/
+│
+├── automation/                      # Phase 3: CRM & Workflows
+│   ├── workflows/
+│   ├── templates/
+│   ├── integrations/
+│   └── scoring/
+│
+├── partner-system/                  # Phase 4: Partner Distribution
+│   ├── outreach/
+│   ├── portal/
+│   └── assets/
+│
+├── nurture-system/                  # Phase 5: Follow-Up
+│   ├── sequences/
+│   ├── compliance/
+│   └── analytics/
+│
+├── analytics/                       # Phase 6: Analytics & Feedback
+│   ├── tracking/
+│   ├── dashboards/
+│   ├── reports/
+│   └── feedback-loops/
+│
+├── openclaw-agents/                 # Phase 7: Agent Automation
+│   ├── agents/
+│   ├── scheduling/
+│   └── outputs/
+│
+├── paid-acquisition/                # Phase 8: Google Ads
+│   ├── campaigns/
+│   ├── landing-pages/
+│   └── negative-keywords/
+│
+├── saas-foundation/                 # Phase 9: SaaS Prep
+│   ├── data-models/
+│   ├── api/
+│   └── features/
+│
+├── shared/                          # Shared utilities
+│   ├── types/
+│   ├── constants/
+│   ├── utils/
+│   └── config/
+│
+└── docs/                            # Documentation
+    ├── HOA-MARKETING-MACHINE-MASTER-PLAN.md
+    ├── COMPLIANCE-GUIDE.md          # CAN-SPAM + TCPA requirements
+    ├── PARTNER-PLAYBOOK.md          # Partner outreach best practices
+    ├── CONTENT-STYLE-GUIDE.md       # Voice, tone, SEO guidelines
+    └── LENDER-INTEGRATION-GUIDE.md  # How lender routing works
+```
+
+---
+
+## Environment Variables Required
+
+```env
+# CRM
+HUBSPOT_API_KEY=
+HUBSPOT_PORTAL_ID=
+
+# Email
+SENDGRID_API_KEY=
+FROM_EMAIL=team@hoaprojectfunding.com
+FROM_NAME=HOA Project Funding
+
+# SMS (TCPA compliant)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+
+# Analytics
+GA4_MEASUREMENT_ID=
+GA4_API_SECRET=
+
+# OpenClaw
+OPENCLAW_GATEWAY_URL=ws://127.0.0.1:8000
+OPENCLAW_API_KEY=
+
+# Google Ads (when ready)
+GOOGLE_ADS_CLIENT_ID=
+GOOGLE_ADS_CLIENT_SECRET=
+GOOGLE_ADS_DEVELOPER_TOKEN=
+
+# Database
+DATABASE_URL=
+
+# App
+NODE_ENV=development
+APP_URL=https://hoaprojectfunding.com
+```
+
+---
+
+## Critical Success Factors
+
+1. **Content quality over quantity** — 12 exceptional pages beat 100 thin pages. Every page must be genuinely useful to a board member making a real decision.
+
+2. **Pre-qual scoring accuracy** — The scoring algorithm must be tuned to match actual lender outcomes. Track and refine monthly.
+
+3. **Speed to respond** — A-tier leads must get human contact within 4 hours. This is finance, and boards have alternatives.
+
+4. **Partner relationships > paid ads** — One management company partnership worth more than $10K in ads. Prioritize accordingly.
+
+5. **Compliance is non-negotiable** — CAN-SPAM, TCPA, state-specific regulations. One violation can torpedo credibility.
+
+6. **Data capture from Day 1** — Every interaction feeds the SaaS moat. Don't wait until "later" to capture structured data.
+
+7. **Feedback loops are the multiplier** — Every funded deal creates content. Every rejection creates education. The machine gets smarter.
+
+---
+
+## Notes for Claude Code Execution
+
+- Start with Phase 1 + Phase 2 in parallel — they're independent and both foundational
+- Phase 3 (CRM/workflows) depends on Phase 2 (forms exist to generate data)
+- Phase 4 (partners) can start as soon as Phase 1 content exists (something to share)
+- Phase 7 (OpenClaw agents) is the longest lead time — start agent configs early
+- Phase 8 (paid) should WAIT until Phases 1-3 are producing data
+- Phase 9 (SaaS) is a parallel track — data capture starts immediately, UI comes later
+
+**The entire system should be buildable and deployable within 60-90 days by a focused team using Claude Code for implementation.**

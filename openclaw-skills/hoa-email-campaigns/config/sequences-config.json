@@ -1,0 +1,82 @@
+{
+  "sequences": {
+    "application_abandonment": {
+      "name": "Application Abandonment Follow-Up",
+      "trigger": "partial_application_submitted",
+      "description": "Sent to contacts who start but don't complete the application form",
+      "emails": 3,
+      "schedule_days": [1, 3, 7],
+      "cta_primary": "complete_application",
+      "cta_secondary": "free_consult",
+      "webhook_required": true,
+      "webhook_data_needed": [
+        "email",
+        "first_name",
+        "hoa_name",
+        "project_type",
+        "timestamp"
+      ]
+    },
+    "post_consult": {
+      "name": "Post-Consult Follow-Up",
+      "trigger": "manual_add_after_consult",
+      "description": "Sent after a free phone/email consultation with a board member or PM",
+      "emails": 4,
+      "schedule_days": [0, 5, 14, 30],
+      "cta_primary": "start_application",
+      "cta_secondary": "reply_to_email",
+      "personalization_required": [
+        "first_name",
+        "hoa_name",
+        "project_type",
+        "project_cost",
+        "timeline_mentioned"
+      ]
+    },
+    "monthly_newsletter": {
+      "name": "Monthly Newsletter",
+      "trigger": "monthly_first_tuesday",
+      "description": "Sent to all past consults, applications, and contacts to stay top of mind",
+      "emails": 1,
+      "schedule": "First Tuesday of month at 10:00 AM ET",
+      "cta_primary": "site_visit",
+      "cta_secondary": "free_consult_or_apply",
+      "content_sections": [
+        "blog_highlight",
+        "board_tip",
+        "cta_block"
+      ],
+      "max_word_count": 400
+    }
+  },
+  "global_cta_urls": {
+    "full_application": "https://www.hoaprojectfunding.com/#apply",
+    "free_consult": "https://www.hoaprojectfunding.com/#consult",
+    "blog": "https://www.hoaprojectfunding.com/blog",
+    "home": "https://www.hoaprojectfunding.com"
+  },
+  "email_settings": {
+    "from_name": "HOA Project Funding",
+    "reply_to": "contact@hoaprojectfunding.com",
+    "default_timezone": "America/New_York",
+    "subject_line_max_chars": 50,
+    "include_unsubscribe": true,
+    "can_spam_compliant": true
+  },
+  "esp_integration": {
+    "providers": ["Mailchimp", "SendGrid", "ConvertKit"],
+    "preferred": "SendGrid",
+    "api_keys_required": {
+      "sendgrid": "SENDGRID_API_KEY",
+      "mailchimp": "MAILCHIMP_API_KEY",
+      "convertkit": "CONVERTKIT_API_SECRET"
+    }
+  },
+  "conversion_tracking": {
+    "application_fills": true,
+    "consult_bookings": true,
+    "email_opens": true,
+    "email_clicks": true,
+    "attribution": "last_touch"
+  }
+}

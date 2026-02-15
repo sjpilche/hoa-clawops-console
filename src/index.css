@@ -1,0 +1,121 @@
+/**
+ * @file index.css
+ * @description Global styles for ClawOps Console.
+ *
+ * DESIGN SYSTEM: "Financial Terminal Meets Modern Chat"
+ * - Dark theme ONLY (no light mode for v1)
+ * - IBM Plex font family for terminal/data aesthetic
+ * - Color palette inspired by Bloomberg Terminal + modern chat apps
+ *
+ * HOW TAILWIND v4 WORKS:
+ * Instead of a tailwind.config.js, we configure everything here in CSS.
+ * The @import "tailwindcss" line imports all Tailwind utilities.
+ * The @theme block defines our custom design tokens.
+ */
+
+/* Import IBM Plex fonts from CDN */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+/* Import Tailwind CSS v4 — this gives us all utility classes */
+@import "tailwindcss";
+
+/* ============================================================================
+ * DESIGN TOKENS — Our custom theme
+ * ============================================================================
+ * These become Tailwind classes: bg-bg-primary, text-accent-primary, etc.
+ * Using @theme makes them available everywhere in Tailwind utilities.
+ * ============================================================================ */
+@theme {
+  /* --- Colors --- */
+  --color-bg-primary:     #0A0E17;
+  --color-bg-secondary:   #111827;
+  --color-bg-elevated:    #1E293B;
+  --color-border:         #1E293B;
+  --color-border-focus:   #334155;
+
+  --color-text-primary:   #F1F5F9;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted:     #475569;
+
+  --color-accent-primary: #06B6D4;
+  --color-accent-success: #10B981;
+  --color-accent-warning: #F59E0B;
+  --color-accent-danger:  #EF4444;
+  --color-accent-info:    #8B5CF6;
+
+  --color-chat-user:      #1E3A5F;
+  --color-chat-agent:     #1A2332;
+  --color-chat-system:    #1C1917;
+
+  /* --- Fonts --- */
+  --font-sans:  'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:  'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* ============================================================================
+ * BASE STYLES — Applied to the entire app
+ * ============================================================================ */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  /* Prevent horizontal scroll */
+  overflow-x: hidden;
+}
+
+/* ============================================================================
+ * SCROLLBAR STYLING — Custom scrollbars for the dark theme
+ * ============================================================================ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-focus);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ============================================================================
+ * UTILITY CLASSES — Custom utilities not covered by Tailwind
+ * ============================================================================ */
+
+/* Monospace for data display — use class="font-data" */
+.font-data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kill switch glow animation — the emergency stop button pulses when agents run */
+@keyframes kill-switch-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.kill-switch-active {
+  animation: kill-switch-pulse 2s ease-in-out infinite;
+}
+
+/* Status dot animation — small pulsing dot for "running" status */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-running {
+  animation: status-pulse 1.5s ease-in-out infinite;
+}

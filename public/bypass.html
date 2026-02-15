@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enabling Bypass Mode...</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #0a0f1a;
+      color: #fff;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .container {
+      text-align: center;
+    }
+    .logo {
+      width: 60px;
+      height: 60px;
+      background: #3b82f6;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 32px;
+      font-weight: bold;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 10px;
+    }
+    p {
+      color: #9ca3af;
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">C</div>
+    <h1>Enabling Bypass Mode...</h1>
+    <p>Setting up testing environment</p>
+    <p id="status">Configuring...</p>
+  </div>
+
+  <script>
+    // Enable bypass mode
+    localStorage.setItem('BYPASS_AUTH', 'true');
+
+    // Update status
+    document.getElementById('status').textContent = 'Bypass mode enabled! Redirecting...';
+
+    // Redirect to dashboard after 1 second
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 1000);
+  </script>
+</body>
+</html>

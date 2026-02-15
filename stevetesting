@@ -1,0 +1,655 @@
+Testing Plan: HOA Project Funding Content Pipeline Foundation
+Context
+We've built a complete automated content pipeline for www.hoaprojectfunding.com with 5 OpenClaw agents, configuration files, and automation scripts. Before enabling automated cron jobs, we need to thoroughly test every component to ensure:
+
+Agents work correctly - Each agent can execute its core function (content generation, publishing, social media, email, engagement monitoring)
+Configuration is complete - All required environment variables and config files are in place
+Scripts function properly - Setup check, cron configuration, and cleanup scripts work as expected
+Pipeline flows correctly - Content moves from generation → approval → publishing → distribution → engagement
+Security is hardened - Exposed secrets are rotated, credentials are secured
+The user wants to "TEST THE HECK OUT OF THIS" - so this plan provides comprehensive validation before going live with automation.
+
+Phase 1: Pre-Testing Setup & Security Hardening
+1.1 Run Setup Validation Script
+Purpose: Identify what's missing before testing begins
+
+Action:
+
+
+cd /home/sjpilche/projects/openclaw-v1
+bash scripts/quick-setup-check.sh
+What to verify:
+
+Script executes without errors
+Identifies missing environment variables
+Shows current agent registration status
+Lists active (or missing) cron jobs
+Displays pipeline readiness status
+Expected output:
+
+Color-coded ✅/❌ for each component
+Prioritized next steps (🔴 Critical, 🟡 High, 🟢 Low)
+Pipeline status for: Content, Publishing, Social, Email, Engagement, Notifications
+1.2 Security Hardening (CRITICAL)
+Issues found in exploration:
+
+OpenAI API key placeholder needs real key
+JWT_SECRET needs rotation (currently exposed in conversation)
+Default admin credentials need immediate change
+Actions required:
+
+File: server/.env.local
+
+Update these variables:
+
+
+# Rotate JWT secret
+JWT_SECRET=<generate new 64-byte hex string>
+
+# Set real OpenAI key
+OPENAI_API_KEY=<real key from OpenAI dashboard>
+
+# Change default admin credentials
+DEFAULT_ADMIN_EMAIL=<your real email>
+DEFAULT_ADMIN_PASSWORD=<strong password>
+Generate new JWT secret:
+
+
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+1.3 Configure Critical Environment Variables
+File: server/.env.local
+
+Add these REQUIRED variables:
+
+
+# Telegram notifications (CRITICAL - needed for content review)
+TELEGRAM_BOT_TOKEN=<token from @BotFather>
+TELEGRAM_CHAT_ID=<your chat ID>
+
+# WordPress publishing (CRITICAL - can't publish without this)
+WORDPRESS_URL=https://www.hoaprojectfunding.com
+WORDPRESS_USER=<your WP username>
+WORDPRESS_APP_PASSWORD=<WP application password>
+
+# Email ESP (HIGH priority - needed for sequences)
+SENDGRID_API_KEY=<SendGrid API key>
+# OR
+MAILCHIMP_API_KEY=<Mailchimp API key>
+
+# Social media APIs (OPTIONAL - can post manually)
+LINKEDIN_ACCESS_TOKEN=<LinkedIn token>
+FACEBOOK_PAGE_ACCESS_TOKEN=<Facebook token>
+How to get credentials:
+
+Telegram bot: https://t.me/BotFather
+WordPress app password: WP Admin → Users → Your Profile → Application Passwords
+SendGrid: https://sendgrid.com → Settings → API Keys
+1.4 Register OpenClaw Agents
+Verify agents are registered:
+
+
+openclaw agents list
+If agents missing, register them:
+
+
+cd /home/sjpilche/projects/openclaw-v1
+openclaw agents add hoa-content-writer
+openclaw agents add hoa-cms-publisher
+openclaw agents add hoa-social-media
+openclaw agents add hoa-email-campaigns
+openclaw agents add hoa-social-engagement
+Verify registration:
+
+
+openclaw agents list
+Expected output: All 5 agents listed
+
+Phase 2: Configuration File Validation
+2.1 Verify Critical Files Exist
+Check these files exist:
+
+
+# Content strategy
+ls workspaces/hoa-content-writer/content-calendar.md
+
+# Social media strategy
+ls workspaces/hoa-social-media/platform-strategy.md
+
+# Email sequences
+ls workspaces/hoa-email-campaigns/config/sequences-config.json
+
+# Lead scoring
+ls workspaces/hoa-social-engagement/config/lead-scoring.json
+ls workspaces/hoa-social-engagement/config/response-templates.md
+If any files missing:
+
+Content calendar: Create basic template with 5-10 blog topics
+Other configs should exist from our previous work
+2.2 Validate JSON Configuration Files
+Test JSON parsing:
+
+
+# Email sequences config
+cat workspaces/hoa-email-campaigns/config/sequences-config.json | jq .
+
+# Lead scoring config
+cat workspaces/hoa-social-engagement/config/lead-scoring.json | jq .
+Expected: Both should parse without errors, showing formatted JSON
+
+Validate structure:
+
+sequences-config.json should have: application_abandonment, post_consult, monthly_newsletter
+lead-scoring.json should have: high_intent_signals, medium_intent_signals, low_intent_signals, scoring thresholds
+Phase 3: Individual Agent Testing (Manual Execution)
+CRITICAL: Test each agent manually BEFORE enabling cron automation. This validates they work correctly and helps debug issues.
+
+3.1 Test Content Writer Agent
+Purpose: Generate a blog post from content calendar
+
+Command:
+
+
+openclaw agent \
+  --agent hoa-content-writer \
+  --local \
+  --session-id "test-content-$(date +%s)" \
+  --message "Pick the next unwritten topic from content-calendar.md. Generate a 1500-2000 word SEO-optimized blog post. Include two CTAs: one mid-article for the free consult, one end-of-article for the full application at www.hoaprojectfunding.com."
+What to verify:
+
+✅ Agent completes without errors
+✅ Blog post saved to workspaces/hoa-content-writer/posts/drafts/YYYY-MM-DD-[topic].md
+✅ Post has frontmatter (title, description, slug, keywords, date)
+✅ Post has proper H1/H2/H3 structure
+✅ Post includes mid-article CTA (free consult)
+✅ Post includes end-of-article CTA (full application)
+✅ Post is 1500-2000 words
+✅ Telegram notification received (if configured)
+Review generated content:
+
+
+cat workspaces/hoa-content-writer/posts/drafts/*.md
+Manual validation:
+
+Content quality acceptable?
+SEO metadata looks good?
+CTAs properly formatted?
+If successful: Move to approved for publishing test
+
+
+mv workspaces/hoa-content-writer/posts/drafts/[filename].md \
+   workspaces/hoa-content-writer/posts/approved/
+3.2 Test CMS Publisher Agent
+Purpose: Upload approved post to WordPress as draft
+
+Prerequisites:
+
+WordPress credentials configured in .env.local
+Approved blog post exists from 3.1
+Command:
+
+
+openclaw agent \
+  --agent hoa-cms-publisher \
+  --local \
+  --session-id "test-cms-$(date +%s)" \
+  --message "Check approved directory and publish all approved posts to WordPress as drafts. Insert CTA blocks pointing to the application form and free consult at www.hoaprojectfunding.com."
+What to verify:
+
+✅ Agent completes without errors
+✅ Post uploaded to WordPress as DRAFT status
+✅ CTA blocks inserted correctly
+✅ Featured image placeholder noted (manual step)
+✅ Telegram notification with WordPress draft link received
+✅ Post moved to published directory
+✅ Log file created in logs/
+Manual WordPress check:
+
+Log into WordPress admin
+Go to Posts → All Posts
+Verify draft post exists
+Check formatting, CTAs, content
+If successful: Manually publish the post in WordPress to complete the test
+
+3.3 Test Social Media Agent (Facebook + LinkedIn)
+Purpose: Convert blog post to social media posts
+
+Prerequisites:
+
+Published blog post exists (from 3.2)
+Command:
+
+
+openclaw agent \
+  --agent hoa-social-media \
+  --local \
+  --session-id "test-social-fb-ln-$(date +%s)" \
+  --message "Convert the latest blog post into a Facebook page share post and LinkedIn thought leadership post. All CTAs drive to www.hoaprojectfunding.com application or free consult."
+What to verify:
+
+✅ Agent completes without errors
+✅ Facebook page post saved to workspaces/hoa-social-media/posts/YYYY-MM-DD-[topic]-facebook-page.md
+✅ LinkedIn post saved to workspaces/hoa-social-media/posts/YYYY-MM-DD-[topic]-linkedin.md
+✅ Facebook post includes clear CTA to website
+✅ LinkedIn post targets PMs/CAMs with professional tone
+✅ Both posts include relevant hashtags
+✅ Posts reference blog URL correctly
+Review generated posts:
+
+
+ls workspaces/hoa-social-media/posts/
+cat workspaces/hoa-social-media/posts/*-facebook-page.md
+cat workspaces/hoa-social-media/posts/*-linkedin.md
+Manual validation:
+
+Tone appropriate for each platform?
+CTAs clear and not pushy?
+Content engaging?
+3.4 Test Social Media Agent (Facebook Group Discussion)
+Purpose: Create value-first group post with NO direct CTA
+
+Command:
+
+
+openclaw agent \
+  --agent hoa-social-media \
+  --local \
+  --session-id "test-social-fb-group-$(date +%s)" \
+  --message "Create a Facebook group discussion post based on the latest blog post. Value-first, no direct sales CTA. Goal is engagement and credibility."
+What to verify:
+
+✅ Agent completes without errors
+✅ Facebook group post saved to workspaces/hoa-social-media/posts/YYYY-MM-DD-[topic]-facebook-group.md
+✅ Post provides value (insight, question, helpful info)
+✅ Post asks question to encourage discussion
+✅ NO direct link to website (correct behavior)
+✅ Tone is peer-to-peer, not salesy
+Review post:
+
+
+cat workspaces/hoa-social-media/posts/*-facebook-group.md
+Manual validation:
+
+Would this be well-received in a group?
+Does it provide genuine value?
+No hard selling?
+3.5 Test Social Engagement Monitor
+Purpose: Monitor social platforms for engagement and score leads
+
+Note: This requires actual social media activity to test properly. For now, test the agent runs without errors.
+
+Command:
+
+
+openclaw agent \
+  --agent hoa-social-engagement \
+  --local \
+  --session-id "test-engagement-$(date +%s)" \
+  --message "Check social platforms for new engagement. Score leads per lead-scoring.json. Draft responses for any leads scoring 10+. Include site link only for high-intent leads."
+What to verify:
+
+✅ Agent completes without errors (even if no interactions found)
+✅ If no interactions: logs "No new engagement found" or similar
+✅ If interactions exist: drafts responses in workspaces/hoa-social-engagement/drafts/
+✅ Lead scoring applied correctly
+✅ HIGH-intent leads get CTA, MEDIUM-intent do not
+✅ Telegram digest sent
+Manual validation:
+
+Check if lead scoring.json thresholds make sense
+Review any draft responses generated
+3.6 Test Email Campaigns Agent (Manual Trigger)
+Purpose: Generate email sequence draft
+
+Command:
+
+
+openclaw agent \
+  --agent hoa-email-campaigns \
+  --local \
+  --session-id "test-email-$(date +%s)" \
+  --message "Generate monthly newsletter with latest blog highlight, one board tip, and standing CTA to www.hoaprojectfunding.com."
+What to verify:
+
+✅ Agent completes without errors
+✅ Newsletter draft saved
+✅ Includes blog highlight
+✅ Includes actionable board tip
+✅ CTA points to application or free consult
+✅ Word count under 400 words
+✅ Unsubscribe link included (CAN-SPAM compliance)
+Manual validation:
+
+Content quality good?
+Value provided to reader?
+CTA clear but not pushy?
+Phase 4: Script Testing
+4.1 Test Setup Check Script (Already Run in Phase 1)
+Verify:
+
+✅ Script executes without errors
+✅ Correctly identifies configured vs missing env vars
+✅ Lists registered agents
+✅ Shows pipeline status
+✅ Prioritizes next steps correctly
+4.2 Test Cron Setup Script (DO NOT RUN YET)
+Purpose: Validate the script SYNTAX without actually scheduling jobs
+
+Check script syntax:
+
+
+bash -n scripts/setup-all-crons.sh
+Expected: No syntax errors
+
+Review script contents:
+
+
+cat scripts/setup-all-crons.sh
+Verify:
+
+✅ All 8 cron jobs defined
+✅ Correct cron syntax (e.g., "0 6 * * 1" for Monday 6 AM)
+✅ Correct timezone (America/New_York)
+✅ Agent names match registered agents
+✅ Messages match expected automation behavior
+DO NOT RUN setup-all-crons.sh until all agents tested successfully in Phase 3
+
+4.3 Test Old Cron Removal Script
+Purpose: Clean up any deprecated jobs
+
+Command:
+
+
+bash scripts/remove-old-crons.sh
+What to verify:
+
+✅ Script runs without errors
+✅ Identifies deprecated patterns (3x/week, HOAReserveWise, etc.)
+✅ Removes matching jobs (if any exist)
+✅ Provides summary of removed jobs
+Phase 5: Cron Job Configuration (After Manual Tests Pass)
+ONLY proceed with this phase if ALL agents in Phase 3 tested successfully.
+
+5.1 Configure All Cron Jobs
+Command:
+
+
+bash scripts/setup-all-crons.sh
+What to verify:
+
+✅ Script executes without errors
+✅ All 8 cron jobs created
+✅ Confirmation message shows scheduled times
+5.2 Verify Cron Jobs
+List active cron jobs:
+
+
+openclaw cron list
+Expected output: 8 cron jobs listed:
+
+HOA Content - Weekly Blog Post (Monday 6 AM)
+HOA CMS - Upload to WordPress (Tuesday 8 AM)
+HOA Social - Facebook Page + LinkedIn (Tuesday 10 AM)
+HOA Social - Facebook Group Discussion (Wednesday 12 PM)
+HOA Engagement - Daily Monitor (Daily 8 AM)
+HOA Engagement - Weekly Metrics (Monday 9 AM)
+HOA Email - Follow-ups Check (Friday 9 AM)
+HOA Email - Monthly Newsletter (First Tuesday 10 AM)
+Check detailed cron info:
+
+
+openclaw cron list --json | jq .
+Verify:
+
+✅ Correct agent names
+✅ Correct schedules
+✅ Correct timezones
+✅ Correct messages
+5.3 Test Individual Cron Job (Without Waiting)
+Manually trigger a cron job to test it works:
+
+Option 1: Use the same command as cron would:
+
+
+openclaw agent \
+  --agent hoa-social-engagement \
+  --local \
+  --session-id "cron-test-$(date +%s)" \
+  --message "Check social platforms for new engagement. Score leads per lead-scoring.json. Draft responses for any leads scoring 10+. Include site link only for high-intent leads."
+Option 2: If OpenClaw supports it:
+
+
+openclaw cron trigger --id <cron-job-id>
+Verify:
+
+✅ Job executes
+✅ Outputs same as manual test in Phase 3
+✅ Telegram notification received (if applicable)
+Phase 6: End-to-End Pipeline Testing
+Purpose: Simulate the complete weekly pipeline flow
+
+6.1 Monday Morning: Content Generation
+Manual trigger (simulating Monday 6 AM cron):
+
+
+openclaw agent \
+  --agent hoa-content-writer \
+  --local \
+  --session-id "e2e-content-$(date +%s)" \
+  --message "Pick the next unwritten topic from content-calendar.md. Generate a 1500-2000 word SEO-optimized blog post. Include two CTAs: one mid-article for the free consult, one end-of-article for the full application at www.hoaprojectfunding.com."
+Manual step: Review & approve
+
+
+# Review draft
+cat workspaces/hoa-content-writer/posts/drafts/*.md
+
+# If good, move to approved
+mv workspaces/hoa-content-writer/posts/drafts/[newest-post].md \
+   workspaces/hoa-content-writer/posts/approved/
+6.2 Tuesday Morning: Publishing
+Manual trigger (simulating Tuesday 8 AM cron):
+
+
+openclaw agent \
+  --agent hoa-cms-publisher \
+  --local \
+  --session-id "e2e-cms-$(date +%s)" \
+  --message "Check approved directory and publish all approved posts to WordPress as drafts. Insert CTA blocks pointing to the application form and free consult at www.hoaprojectfunding.com."
+Manual step: Publish in WordPress
+
+Go to WordPress admin
+Add featured image
+Final review
+Change status to "Published"
+6.3 Tuesday Mid-Morning: Social Media (Page + LinkedIn)
+Manual trigger (simulating Tuesday 10 AM cron):
+
+
+openclaw agent \
+  --agent hoa-social-media \
+  --local \
+  --session-id "e2e-social-fl-$(date +%s)" \
+  --message "Convert the latest blog post into a Facebook page share post and LinkedIn thought leadership post. All CTAs drive to www.hoaprojectfunding.com application or free consult."
+Manual step: Post to platforms
+
+Review generated posts
+Schedule on Facebook page
+Schedule on LinkedIn
+6.4 Wednesday Afternoon: Social Media (Group Discussion)
+Manual trigger (simulating Wednesday 12 PM cron):
+
+
+openclaw agent \
+  --agent hoa-social-media \
+  --local \
+  --session-id "e2e-social-group-$(date +%s)" \
+  --message "Create a Facebook group discussion post based on the latest blog post. Value-first, no direct sales CTA. Goal is engagement and credibility."
+Manual step: Post to groups
+
+Review generated post
+Post to relevant Facebook groups
+6.5 Verify Complete Flow
+Check that all steps completed:
+
+✅ Blog post generated Monday
+✅ Blog post approved manually
+✅ Blog post published to WordPress Tuesday
+✅ Social posts generated Tuesday
+✅ Facebook group post generated Wednesday
+✅ All files in correct directories
+✅ All Telegram notifications received
+Phase 7: Monitoring & Validation (First Week)
+After enabling cron automation, monitor the first week closely:
+
+7.1 Daily Checks
+Every morning:
+
+
+# Check if daily engagement monitor ran
+openclaw cron list --json | jq '.[] | select(.name == "HOA Engagement - Daily Monitor")'
+
+# Review any draft responses generated
+ls workspaces/hoa-social-engagement/drafts/
+
+# Check Telegram for notifications
+7.2 Weekly Checks
+Monday:
+
+✅ Content Writer ran at 6 AM?
+✅ Blog post draft exists?
+✅ Engagement metrics report generated at 9 AM?
+Tuesday:
+
+✅ CMS Publisher ran at 8 AM?
+✅ WordPress draft created?
+✅ Social posts generated at 10 AM?
+Wednesday:
+
+✅ Facebook group post generated at 12 PM?
+Friday:
+
+✅ Email follow-ups check ran at 9 AM?
+7.3 Error Handling
+If a cron job fails:
+
+Check OpenClaw logs: openclaw logs --agent <agent-name>
+Run the agent manually to debug
+Check environment variables are still set
+Verify configuration files haven't been modified
+Check Telegram for error notifications
+Common issues:
+
+Missing environment variables
+Configuration file syntax errors
+Network issues (ESP, WordPress API)
+Rate limiting
+Insufficient permissions
+Phase 8: Final Validation Checklist
+Pre-Go-Live Checklist
+Security:
+
+ JWT_SECRET rotated
+ OpenAI API key set (real, not placeholder)
+ Default admin credentials changed
+ Telegram bot token secured
+ WordPress app password secured
+ ESP API keys secured
+Configuration:
+
+ All environment variables set in server/.env.local
+ All 5 agents registered with OpenClaw
+ content-calendar.md populated with topics
+ platform-strategy.md exists
+ sequences-config.json valid
+ lead-scoring.json valid
+Agent Testing:
+
+ hoa-content-writer generates quality blog posts
+ hoa-cms-publisher uploads to WordPress correctly
+ hoa-social-media creates platform-specific content
+ hoa-email-campaigns generates email sequences
+ hoa-social-engagement monitors and scores leads
+Automation:
+
+ All 8 cron jobs configured
+ Cron jobs scheduled at correct times
+ Telegram notifications working
+ Manual review steps documented
+Pipeline Flow:
+
+ End-to-end test completed successfully
+ Content → Publishing → Social → Engagement flow works
+ All manual steps clearly defined
+ Approval workflows understood
+Success Criteria
+The pipeline is ready for production when:
+
+✅ All agents execute without errors when triggered manually
+✅ Security issues addressed (secrets rotated, credentials secured)
+✅ All critical environment variables configured
+✅ Cron jobs configured and verified
+✅ End-to-end pipeline test successful (Monday → Wednesday flow)
+✅ Telegram notifications working for content review
+✅ WordPress publishing working correctly
+✅ Social media posts generated in correct format
+✅ Lead scoring and engagement monitoring functional
+✅ First-week monitoring plan established
+DO NOT enable cron automation until ALL success criteria met.
+
+Rollback Plan (If Issues Arise)
+If automation causes problems:
+
+Immediate Actions:
+
+# 1. Disable all cron jobs
+openclaw cron list --json | jq -r '.[].id' | xargs -I {} openclaw cron remove --id {}
+
+# 2. Verify removal
+openclaw cron list
+
+# 3. Continue manual execution while debugging
+Debug Process:
+Identify which agent/step failed
+Review logs: openclaw logs --agent <agent-name>
+Test agent manually with same message
+Fix configuration issues
+Re-test manually until working
+Re-enable cron automation when stable
+Post-Testing Documentation
+After successful testing, document:
+
+Any configuration changes made during testing
+Lessons learned from agent behavior
+Timing adjustments needed for cron schedule
+Manual review process optimizations
+Any additional environment variables needed
+Common issues and solutions
+Update these files:
+
+README with actual test results
+SKILL.md files with any clarifications
+pipeline-schedule.md with timing adjustments
+.env.local.example with all required variables
+Files Referenced in This Plan
+Agent Definitions:
+
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-content-writer/SOUL.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-cms-publisher/SOUL.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-social-media/SOUL.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-email-campaigns/SOUL.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-social-engagement/SOUL.md
+Configuration Files:
+
+/c/Users/SPilcher/OpenClaw2.0 for linux/server/.env.local
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-social-media/platform-strategy.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-email-campaigns/config/sequences-config.json
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/hoa-social-engagement/config/lead-scoring.json
+Testing Scripts:
+
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/scripts/quick-setup-check.sh
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/scripts/setup-all-crons.sh
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/scripts/remove-old-crons.sh
+Documentation:
+
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/docs/pipeline-schedule.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/docs/cron-commands-reference.md
+/c/Users/SPilcher/OpenClaw2.0 for linux/openclaw-skills/scripts/README.md
