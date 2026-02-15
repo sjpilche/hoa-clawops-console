@@ -82,7 +82,9 @@
       "Bash(git push:*)",
       "Bash(lsof:*)",
       "Bash(git init:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)"
     ]
   }
 }
