@@ -46,52 +46,24 @@ import AuditLogPage from '@/pages/AuditLogPage';
 import CostDashboardPage from '@/pages/CostDashboardPage';
 import HelpPage from '@/pages/HelpPage';
 import LeadGenPage from '@/pages/LeadGenPage';
+import FacebookLeadsPage from '@/pages/FacebookLeadsPage';
 import BlitzPage from '@/pages/BlitzPage';
+import EngagementQueue from '@/pages/EngagementQueue';
+import TradingPage from '@/pages/TradingPage';
+import ContentQueuePage from '@/pages/ContentQueuePage';
+import HOALeadsPage from '@/pages/HOALeadsPage';
 
 /**
  * Protected Route wrapper.
- * If the user is not authenticated, redirect them to the login page.
- * This wraps around the AppShell so ALL protected pages share the same layout.
+ * AUTHENTICATION DISABLED FOR DEVELOPMENT - Just render children
  */
 function ProtectedRoute({ children }) {
-  // BYPASS FOR TESTING - Skip auth check entirely
-  const BYPASS_AUTH = true;
-
-  if (BYPASS_AUTH) {
-    return children;
-  }
-
-  const { isAuthenticated, isLoading } = useSettingsStore();
-
-  // Still checking auth — show loading
-  if (isLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-bg-primary">
-        <div className="text-center">
-          <div className="w-10 h-10 rounded-xl bg-accent-primary flex items-center justify-center mx-auto mb-3 animate-pulse">
-            <span className="text-bg-primary font-bold">C</span>
-          </div>
-          <p className="text-sm text-text-muted">Loading ClawOps Console...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Not authenticated — redirect to login
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
+  // Skip all auth checks - just render the app
   return children;
 }
 
 export default function App() {
-  const { checkAuth } = useSettingsStore();
-
-  // On app load, check if there's a valid JWT token stored
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+  // Authentication disabled for development - no checks needed
 
   return (
     <Routes>
@@ -119,7 +91,12 @@ export default function App() {
         <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/results" element={<ResultsPage />} />
         <Route path="/lead-gen" element={<LeadGenPage />} />
+        <Route path="/facebook-leads" element={<FacebookLeadsPage />} />
+        <Route path="/engagement-queue" element={<EngagementQueue />} />
         <Route path="/blitz" element={<BlitzPage />} />
+        <Route path="/trading" element={<TradingPage />} />
+        <Route path="/content-queue" element={<ContentQueuePage />} />
+        <Route path="/hoa-leads" element={<HOALeadsPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />

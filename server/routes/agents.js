@@ -420,7 +420,22 @@ router.delete('/:id', validateParams(agentIdParamSchema), async (req, res, next)
 
 /**
  * POST /api/agents/:id/run
- * Trigger an agent run via OpenClaw Gateway.
+ * =============================
+ * PHASE 2.1: CONFIRMATION GATE ⭐
+ * =============================
+ *
+ * Creates a PENDING agent run that requires user confirmation.
+ * This is Step 1 of the human-in-the-loop safety flow.
+ *
+ * OLD BEHAVIOR (Phase 0): Executed agent immediately
+ * NEW BEHAVIOR (Phase 2.1): Creates pending run, returns run_id for confirmation
+ *
+ * Flow:
+ * 1. POST /api/agents/:id/run → creates pending run record ← YOU ARE HERE
+ * 2. Client displays ConfirmationDialog with cost estimate, permissions, domains
+ * 3. User confirms → POST /api/runs/:id/confirm (in runs.js)
+ * 4. Agent executes and run status updates to completed/failed
+ *
  * Request body: { message, sessionId (optional), json (optional) }
  */
 router.post(
@@ -439,9 +454,6 @@ router.post(
 
       const { message, sessionId, json } = req.validated.body;
 
-      // Connect to OpenClaw and run the agent
-      const openclawBridge = require('../services/openclawBridge');
-
       // Extract the OpenClaw agent ID from the stored config
       const agentConfig = agent.config ? JSON.parse(agent.config) : {};
 
@@ -454,80 +466,48 @@ router.post(
         );
       }
 
-      const openclawId = agentConfig.openclaw_id;
-
-      const runResult = await openclawBridge.runAgent(agent.id, {
-        openclawId,
-        message,
-        sessionId,
-        json: json !== false, // Default to JSON output
-      });
-
-      // Create a run record in the database
+      // Create a PENDING run record (does NOT execute agent yet)
       const runId = uuidv4();
       const userId = req.user?.id || 'system';
 
-      // Extract metrics from OpenClaw JSON output
-      let durationMs = null;
-      let tokensUsed = 0;
-      let costUsd = 0;
-      let outputText = '';
-      try {
-        const parsed = JSON.parse(runResult.output || '{}');
-        if (parsed.meta?.durationMs) durationMs = parsed.meta.durationMs;
-        if (parsed.meta?.agentMeta?.usage?.total) tokensUsed = parsed.meta.agentMeta.usage.total;
-        // Estimate cost: gpt-4o-mini ~ $0.15/1M input + $0.60/1M output
-        const usage = parsed.meta?.agentMeta?.usage || {};
-        costUsd = ((usage.input || 0) * 0.00000015 + (usage.output || 0) * 0.0000006);
-        // Extract the text response
-        if (parsed.payloads?.[0]?.text) outputText = parsed.payloads[0].text;
-      } catch {
-        // Non-JSON output, store as-is
-        outputText = runResult.output || '';
-      }
-
+      // Store the run parameters in result_data for later use when confirmed
       const resultData = JSON.stringify({
-        sessionId: runResult.sessionId,
         message,
-        output: runResult.output || null,
-        outputText,
+        sessionId,
+        json: json !== false,
       });
 
       run(
-        `INSERT INTO runs (id, agent_id, user_id, status, trigger, started_at, completed_at, duration_ms, tokens_used, cost_usd, result_data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, agent_id, user_id, status, trigger, result_data)
+       VALUES (?, ?, ?, ?, ?, ?)`,
         [
           runId,
           agent.id,
           userId,
-          runResult.status || 'completed',
+          'pending', // ⭐ NEW: Run is pending confirmation
           'manual',
-          runResult.startedAt || new Date().toISOString(),
-          runResult.completedAt || new Date().toISOString(),
-          durationMs,
-          tokensUsed,
-          costUsd,
           resultData,
         ]
       );
 
-      // Update agent status and run count
-      run(
-        `UPDATE agents SET status = ?, total_runs = total_runs + 1, last_run_at = datetime("now"), updated_at = datetime("now") WHERE id = ?`,
-        ['idle', agent.id]
-      );
-
+      // Return the pending run information
+      // Client will display confirmation dialog
       res.json({
-        message: `Agent "${agent.name}" completed successfully`,
+        message: `Agent run created - awaiting confirmation`,
         run: {
           id: runId,
-          sessionId: runResult.sessionId,
-          status: runResult.status || 'completed',
-          startedAt: runResult.startedAt,
-          completedAt: runResult.completedAt,
-          output: runResult.output,
+          status: 'pending',
+          agent_id: agent.id,
+          created_at: new Date().toISOString(),
         },
-        agent: { id: agent.id, name: agent.name },
+        agent: {
+          id: agent.id,
+          name: agent.name,
+          permissions: agent.permissions,
+          domains: agent.domains ? JSON.parse(agent.domains) : [],
+        },
+        confirmation_required: true,
+        next_step: `POST /api/runs/${runId}/confirm to execute`,
       });
     } catch (error) {
       next(error);

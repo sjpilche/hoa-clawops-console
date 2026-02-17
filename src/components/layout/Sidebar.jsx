@@ -29,6 +29,11 @@ import {
   HelpCircle,
   Users,
   Zap,
+  Facebook,
+  MessageSquare,
+  TrendingUp,
+  Send,
+  Building2,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -50,6 +55,11 @@ const iconMap = {
   HelpCircle,
   Users,
   Zap,
+  Facebook,
+  MessageSquare,
+  TrendingUp,
+  Send,
+  Building2,
 };
 
 export default function Sidebar() {

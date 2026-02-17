@@ -1,367 +1,215 @@
 /**
  * @file schedules.js
- * @description API routes for managing agent schedules (cron jobs)
- *
- * This connects the SchedulePage UI to OpenClaw's cron functionality
+ * @description API routes for managing agent schedules.
+ * Schedules are stored in the local SQLite DB and displayed in the Scheduler UI.
  */
 
 const express = require('express');
 const router = express.Router();
-const openclawBridge = require('../services/openclawBridge');
 const db = require('../db/connection');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * GET /api/schedules
- * List all scheduled jobs from OpenClaw
+ * List all scheduled jobs
  */
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
-    // Get all schedules from OpenClaw
-    const schedules = await openclawBridge.listSchedules();
+    const schedules = db.all(`
+      SELECT s.*, a.name as agent_name_live
+      FROM schedules s
+      LEFT JOIN agents a ON s.agent_id = a.id
+      ORDER BY s.created_at DESC
+    `);
 
-    // Enrich with agent information from database
-    const enrichedSchedules = [];
-    for (const schedule of schedules) {
-      const agent = db.get(
-        'SELECT id, name, target_system FROM agents WHERE config LIKE ?',
-        [`%"openclaw_id":"${schedule.agent_id}"%`]
-      );
+    // Normalize field names for the frontend ScheduleCard component
+    const normalized = schedules.map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      agentId: s.agent_id,
+      agentName: s.agent_name_live || s.agent_name,
+      cronExpression: s.cron_expression,
+      message: s.message,
+      enabled: s.enabled === 1,
+      lastRunAt: s.last_run_at,
+      nextRunAt: s.next_run_at,
+      createdAt: s.created_at,
+    }));
 
-      enrichedSchedules.push({
-        ...schedule,
-        agent_name: agent?.name || schedule.agent_id,
-        agent_db_id: agent?.id,
-        target_system: agent?.target_system,
-      });
-    }
-
-    res.json({
-      success: true,
-      count: enrichedSchedules.length,
-      schedules: enrichedSchedules,
-    });
+    res.json({ success: true, count: normalized.length, schedules: normalized });
   } catch (error) {
-    console.error('[Schedules API] Error listing schedules:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/schedules/:agentId
- * Get schedules for a specific agent
- */
-router.get('/:agentId', async (req, res) => {
-  try {
-    const agent = db.get('SELECT * FROM agents WHERE id = ?', [req.params.agentId]);
-
-    if (!agent) {
-      return res.status(404).json({
-        success: false,
-        error: 'Agent not found',
-      });
-    }
-
-    const config = JSON.parse(agent.config || '{}');
-    const openclawId = config.openclaw_id;
-
-    if (!openclawId) {
-      return res.json({
-        success: true,
-        schedules: [],
-        message: 'Agent has no OpenClaw ID',
-      });
-    }
-
-    // Get all schedules and filter by agent
-    const allSchedules = await openclawBridge.listSchedules();
-    const agentSchedules = allSchedules.filter(s => s.agent_id === openclawId);
-
-    res.json({
-      success: true,
-      count: agentSchedules.length,
-      schedules: agentSchedules,
-      agent: {
-        id: agent.id,
-        name: agent.name,
-        openclaw_id: openclawId,
-      },
-    });
-  } catch (error) {
-    console.error('[Schedules API] Error getting agent schedules:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('[Schedules] Error listing schedules:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
  * POST /api/schedules
- * Create a new schedule for an agent
- * Body: { agentId, cron, description }
+ * Create a new schedule
+ * Body: { name, description, agentId, message, cronExpression, enabled }
  */
-router.post('/', async (req, res) => {
+router.post('/', (req, res) => {
   try {
-    const { agentId, cron, description } = req.body;
+    const { name, description, agentId, message, cronExpression, enabled } = req.body;
 
-    if (!agentId || !cron) {
+    if (!name || !agentId || !message || !cronExpression) {
       return res.status(400).json({
         success: false,
-        error: 'agentId and cron are required',
+        error: 'name, agentId, message, and cronExpression are required',
       });
     }
 
-    // Get agent from database
     const agent = db.get('SELECT * FROM agents WHERE id = ?', [agentId]);
-
     if (!agent) {
-      return res.status(404).json({
-        success: false,
-        error: 'Agent not found',
-      });
+      return res.status(404).json({ success: false, error: 'Agent not found' });
     }
 
-    const config = JSON.parse(agent.config || '{}');
-    const openclawId = config.openclaw_id;
-
-    if (!openclawId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Agent has no OpenClaw ID. Cannot schedule.',
-      });
-    }
-
-    // Add schedule via OpenClaw
-    const result = await openclawBridge.addSchedule(openclawId, cron, description);
-
-    // Update agent config to mark scheduling enabled
-    config.task = config.task || {};
-    config.task.schedule = {
-      enabled: true,
-      cron: cron,
-      description: description || '',
-    };
-
+    const id = uuidv4();
     db.run(
-      'UPDATE agents SET config = ? WHERE id = ?',
-      [JSON.stringify(config), agentId]
+      `INSERT INTO schedules (id, name, description, agent_id, agent_name, cron_expression, message, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, name, description || '', agentId, agent.name, cronExpression, message, enabled !== false ? 1 : 0]
     );
 
+    const created = db.get('SELECT * FROM schedules WHERE id = ?', [id]);
     res.status(201).json({
       success: true,
       message: 'Schedule created successfully',
-      schedule: result,
+      schedule: { ...created, agentName: agent.name, cronExpression: created.cron_expression, enabled: created.enabled === 1 },
     });
   } catch (error) {
-    console.error('[Schedules API] Error creating schedule:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('[Schedules] Error creating schedule:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * PUT /api/schedules/:agentId
- * Update a schedule for an agent
- * Body: { cron, description }
+ * PUT /api/schedules/:id
+ * Update a schedule (enable/disable or change cron)
+ * Body: { enabled?, cronExpression?, description?, message? }
  */
-router.put('/:agentId', async (req, res) => {
+router.put('/:id', (req, res) => {
   try {
-    const { cron, description } = req.body;
-    const agentId = req.params.agentId;
+    const { id } = req.params;
+    const { enabled, cronExpression, description, message } = req.body;
 
-    if (!cron) {
-      return res.status(400).json({
-        success: false,
-        error: 'cron is required',
-      });
+    const existing = db.get('SELECT * FROM schedules WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Schedule not found' });
     }
-
-    // Get agent
-    const agent = db.get('SELECT * FROM agents WHERE id = ?', [agentId]);
-
-    if (!agent) {
-      return res.status(404).json({
-        success: false,
-        error: 'Agent not found',
-      });
-    }
-
-    const config = JSON.parse(agent.config || '{}');
-    const openclawId = config.openclaw_id;
-
-    if (!openclawId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Agent has no OpenClaw ID',
-      });
-    }
-
-    // Remove old schedule and add new one
-    await openclawBridge.removeSchedule(openclawId);
-    const result = await openclawBridge.addSchedule(openclawId, cron, description);
-
-    // Update agent config
-    config.task = config.task || {};
-    config.task.schedule = {
-      enabled: true,
-      cron: cron,
-      description: description || '',
-    };
 
     db.run(
-      'UPDATE agents SET config = ? WHERE id = ?',
-      [JSON.stringify(config), agentId]
+      `UPDATE schedules SET
+        enabled = ?,
+        cron_expression = ?,
+        description = ?,
+        message = ?,
+        updated_at = datetime('now')
+       WHERE id = ?`,
+      [
+        enabled !== undefined ? (enabled ? 1 : 0) : existing.enabled,
+        cronExpression || existing.cron_expression,
+        description !== undefined ? description : existing.description,
+        message || existing.message,
+        id,
+      ]
     );
 
+    const updated = db.get('SELECT * FROM schedules WHERE id = ?', [id]);
     res.json({
       success: true,
-      message: 'Schedule updated successfully',
-      schedule: result,
+      message: 'Schedule updated',
+      schedule: { ...updated, cronExpression: updated.cron_expression, enabled: updated.enabled === 1 },
     });
   } catch (error) {
-    console.error('[Schedules API] Error updating schedule:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('[Schedules] Error updating schedule:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * DELETE /api/schedules/:agentId
- * Delete a schedule for an agent
+ * POST /api/schedules/:id/run
+ * Immediately run a schedule's agent with the schedule's stored message.
+ * Creates a pending run (same flow as POST /api/agents/:id/run).
  */
-router.delete('/:agentId', async (req, res) => {
+router.post('/:id/run', (req, res) => {
   try {
-    const agentId = req.params.agentId;
+    const { id } = req.params;
+    const schedule = db.get('SELECT * FROM schedules WHERE id = ?', [id]);
+    if (!schedule) {
+      return res.status(404).json({ success: false, error: 'Schedule not found' });
+    }
 
-    // Get agent
-    const agent = db.get('SELECT * FROM agents WHERE id = ?', [agentId]);
-
+    const agent = db.get('SELECT * FROM agents WHERE id = ?', [schedule.agent_id]);
     if (!agent) {
-      return res.status(404).json({
+      return res.status(404).json({ success: false, error: 'Agent not found for this schedule' });
+    }
+
+    const agentConfig = agent.config ? JSON.parse(agent.config) : {};
+    if (!agentConfig.openclaw_id) {
+      return res.status(400).json({
         success: false,
-        error: 'Agent not found',
+        error: `Agent "${agent.name}" is not registered with OpenClaw. Register it on the Agents page first.`,
       });
     }
 
-    const config = JSON.parse(agent.config || '{}');
-    const openclawId = config.openclaw_id;
-
-    if (!openclawId) {
-      return res.status(404).json({
-        success: false,
-        error: 'Agent has no OpenClaw ID',
-      });
-    }
-
-    // Remove schedule from OpenClaw
-    await openclawBridge.removeSchedule(openclawId);
-
-    // Update agent config to mark scheduling disabled
-    if (config.task && config.task.schedule) {
-      config.task.schedule.enabled = false;
-    }
+    // Create a pending run (same as POST /api/agents/:id/run)
+    const runId = uuidv4();
+    const userId = req.user?.id || 'system';
+    const resultData = JSON.stringify({
+      message: schedule.message,
+      sessionId: undefined,
+      json: true,
+    });
 
     db.run(
-      'UPDATE agents SET config = ? WHERE id = ?',
-      [JSON.stringify(config), agentId]
+      `INSERT INTO runs (id, agent_id, user_id, status, trigger, result_data)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [runId, agent.id, userId, 'pending', 'schedule_manual', resultData]
     );
 
     res.json({
       success: true,
-      message: 'Schedule deleted successfully',
+      message: `Schedule run created — awaiting confirmation`,
+      run: {
+        id: runId,
+        status: 'pending',
+        agent_id: agent.id,
+        created_at: new Date().toISOString(),
+      },
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        permissions: agent.permissions,
+        domains: agent.domains ? JSON.parse(agent.domains) : [],
+      },
+      confirmation_required: true,
+      estimated_cost_usd: 0.05,
     });
   } catch (error) {
-    console.error('[Schedules API] Error deleting schedule:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('[Schedules] Error running schedule:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * POST /api/schedules/:agentId/toggle
- * Enable/disable a schedule
- * Body: { enabled: boolean }
+ * DELETE /api/schedules/:id
+ * Delete a schedule
  */
-router.post('/:agentId/toggle', async (req, res) => {
+router.delete('/:id', (req, res) => {
   try {
-    const { enabled } = req.body;
-    const agentId = req.params.agentId;
-
-    if (typeof enabled !== 'boolean') {
-      return res.status(400).json({
-        success: false,
-        error: 'enabled (boolean) is required',
-      });
+    const { id } = req.params;
+    const existing = db.get('SELECT * FROM schedules WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Schedule not found' });
     }
 
-    const agent = db.get('SELECT * FROM agents WHERE id = ?', [agentId]);
-
-    if (!agent) {
-      return res.status(404).json({
-        success: false,
-        error: 'Agent not found',
-      });
-    }
-
-    const config = JSON.parse(agent.config || '{}');
-    const openclawId = config.openclaw_id;
-
-    if (!openclawId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Agent has no OpenClaw ID',
-      });
-    }
-
-    if (enabled) {
-      // Enable: add schedule back
-      if (config.task?.schedule?.cron) {
-        await openclawBridge.addSchedule(
-          openclawId,
-          config.task.schedule.cron,
-          config.task.schedule.description
-        );
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: 'No cron schedule configured for this agent',
-        });
-      }
-    } else {
-      // Disable: remove schedule
-      await openclawBridge.removeSchedule(openclawId);
-    }
-
-    // Update config
-    if (config.task && config.task.schedule) {
-      config.task.schedule.enabled = enabled;
-    }
-
-    db.run(
-      'UPDATE agents SET config = ? WHERE id = ?',
-      [JSON.stringify(config), agentId]
-    );
-
-    res.json({
-      success: true,
-      message: `Schedule ${enabled ? 'enabled' : 'disabled'} successfully`,
-      enabled,
-    });
+    db.run('DELETE FROM schedules WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Schedule deleted' });
   } catch (error) {
-    console.error('[Schedules API] Error toggling schedule:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('[Schedules] Error deleting schedule:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

@@ -245,24 +245,105 @@ Output: Company size, revenue, industry, social profiles, etc.
 
 ---
 
+### 9. LinkedIn Integration
+**Purpose:** B2B lead generation, thought leadership
+**Status:** ⚠️ Not Configured
+**Priority:** HIGH (B2B focus)
+**Cost:** Free
+
+**Setup Guide:** See [LINKEDIN-SOCIAL-INTEGRATION-SETUP.md](LINKEDIN-SOCIAL-INTEGRATION-SETUP.md)
+
+**What you need:**
+1. LinkedIn Developer App
+2. Marketing Developer Platform access (requires approval)
+3. OAuth 2.0 credentials
+
+**Environment Variables:**
+```env
+LINKEDIN_CLIENT_ID=78xxxxxxxxxxxxx
+LINKEDIN_CLIENT_SECRET=VxXxxxxxxxxxxxxxxxxxxxxx
+LINKEDIN_ACCESS_TOKEN=AQV...
+```
+
+**Time to Setup:** 1-2 hours
+
+---
+
+### 10. Twitter/X Integration
+**Purpose:** Real-time engagement, trending topics
+**Status:** ⚠️ Not Configured
+**Priority:** MEDIUM
+**Cost:** Free (Elevated access required)
+
+**Setup Guide:** See [LINKEDIN-SOCIAL-INTEGRATION-SETUP.md](LINKEDIN-SOCIAL-INTEGRATION-SETUP.md)
+
+**Environment Variables:**
+```env
+TWITTER_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxx
+TWITTER_API_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWITTER_ACCESS_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWITTER_ACCESS_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**Time to Setup:** 30 minutes
+
+---
+
+### 11. Instagram Integration
+**Purpose:** Visual storytelling, community building
+**Status:** ⚠️ Not Configured
+**Priority:** MEDIUM
+**Cost:** Free (uses Facebook app)
+
+**Setup Guide:** See [LINKEDIN-SOCIAL-INTEGRATION-SETUP.md](LINKEDIN-SOCIAL-INTEGRATION-SETUP.md)
+
+**Environment Variables:**
+```env
+INSTAGRAM_ACCOUNT_ID=17841400000000000
+# Uses FACEBOOK_ACCESS_TOKEN from existing config
+```
+
+**Time to Setup:** 30 minutes
+
+---
+
+### 12. YouTube Integration
+**Purpose:** Video content, SEO
+**Status:** ⚠️ Not Configured
+**Priority:** LOW
+**Cost:** Free
+
+**Setup Guide:** See [LINKEDIN-SOCIAL-INTEGRATION-SETUP.md](LINKEDIN-SOCIAL-INTEGRATION-SETUP.md)
+
+**Environment Variables:**
+```env
+YOUTUBE_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+YOUTUBE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+YOUTUBE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxxx
+```
+
+**Time to Setup:** 1 hour
+
+---
+
 ## 🔵 FUTURE INTEGRATIONS (Optional)
 
-### 9. Google Analytics
+### 13. Google Analytics
 **Purpose:** Track lead conversion and ROI
 **Setup:** Add GA tracking code to website
 **Cost:** Free
 
-### 10. Zapier
+### 14. Zapier
 **Purpose:** No-code workflow automation
 **Use Case:** Connect Facebook leads to 1000+ apps
 **Cost:** Free tier available
 
-### 11. Slack Notifications
+### 15. Slack Notifications
 **Purpose:** Real-time lead alerts in Slack
 **Setup:** Create Slack webhook URL
 **Cost:** Free
 
-### 12. Calendar API (Google/Outlook)
+### 16. Calendar API (Google/Outlook)
 **Purpose:** Auto-schedule calls with leads
 **Setup:** OAuth integration
 **Cost:** Free (requires Google/Microsoft account)
@@ -273,12 +354,27 @@ Output: Company size, revenue, industry, social profiles, etc.
 
 | Integration | Priority | Difficulty | Time | Cost | ROI |
 |-------------|----------|-----------|------|------|-----|
+| **Social Media** | | | | | |
+| LinkedIn | HIGH | Medium | 2hrs | Free | High |
+| Twitter/X | Medium | Easy | 30min | Free | High |
+| Instagram | Medium | Easy | 30min | Free | Medium |
+| YouTube | Low | Medium | 1hr | Free | Medium |
+| **Lead Management** | | | | | |
 | Facebook Webhooks | Medium | Easy | 30min | Free | High |
 | CRM (HubSpot) | High | Medium | 2hrs | Free | High |
 | Twilio SMS | Medium | Easy | 1hr | Low | Medium |
 | Lead Enrichment | Low | Easy | 1hr | $$$ | Low |
+| **Analytics** | | | | | |
 | Google Analytics | Low | Easy | 30min | Free | Medium |
 | Zapier | Low | Easy | 1hr | $ | Medium |
+
+**Recommended Setup Order:**
+1. LinkedIn (B2B focus, highest ROI)
+2. Twitter/X (quick wins, easy engagement)
+3. CRM Integration (centralize lead management)
+4. Instagram (visual content)
+5. Twilio SMS (instant lead contact)
+6. YouTube (long-form content)
 
 ---
 

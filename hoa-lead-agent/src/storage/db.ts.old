@@ -1,0 +1,158 @@
+import Database from 'better-sqlite3';
+import path from 'path';
+import { logger } from '../utils/logger';
+
+export interface Lead {
+  id?: number;
+  company_name: string;
+  website?: string;
+  phone?: string;
+  primary_email?: string;
+  contact_name?: string;
+  contact_title?: string;
+  contact_linkedin_url?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  number_of_hoas_managed?: number;
+  source: string;
+  signal_score: number;
+  date_found: string;
+  outreach_status: string;
+}
+
+class LeadDatabase {
+  private db: Database.Database;
+
+  constructor(dbPath: string = path.join(process.cwd(), 'leads.db')) {
+    this.db = new Database(dbPath);
+    this.init();
+  }
+
+  private init() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_name TEXT NOT NULL,
+        website TEXT,
+        phone TEXT,
+        primary_email TEXT,
+        contact_name TEXT,
+        contact_title TEXT,
+        contact_linkedin_url TEXT,
+        city TEXT,
+        state TEXT,
+        zip TEXT,
+        number_of_hoas_managed INTEGER,
+        source TEXT NOT NULL,
+        signal_score INTEGER DEFAULT 0,
+        date_found TEXT NOT NULL,
+        outreach_status TEXT DEFAULT 'new',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_company_domain
+        ON leads(company_name, website);
+
+      CREATE INDEX IF NOT EXISTS idx_signal_score ON leads(signal_score DESC);
+      CREATE INDEX IF NOT EXISTS idx_outreach_status ON leads(outreach_status);
+      CREATE INDEX IF NOT EXISTS idx_state ON leads(state);
+    `);
+    logger.info('Database initialized');
+  }
+
+  insertLead(lead: Lead): { id: number; isNew: boolean } {
+    try {
+      // Check for duplicate
+      const existing = this.db.prepare(`
+        SELECT id FROM leads
+        WHERE company_name = ? AND (website = ? OR (website IS NULL AND ? IS NULL))
+      `).get(lead.company_name, lead.website, lead.website);
+
+      if (existing) {
+        logger.debug(`Duplicate lead skipped: ${lead.company_name}`);
+        return { id: (existing as any).id, isNew: false };
+      }
+
+      const stmt = this.db.prepare(`
+        INSERT INTO leads (
+          company_name, website, phone, primary_email, contact_name,
+          contact_title, contact_linkedin_url, city, state, zip,
+          number_of_hoas_managed, source, signal_score, date_found, outreach_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const result = stmt.run(
+        lead.company_name,
+        lead.website,
+        lead.phone,
+        lead.primary_email,
+        lead.contact_name,
+        lead.contact_title,
+        lead.contact_linkedin_url,
+        lead.city,
+        lead.state,
+        lead.zip,
+        lead.number_of_hoas_managed,
+        lead.source,
+        lead.signal_score,
+        lead.date_found,
+        lead.outreach_status
+      );
+
+      logger.info(`New lead inserted: ${lead.company_name} (score: ${lead.signal_score})`);
+      return { id: result.lastInsertRowid as number, isNew: true };
+    } catch (error) {
+      logger.error(`Failed to insert lead ${lead.company_name}:`, error);
+      throw error;
+    }
+  }
+
+  updateLead(id: number, updates: Partial<Lead>) {
+    const fields = Object.keys(updates).filter(k => k !== 'id');
+    if (fields.length === 0) return;
+
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => (updates as any)[f]);
+
+    const stmt = this.db.prepare(`
+      UPDATE leads SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `);
+
+    stmt.run(...values, id);
+    logger.debug(`Lead ${id} updated`);
+  }
+
+  getAllLeads(): Lead[] {
+    return this.db.prepare('SELECT * FROM leads ORDER BY signal_score DESC, created_at DESC').all() as Lead[];
+  }
+
+  getLeadsByStatus(status: string): Lead[] {
+    return this.db.prepare('SELECT * FROM leads WHERE outreach_status = ? ORDER BY signal_score DESC').all(status) as Lead[];
+  }
+
+  getStats() {
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM leads').get() as { count: number };
+    const byState = this.db.prepare(`
+      SELECT state, COUNT(*) as count FROM leads GROUP BY state ORDER BY count DESC
+    `).all();
+    const bySource = this.db.prepare(`
+      SELECT source, COUNT(*) as count FROM leads GROUP BY source ORDER BY count DESC
+    `).all();
+    const avgScore = this.db.prepare('SELECT AVG(signal_score) as avg FROM leads').get() as { avg: number };
+
+    return {
+      total: total.count,
+      byState,
+      bySource,
+      avgScore: avgScore.avg ? avgScore.avg.toFixed(2) : '0',
+    };
+  }
+
+  close() {
+    this.db.close();
+  }
+}
+
+export const db = new LeadDatabase();

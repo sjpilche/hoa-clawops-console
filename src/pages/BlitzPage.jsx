@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Play, Zap, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, History } from 'lucide-react';
-import api from '@/lib/api';
+import { api } from '@/lib/api';
 
 export default function BlitzPage() {
   const [isRunning, setIsRunning] = useState(false);

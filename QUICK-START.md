@@ -1,348 +1,479 @@
-# Quick Start Guide - HOA Agent Fleet Phase 1
+# ClawOps Console - Quick Start Guide
 
-## 🚀 Get Started in 5 Minutes
+**Welcome to ClawOps Console!** This guide will get you up and running in 5 minutes.
+
+---
+
+## 🎯 What is ClawOps Console?
+
+ClawOps Console is a **chat-centric command center** for managing autonomous browser agents. Instead of clicking through UIs, you command agents via chat:
+
+```
+You: /run ap-invoice-extractor
+Bot: 🚀 Starting AP Invoice Extractor...
+Bot: ✅ Extracted 47 invoices | 2m 14s | $0.23 cost
+```
+
+**Current Use Case:** HOA Project Funding - Complete marketing automation (lead gen, content, social media)
+
+---
+
+## 📋 Prerequisites
+
+Before you start, make sure you have:
+
+- **Node.js 18+** installed ([download here](https://nodejs.org))
+- **npm** (comes with Node.js)
+- **Windows, macOS, or Linux**
+
+**Optional but recommended:**
+- Git for version control
+- SQLite browser for database inspection
+
+---
+
+## 🚀 Installation
 
 ### Step 1: Install Dependencies
+
+Open terminal in the project directory and run:
 
 ```bash
 npm install
 ```
 
-This installs the 6 new packages we added:
-- `redis` - Distributed state management
-- `multer` - File upload handling
-- `pdf-parse` - PDF extraction
-- `tesseract.js` - OCR processing
-- `playwright` - Browser automation
-- `prom-client` - Prometheus metrics
+This will install all required packages (~1,047 packages, takes 2-3 minutes).
 
 ---
 
-### Step 2: Start Redis
+### Step 2: Configure Environment
+
+Copy the example environment file:
 
 ```bash
-# Start Redis in the background
-docker-compose up -d redis
-
-# Verify it's running
-docker ps
-# You should see: openclaw-redis
-
-# Test connection
-docker exec -it openclaw-redis redis-cli ping
-# Expected output: PONG
+cp .env.example .env.local
 ```
 
-**Optional**: Start Redis Commander (Web UI)
-```bash
-# Uncomment the redis-commander service in docker-compose.yml first
-docker-compose up -d redis redis-commander
+**Edit `.env.local`** and set these required values:
 
-# Open browser to http://localhost:8081
+```env
+# Required: Change the default admin password
+DEFAULT_ADMIN_PASSWORD=YourSecurePasswordHere123!
+
+# Required: OpenAI API key (for agent intelligence)
+OPENAI_API_KEY=sk-proj-your-actual-key-here
+
+# Optional: Change server ports if needed
+SERVER_PORT=3001
+VITE_DEV_PORT=5173
+```
+
+**⚠️ Security Note:** Never commit `.env.local` to Git (it's already in `.gitignore`).
+
+---
+
+### Step 3: Initialize Database
+
+The database will be created automatically on first run. To verify setup:
+
+```bash
+# Check if database exists
+ls data/clawops.db
+
+# If not, the server will create it on first start
 ```
 
 ---
 
-### Step 3: Start the Server
+## 🎮 Starting the Application
 
-The server will automatically:
-1. Apply the database schema (8 new tables)
-2. Connect to Redis
-3. Initialize the workflow engine
+### Option 1: Windows Batch Script (Easiest)
 
+Double-click:
+```
+START-CLAWOPS.bat
+```
+
+Then in a new terminal, double-click:
+```
+START-DASHBOARD.bat
+```
+
+### Option 2: Command Line (All Platforms)
+
+**Terminal 1 - Start Backend:**
+```bash
+npm run server
+```
+
+**Terminal 2 - Start Frontend:**
 ```bash
 npm run dev
 ```
 
-You should see:
-```
-[Database] Schema applied successfully
-[Database] Ready
-[Redis] Main client connected
-[Redis] Subscriber connected
-[Redis] Publisher connected
-[Redis] All clients connected successfully
-Server running on http://localhost:3001
+### Option 3: Docker (Advanced)
+
+```bash
+docker-compose up
 ```
 
 ---
 
-### Step 4: Test the Workflow Engine
+## 🌐 Accessing the Application
 
-Open a new terminal and test workflow creation:
+### Local Development
+
+- **Frontend:** http://localhost:5173
+- **API:** http://localhost:3001/api
+- **Health Check:** http://localhost:3001/health
+
+### Production (Render)
+
+- **Live App:** https://hoa-clawops-console.onrender.com
+
+---
+
+## 🔐 First Login
+
+1. Open **http://localhost:5173** in your browser
+2. You'll see the login screen
+3. Enter default credentials:
+   - **Email:** `admin@clawops.local`
+   - **Password:** (the one you set in `.env.local`)
+4. Click **Login**
+
+**✅ Success!** You should see the ClawOps Console dashboard.
+
+---
+
+## 🧭 Navigating the Interface
+
+After login, you'll see the sidebar with these sections:
+
+### Core Features
+- **📊 Dashboard** - Overview of all agents and recent activity
+- **🤖 Agents** - Manage your agent fleet (7 marketing agents)
+- **💬 Chat** - Chat interface for commanding agents
+- **📅 Scheduler** - Schedule automated agent runs
+- **📈 Monitor** - Real-time agent execution monitoring
+
+### Lead Generation
+- **👥 Lead Gen** - Community engagement dashboard
+- **📇 Contacts** - Contact/lead management
+
+### Operations
+- **📋 Audit Log** - Security and activity logs
+- **💰 Costs** - Cost tracking and budget monitoring
+- **⚙️ Settings** - Configuration and preferences
+
+---
+
+## 🚀 Running Your First Agent
+
+### Method 1: Via Chat Interface
+
+1. Click **Chat** in the sidebar
+2. Type: `/run hoa-content-writer`
+3. Press **Enter**
+4. Watch the agent execute in real-time!
+
+### Method 2: Via Agent Management
+
+1. Click **Agents** in the sidebar
+2. Find **HOA Content Writer**
+3. Click **Run** button
+4. Monitor progress in real-time
+
+### Method 3: Via API
 
 ```bash
-# Start Node.js REPL
-node
-
-# In the REPL:
+curl -X POST http://localhost:3001/api/agents/hoa-content-writer/run \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json"
 ```
 
-```javascript
-// Load modules
-const redisClient = require('./server/services/redisClient');
-const { workflowEngine } = require('./server/services/agentOrchestrator');
+---
 
-// Connect to Redis
-await redisClient.connect();
+## 🎯 Key Features to Explore
 
-// Create a test workflow
-const workflowId = await workflowEngine.startFundingWorkflow('test-lead-001', {
-  loanAmount: 250000,
-  hoaState: 'FL',
-  hoaUnits: 120
-});
+### 1. **Agent Fleet** (7 Marketing Agents)
 
-console.log('✅ Workflow created:', workflowId);
+Located in `openclaw-skills/` directory:
 
-// Check Redis state
-const state = await redisClient.getWorkflowState(workflowId);
-console.log('📊 Workflow state:', JSON.stringify(state, null, 2));
+- **hoa-content-writer** - Generate blog posts and articles
+- **hoa-email-campaigns** - Email marketing automation
+- **hoa-social-media** - Social media posting
+- **hoa-cms-publisher** - WordPress publishing
+- **hoa-networker** - Lead generation and outreach
+- **hoa-social-engagement** - Community engagement
+- **hoa-website-publisher** - Website content management
 
-// Monitor all workflows
-const workflows = await workflowEngine.monitorWorkflows();
-console.log('📈 Active workflows:', workflows.length);
+### 2. **Facebook Lead Ads Integration**
+
+Real-time lead capture from Facebook (< 2 seconds):
+
+1. Go to **Lead Gen** in sidebar
+2. View captured leads from Facebook
+3. Leads are automatically stored in database
+
+**Webhook URL:** https://hoa-clawops-console.onrender.com/api/facebook/webhook
+
+### 3. **Cost Tracking**
+
+Monitor agent execution costs:
+
+1. Click **Costs** in sidebar
+2. View per-agent, per-run, and time-based breakdowns
+3. Set budget limits in Settings
+
+### 4. **Audit Logging**
+
+Track all user actions and agent executions:
+
+1. Click **Audit Log** in sidebar
+2. Filter by user, action, or time range
+3. Export for compliance
+
+### 5. **Scheduled Runs**
+
+Automate agent execution:
+
+1. Click **Scheduler** in sidebar
+2. Create new schedule (daily, weekly, monthly)
+3. Set time, recurrence, and agent parameters
+
+---
+
+## 🛠️ Configuration
+
+### Environment Variables
+
+Key settings in `.env.local`:
+
+```env
+# Server Configuration
+SERVER_PORT=3001
+VITE_DEV_PORT=5173
+NODE_ENV=development
+
+# Database
+DB_PATH=./data/clawops.db
+
+# Authentication
+JWT_SECRET=<128-char auto-generated token>
+JWT_EXPIRY=24h
+DEFAULT_ADMIN_EMAIL=admin@clawops.local
+DEFAULT_ADMIN_PASSWORD=<your secure password>
+
+# OpenClaw Configuration
+OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
+OPENCLAW_MODE=shell
+OPENCLAW_PATH=/path/to/openclaw-v1
+
+# Agent Limits
+MAX_CONCURRENT_AGENTS=3
+MAX_COST_PER_RUN=5.00
+MAX_DURATION_PER_RUN=300
+MAX_TOKENS_PER_RUN=100000
+MAX_RUNS_PER_HOUR=20
+
+# OpenAI API
+OPENAI_API_KEY=sk-proj-your-key-here
+
+# Email (SMTP) - Gmail
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=<app password>
+
+# Facebook Lead Ads
+FACEBOOK_APP_ID=<your app id>
+FACEBOOK_PAGE_ID=<your page id>
+FACEBOOK_ACCESS_TOKEN=<your access token>
+FACEBOOK_WEBHOOK_VERIFY_TOKEN=<random 64-char token>
+
+# Azure SQL Server (Optional)
+AZURE_SQL_SERVER=your-server.database.windows.net
+AZURE_SQL_DATABASE=your-database
+AZURE_SQL_USER=your-username
+AZURE_SQL_PASSWORD=your-password
+
+# WordPress Webhook (Optional)
+HOA_WEBHOOK_SECRET=<random 64-char token>
+HOA_WEBHOOK_API_URL=https://your-wordpress-site.com/api
 ```
 
-**Expected Output**:
-```javascript
-✅ Workflow created: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-📊 Workflow state: {
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "lead_id": "test-lead-001",
-  "stage": "intake",
-  "status": "in_progress",
-  "progress": 0,
-  "tasks": {
-    "lending_research": { "status": "pending", "progress": 0 },
-    "compliance_check": { "status": "pending", "progress": 0 },
-    "document_prep": { "status": "pending", "progress": 0 }
-  },
-  "results": {
-    "loan_options": [],
-    "compliance_issues": [],
-    "documents": []
-  }
+### Agent Configuration
+
+Each agent has a `soul.json` file in `openclaw-skills/<agent-name>/`:
+
+```json
+{
+  "name": "HOA Content Writer",
+  "persona": "Professional content strategist...",
+  "capabilities": ["blog_posts", "seo_optimization"],
+  "max_cost": 1.00,
+  "timeout": 300
 }
-📈 Active workflows: 1
+```
+
+Edit these files to customize agent behavior.
+
+---
+
+## 🧪 Testing Your Setup
+
+### 1. Health Check
+
+```bash
+curl http://localhost:3001/health
+```
+
+Expected response:
+```json
+{"status": "healthy"}
+```
+
+### 2. Database Check
+
+```bash
+sqlite3 data/clawops.db "SELECT COUNT(*) FROM users;"
+```
+
+Should return at least 1 (the admin user).
+
+### 3. Facebook Webhook Test
+
+```bash
+curl http://localhost:3001/api/facebook/webhook?hub.mode=subscribe&hub.verify_token=YOUR_VERIFY_TOKEN&hub.challenge=test123
+```
+
+Should return: `test123`
+
+### 4. Agent Execution Test
+
+Run the test script:
+
+```bash
+node test-facebook.js
 ```
 
 ---
 
-### Step 5: Verify Database
+## 🐛 Troubleshooting
 
-Check that the workflow was saved to SQLite:
+### Issue: "Port already in use"
+
+**Solution:** Change ports in `.env.local`:
+```env
+SERVER_PORT=3002
+VITE_DEV_PORT=5174
+```
+
+### Issue: "Database file not found"
+
+**Solution:** Create the data directory:
+```bash
+mkdir -p data
+```
+
+Then restart the server (it will create the database automatically).
+
+### Issue: "Cannot connect to API"
+
+**Check:**
+1. Backend server is running (port 3001)
+2. Frontend is pointing to correct API URL
+3. No firewall blocking the ports
 
 ```bash
-# Using sqlite3 CLI (if installed)
-sqlite3 data/clawops.db "SELECT id, lead_id, current_stage, status FROM funding_workflows;"
-
-# Or using Node.js
-node -e "const db = require('./server/db/connection'); console.log(db.all('SELECT * FROM funding_workflows'));"
+# Test API connectivity
+curl http://localhost:3001/api/health
 ```
 
----
+### Issue: "Authentication failed"
 
-## 🔍 Verify Everything Works
+**Solutions:**
+1. Check JWT_SECRET is set in `.env.local`
+2. Clear browser cookies/localStorage
+3. Restart the server
+4. Try creating a new user
 
-### Health Checks
+### Issue: "Facebook webhook verification failed"
 
-**Redis Health**:
-```bash
-docker exec -it openclaw-redis redis-cli ping
-# Expected: PONG
-```
-
-**Database Health**:
-```bash
-sqlite3 data/clawops.db "SELECT COUNT(*) as table_count FROM sqlite_master WHERE type='table';"
-# Expected: 28 tables (20 existing + 8 new)
-```
-
-**Redis Connection from Node**:
-```javascript
-const redisClient = require('./server/services/redisClient');
-await redisClient.connect();
-const health = await redisClient.healthCheck();
-console.log(health);
-// Expected: { healthy: true, connected: true, message: 'Redis operational' }
-```
-
----
-
-## 🎯 What You Can Do Now
-
-### 1. Create Workflows
-```javascript
-const { workflowEngine } = require('./server/services/agentOrchestrator');
-
-const wfId = await workflowEngine.startFundingWorkflow('lead-123', {
-  loanAmount: 300000,
-  hoaState: 'CA'
-});
-```
-
-### 2. Use Task Queues
-```javascript
-const { taskQueue } = require('./server/services/agentOrchestrator');
-
-// Push task
-await taskQueue.push('lending-tasks', {
-  workflow_id: wfId,
-  task_type: 'scrape_lender',
-  platform: 'creditunion.com'
-});
-
-// Pop task (blocking)
-const task = await taskQueue.pop('lending-tasks', 30);
-console.log(task);
-
-// Check queue length
-const length = await taskQueue.getLength('lending-tasks');
-console.log('Queue length:', length);
-```
-
-### 3. Pub/Sub Messaging
-```javascript
-const redisClient = require('./server/services/redisClient');
-
-// Subscribe to channel
-await redisClient.subscribe('hoa-funding:coordinator-tasks', (message) => {
-  console.log('Received:', message);
-});
-
-// Publish message
-await redisClient.publish('hoa-funding:coordinator-tasks', {
-  workflow_id: wfId,
-  task_type: 'orchestrate_workflow'
-});
-```
-
-### 4. Agent Coordination
-```javascript
-const { agentCoordinator } = require('./server/services/agentOrchestrator');
-
-// Get available agents
-const agents = await agentCoordinator.getAvailableAgents('lending');
-console.log('Available agents:', agents);
-
-// Assign task to agent
-const agentId = await agentCoordinator.assignTask('lending', {
-  task_type: 'scrape_lender'
-});
-
-// Release agent
-await agentCoordinator.releaseAgent(agentId, true);
-```
-
----
-
-## 📊 View Live Data
-
-### Redis Commander (Optional)
-1. Uncomment `redis-commander` service in `docker-compose.yml`
-2. Run: `docker-compose up -d redis-commander`
-3. Open: http://localhost:8081
-4. Explore:
-   - `workflow:*` keys - Workflow states
-   - `queue:*` keys - Task queues
-   - `agent:*` keys - Agent heartbeats
-
-### Database Browser
-```bash
-# View all workflows
-sqlite3 data/clawops.db "SELECT * FROM funding_workflows;"
-
-# View all tables
-sqlite3 data/clawops.db ".tables"
-
-# View schema for specific table
-sqlite3 data/clawops.db ".schema lending_products"
-```
-
----
-
-## 🛠️ Troubleshooting
-
-### Redis Won't Start
-```bash
-# Check if port 6379 is in use
-netstat -an | grep 6379
-
-# Stop existing Redis
-docker-compose down
-
-# Remove volumes and restart
-docker-compose down -v
-docker-compose up -d redis
-```
-
-### Database Schema Not Applied
-```bash
-# Manually apply schema
-node -e "const db = require('./server/db/connection'); db.initDatabase().then(() => console.log('Done'));"
-```
-
-### Connection Errors
-```javascript
-// Check if Redis is running
-const redisClient = require('./server/services/redisClient');
-await redisClient.connect();
-// If this fails, Redis is not running
-
-// Check database
-const db = require('./server/db/connection');
-console.log(db.getDb()); // Should not throw
-```
+**Check:**
+1. FACEBOOK_WEBHOOK_VERIFY_TOKEN matches in Facebook Developer Console
+2. Webhook URL is correct (https://your-domain.com/api/facebook/webhook)
+3. Render service is running (not sleeping)
 
 ---
 
 ## 📚 Next Steps
 
-### Ready for Phase 2?
-See [PHASE-1-COMPLETE.md](PHASE-1-COMPLETE.md) for details on Phase 2: Document Processing
+### For Lead Generation:
+- **[Lead Gen Guide](docs/archive/lead-gen/)** - Setup Facebook Lead Ads, lead scoring, CRM integration
+- **[Facebook Integration](docs/FACEBOOK-INTEGRATION.md)** - Complete technical documentation
 
-**Phase 2 Goals**:
-- Build document upload API
-- Implement PDF/OCR extraction
-- Create 3 document specialist agents
-- Achieve 85%+ extraction accuracy
+### For Marketing Automation:
+- **[Marketing Guide](docs/archive/marketing/)** - Email campaigns, social media, content strategy
+- **[Agent Configuration](openclaw-skills/)** - Customize agent personas and capabilities
+
+### For Development:
+- **[Project Structure](PROJECT-STRUCTURE.md)** - Directory structure and architecture
+- **[API Reference](docs/API-REFERENCE.md)** - Complete API documentation
+- **[Testing Guide](TESTING-GUIDE.md)** - Unit, integration, and E2E testing
+
+### For Security:
+- **[Security Guide](docs/AGENT-SAFETY.md)** - Agent safety and security best practices
+- **[Secret Rotation](docs/SECRET-ROTATION.md)** - How to rotate API keys and tokens
+- **[Backup & Restore](docs/BACKUP-RESTORE.md)** - Database backup procedures
 
 ---
 
-## 🔗 Useful Commands
+## 📞 Support & Resources
+
+### Documentation
+- **[Project Inventory](PROJECT-INVENTORY.md)** - Complete project overview
+- **[Audit Report](PROJECT-AUDIT-REPORT.md)** - Security and health status
+- **[Roadmap](ROADMAP.md)** - Future development plans
+
+### External Resources
+- **Production App:** https://hoa-clawops-console.onrender.com
+- **GitHub Repository:** https://github.com/sjpilche/hoa-clawops-console
+- **Facebook Developer Console:** https://developers.facebook.com
+- **Render Dashboard:** https://dashboard.render.com
+
+### Getting Help
+- Check **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
+- Review **[Audit Logs](http://localhost:5173/audit-logs)** for errors
+- Check server logs in terminal
+- Inspect database: `sqlite3 data/clawops.db`
+
+---
+
+## 🎉 You're All Set!
+
+**Congratulations!** You now have a production-ready agent automation platform.
+
+### Quick Commands Summary:
 
 ```bash
-# Development
-npm run dev              # Start server + client
-npm run dev:server       # Server only
-npm run dev:client       # Client only
+# Start backend
+npm run server
 
-# Docker
-docker-compose up -d redis           # Start Redis
-docker-compose logs -f redis         # View Redis logs
-docker-compose down                  # Stop all services
-docker-compose ps                    # List running services
+# Start frontend
+npm run dev
 
-# Database
-sqlite3 data/clawops.db              # Open database
-sqlite3 data/clawops.db ".tables"    # List tables
-sqlite3 data/clawops.db ".schema"    # View schema
+# Run tests
+npm test
 
-# Redis
-docker exec -it openclaw-redis redis-cli    # Open Redis CLI
-docker exec -it openclaw-redis redis-cli KEYS "*"  # List all keys
+# Check health
+curl http://localhost:3001/health
+
+# Access app
+open http://localhost:5173
 ```
 
 ---
 
-## 💡 Tips
-
-1. **Keep Redis running** - The workflow engine needs it for state management
-2. **Check logs** - Server logs show workflow events in real-time
-3. **Use Redis Commander** - Great for debugging workflow states
-4. **Test incrementally** - Create one workflow at a time to verify each component
-
----
-
-**Status**: ✅ Phase 1 Complete - Ready for Phase 2!
+**Ready to automate? Start with the Lead Gen dashboard or run your first agent!** 🚀

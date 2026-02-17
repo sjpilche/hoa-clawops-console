@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import AgentCard from '@/components/agents/AgentCard';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import ConfirmationDialog from '@/components/safety/ConfirmationDialog';
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
@@ -109,7 +110,7 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {/* Agent Grid */}
+      {/* Agent List */}
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
@@ -141,7 +142,19 @@ export default function AgentsPage() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-2">
+            {/* Column headers */}
+            <div className="flex items-center gap-4 px-4 py-1.5 text-xs text-text-muted uppercase tracking-wider">
+              <div className="w-2.5 shrink-0" />
+              <div className="w-8 shrink-0" />
+              <div className="flex-1">Agent</div>
+              <div className="hidden md:flex items-center gap-5 shrink-0">
+                <div className="w-8 text-center">Runs</div>
+                <div className="w-12 text-center">Success</div>
+                <div className="w-24 text-right">Last Run</div>
+              </div>
+              <div className="w-28 shrink-0" />
+            </div>
             {filteredAgents.map((agent) => (
               <AgentCard
                 key={agent.id}
@@ -195,9 +208,11 @@ function RunAgentModal({ agent, onClose, onComplete }) {
   const isRegistered = !!config.openclaw_id;
 
   const [message, setMessage] = useState(taskMessage);
-  const [status, setStatus] = useState('idle'); // idle, running, success, error, registering
+  const [status, setStatus] = useState('idle'); // idle, pending, awaiting_confirmation, running, success, error, registering
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [pendingRun, setPendingRun] = useState(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const handleRegister = async () => {
     setStatus('registering');
@@ -215,20 +230,65 @@ function RunAgentModal({ agent, onClose, onComplete }) {
     e.preventDefault();
     if (!message.trim()) return;
 
-    setStatus('running');
+    setStatus('pending');
     setError('');
     setResult(null);
 
     try {
+      // Phase 2.1: Create pending run (requires confirmation)
       const data = await api.post(`/agents/${agent.id}/run`, {
         message: message.trim(),
       });
-      setStatus('success');
-      setResult(data);
+
+      if (data.confirmation_required) {
+        // Store the pending run and show confirmation dialog
+        setPendingRun(data.run);
+        setShowConfirmDialog(true);
+        setStatus('awaiting_confirmation');
+      } else {
+        // Fallback: if confirmation not required (shouldn't happen)
+        setStatus('success');
+        setResult(data);
+      }
     } catch (err) {
       setStatus('error');
-      setError(err.message || 'Failed to run agent');
+      setError(err.message || 'Failed to create run');
     }
+  };
+
+  const handleConfirm = async () => {
+    if (!pendingRun) return;
+
+    setShowConfirmDialog(false);
+    setStatus('running');
+
+    try {
+      // Phase 2.1: Confirm and execute
+      const data = await api.post(`/runs/${pendingRun.id}/confirm`);
+      setStatus('success');
+      setResult(data);
+      setPendingRun(null);
+    } catch (err) {
+      setStatus('error');
+      setError(err.message || 'Failed to execute agent');
+      setPendingRun(null);
+    }
+  };
+
+  const handleCancelRun = async () => {
+    if (!pendingRun) return;
+
+    try {
+      // Optional: Cancel the pending run on the backend
+      await api.post(`/runs/${pendingRun.id}/cancel`);
+    } catch (err) {
+      console.error('Failed to cancel run:', err);
+    }
+
+    setShowConfirmDialog(false);
+    setStatus('idle');
+    setPendingRun(null);
+    setError('');
   };
 
   return (
@@ -326,6 +386,13 @@ function RunAgentModal({ agent, onClose, onComplete }) {
             />
 
             {/* Status Feedback */}
+            {status === 'awaiting_confirmation' && (
+              <div className="mt-3 flex items-center gap-2 text-sm text-accent-warning bg-accent-warning/10 rounded-lg px-3 py-2">
+                <AlertCircle size={14} />
+                Awaiting confirmation... Review the details and confirm to execute.
+              </div>
+            )}
+
             {status === 'running' && (
               <div className="mt-3 flex items-center gap-2 text-sm text-accent-info bg-accent-info/10 rounded-lg px-3 py-2">
                 <Loader size={14} className="animate-spin" />
@@ -372,13 +439,18 @@ function RunAgentModal({ agent, onClose, onComplete }) {
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={!message.trim() || status === 'running' || !isRegistered}
+                  disabled={!message.trim() || status === 'running' || status === 'awaiting_confirmation' || !isRegistered}
                   className="flex-1"
                 >
                   {status === 'running' ? (
                     <>
                       <Loader size={14} className="animate-spin" />
                       Running...
+                    </>
+                  ) : status === 'awaiting_confirmation' ? (
+                    <>
+                      <Clock size={14} />
+                      Awaiting Confirmation
                     </>
                   ) : (
                     <>
@@ -399,6 +471,54 @@ function RunAgentModal({ agent, onClose, onComplete }) {
             </div>
           </form>
         </div>
+
+        {/* Phase 2.1: Confirmation Dialog */}
+        {showConfirmDialog && pendingRun && (
+          <ConfirmationDialog
+            isOpen={showConfirmDialog}
+            title="Confirm Agent Execution"
+            message={
+              <>
+                <p className="mb-3">You are about to run <strong>{agent.name}</strong></p>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-text-muted">Permissions:</span>
+                    <span className={`font-medium ${
+                      agent.permissions === 'read-only' ? 'text-green-400' :
+                      agent.permissions === 'read-write' ? 'text-yellow-400' :
+                      'text-orange-400'
+                    }`}>
+                      {agent.permissions || 'read-only'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-muted">Estimated cost:</span>
+                    <span className="text-text-primary font-medium">~$0.05</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-muted">Max duration:</span>
+                    <span className="text-text-primary font-medium">{advanced.maxDurationSeconds || 300}s</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-muted">Run ID:</span>
+                    <span className="text-text-primary font-mono text-xs">{pendingRun.id.substring(0, 8)}...</span>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs text-yellow-400">
+                    This agent will have <strong>{agent.permissions || 'read-only'}</strong> access.
+                    Confirm to proceed with execution.
+                  </p>
+                </div>
+              </>
+            }
+            confirmText="Execute Agent"
+            cancelText="Cancel"
+            onConfirm={handleConfirm}
+            onCancel={handleCancelRun}
+            variant="warning"
+          />
+        )}
       </div>
     </div>
   );

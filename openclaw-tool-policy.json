@@ -1,0 +1,52 @@
+{
+  "tools": {
+    "deny": [
+      "browser",
+      "exec",
+      "process",
+      "apply_patch",
+      "write",
+      "edit"
+    ],
+    "allow": [
+      "read",
+      "web_search",
+      "web_fetch",
+      "sessions_list",
+      "sessions_history"
+    ],
+    "elevated": {
+      "enabled": false
+    }
+  },
+  "_comment": "OpenClaw Tool Policy - Security Hardening Phase 3.1",
+  "_blocked_tools_explanation": {
+    "browser": "Prevents autonomous web browsing (prompt injection risk from web content)",
+    "exec": "Prevents shell command execution (critical security risk)",
+    "process": "Prevents background process management",
+    "apply_patch": "Prevents file patching",
+    "write": "Prevents file system write operations",
+    "edit": "Prevents file editing"
+  },
+  "_allowed_tools_explanation": {
+    "read": "Read-only file access (safe)",
+    "web_search": "Built-in web search (not browser automation, safe)",
+    "web_fetch": "Built-in URL fetching (not browser automation, safe)",
+    "sessions_list": "Session management (safe)",
+    "sessions_history": "Session history viewing (safe)"
+  },
+  "_notes": [
+    "This policy locks down dangerous tools while preserving core agent functionality",
+    "Agents can still: chat, read files, search web, fetch URLs, manage sessions",
+    "Agents CANNOT: execute shell commands, browse web, modify files, manage processes",
+    "To enable a blocked tool, remove it from 'deny' array and optionally add to 'allow'",
+    "Never enable 'elevated' mode unless absolutely necessary - it bypasses all restrictions"
+  ],
+  "_installation": [
+    "Copy this file to ~/.openclaw/openclaw.json in WSL2:",
+    "cp openclaw-tool-policy.json ~/.openclaw/openclaw.json",
+    "Or manually create ~/.openclaw/openclaw.json with this content",
+    "Restart OpenClaw gateway: openclaw gateway restart",
+    "Verify: openclaw config get tools"
+  ]
+}

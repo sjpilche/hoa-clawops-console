@@ -65,11 +65,11 @@ async function request(endpoint, options = {}) {
     });
 
     // Handle 401 — token expired or invalid
+    // DISABLED FOR DEVELOPMENT - Don't redirect to login
     if (response.status === 401) {
       removeToken();
-      // Redirect to login page
-      window.location.href = '/login';
-      throw new Error('Session expired. Please log in again.');
+      // Don't redirect - just throw error
+      throw new Error('Authentication required (401)');
     }
 
     const data = await response.json();

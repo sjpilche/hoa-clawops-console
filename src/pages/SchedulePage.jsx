@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import ScheduleCard from '@/components/scheduler/ScheduleCard';
 import CronBuilder from '@/components/scheduler/CronBuilder';
+import ConfirmationDialog from '@/components/safety/ConfirmationDialog';
 
 export default function SchedulePage() {
   const [schedules, setSchedules] = useState([]);
@@ -17,6 +18,12 @@ export default function SchedulePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewScheduleForm, setShowNewScheduleForm] = useState(false);
+
+  // Run Now state
+  const [pendingRun, setPendingRun] = useState(null);
+  const [runningSchedule, setRunningSchedule] = useState(null);
+  const [runResult, setRunResult] = useState(null);
+  const [runError, setRunError] = useState('');
 
   useEffect(() => {
     fetchSchedules();
@@ -64,6 +71,44 @@ export default function SchedulePage() {
     } catch (error) {
       console.error('[SchedulePage] Failed to delete schedule:', error);
     }
+  };
+
+  const handleRunNow = async (schedule) => {
+    setRunError('');
+    setRunResult(null);
+    setRunningSchedule(schedule);
+    try {
+      const data = await api.post(`/schedules/${schedule.id}/run`);
+      if (data.confirmation_required) {
+        setPendingRun(data.run);
+      }
+    } catch (err) {
+      setRunError(err.message || 'Failed to start run');
+      setRunningSchedule(null);
+    }
+  };
+
+  const handleConfirmRun = async () => {
+    if (!pendingRun) return;
+    const runId = pendingRun.id;
+    setPendingRun(null);
+    try {
+      const data = await api.post(`/runs/${runId}/confirm`);
+      setRunResult({ schedule: runningSchedule, data });
+    } catch (err) {
+      setRunError(err.message || 'Agent run failed');
+    } finally {
+      setRunningSchedule(null);
+    }
+  };
+
+  const handleCancelRun = async () => {
+    if (pendingRun) {
+      try { await api.post(`/runs/${pendingRun.id}/cancel`); } catch (_) {}
+    }
+    setPendingRun(null);
+    setRunningSchedule(null);
+    setRunError('');
   };
 
   const filteredSchedules = schedules.filter(schedule =>
@@ -136,7 +181,15 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-2">
+            {/* Column headers */}
+            <div className="flex items-center gap-4 px-4 py-1.5 text-xs text-text-muted uppercase tracking-wider">
+              <div className="w-2.5 shrink-0" />
+              <div className="w-8 shrink-0" />
+              <div className="flex-1">Schedule / Agent</div>
+              <div className="hidden md:block w-20 text-right">Last Run</div>
+              <div className="w-28 shrink-0" />
+            </div>
             {filteredSchedules.map((schedule) => (
               <ScheduleCard
                 key={schedule.id}
@@ -144,11 +197,59 @@ export default function SchedulePage() {
                 onToggle={handleToggleSchedule}
                 onDelete={handleDeleteSchedule}
                 onEdit={() => console.log('Edit schedule:', schedule)}
+                onRunNow={handleRunNow}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Run Now: error banner */}
+      {runError && (
+        <div className="fixed bottom-4 right-4 bg-accent-danger/10 border border-accent-danger text-accent-danger px-4 py-3 rounded-lg text-sm max-w-md z-40">
+          <strong>Run failed:</strong> {runError}
+          <button onClick={() => setRunError('')} className="ml-3 underline">Dismiss</button>
+        </div>
+      )}
+
+      {/* Run Now: success banner */}
+      {runResult && (
+        <div className="fixed bottom-4 right-4 bg-accent-success/10 border border-accent-success text-accent-success px-4 py-3 rounded-lg text-sm max-w-md z-40">
+          <strong>{runResult.schedule?.name}</strong> started successfully.
+          <button onClick={() => setRunResult(null)} className="ml-3 underline">Dismiss</button>
+        </div>
+      )}
+
+      {/* Run Now: Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={!!pendingRun}
+        title="Confirm Agent Run"
+        message={
+          runningSchedule ? (
+            <>
+              <p className="mb-3">Run <strong>{runningSchedule.agentName}</strong> now using the schedule message for:</p>
+              <p className="font-semibold text-text-primary mb-3">"{runningSchedule.name}"</p>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-text-muted">Estimated cost:</span>
+                  <span className="text-text-primary font-medium">~$0.022</span>
+                </div>
+                {pendingRun && (
+                  <div className="flex justify-between">
+                    <span className="text-text-muted">Run ID:</span>
+                    <span className="text-text-primary font-mono text-xs">{pendingRun.id.substring(0, 8)}...</span>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : 'Confirm agent run'
+        }
+        confirmText="Run Agent"
+        cancelText="Cancel"
+        onConfirm={handleConfirmRun}
+        onCancel={handleCancelRun}
+        variant="warning"
+      />
 
       {/* New Schedule Modal */}
       {showNewScheduleForm && (

@@ -70,8 +70,8 @@ validateJWTSecret();
 
 // Failed authentication attempt tracking (simple in-memory, could use Redis in production)
 const failedAttempts = new Map();
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_FAILED_ATTEMPTS = process.env.NODE_ENV === 'production' ? 5 : 50;
+const LOCKOUT_DURATION_MS = process.env.NODE_ENV === 'production' ? 15 * 60 * 1000 : 30 * 1000; // 15 min prod, 30 sec dev
 
 /**
  * Track failed authentication attempt
@@ -127,17 +127,6 @@ function clearFailedAttempts(identifier) {
  * If authentication fails, sends a 401 response with a helpful error message.
  */
 function authenticate(req, res, next) {
-  // BYPASS FOR TESTING - Set BYPASS_AUTH=true in environment to skip authentication
-  if (process.env.BYPASS_AUTH === 'true') {
-    console.log('[Auth] ⚠️  BYPASSED - Using default test user (BYPASS_AUTH=true)');
-    req.user = {
-      id: 'test-user-id',
-      email: 'admin@test.com',
-      role: 'admin',
-    };
-    return next();
-  }
-
   // Get IP for rate limiting failed attempts
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
 
@@ -145,22 +134,45 @@ function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    // DON'T track failed attempt - missing header is often a dev mistake, not brute force
+    // Track failed attempt
+    const lockStatus = trackFailedAttempt(clientIP);
+
+    if (lockStatus.locked) {
+      return res.status(429).json({
+        error: 'Too many failed authentication attempts',
+        message: `Account locked. Please wait ${lockStatus.remainingTime} seconds before trying again.`,
+        code: 'AUTH_RATE_LIMITED',
+        retryAfter: lockStatus.remainingTime,
+      });
+    }
+
     return res.status(401).json({
       error: 'Authentication required',
       message: 'No Authorization header found. Include: Authorization: Bearer <your-token>',
       code: 'AUTH_MISSING_TOKEN',
+      attemptsRemaining: lockStatus.attemptsRemaining,
     });
   }
 
   // The header should look like: "Bearer eyJhbGci..."
   const parts = authHeader.split(' ');
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    // DON'T track failed attempt - malformed header is often a dev mistake, not brute force
+    const lockStatus = trackFailedAttempt(clientIP);
+
+    if (lockStatus.locked) {
+      return res.status(429).json({
+        error: 'Too many failed authentication attempts',
+        message: `Account locked. Please wait ${lockStatus.remainingTime} seconds.`,
+        code: 'AUTH_RATE_LIMITED',
+        retryAfter: lockStatus.remainingTime,
+      });
+    }
+
     return res.status(401).json({
       error: 'Malformed Authorization header',
       message: 'Expected format: "Bearer <token>". Check that you\'re sending the token correctly.',
       code: 'AUTH_MALFORMED_HEADER',
+      attemptsRemaining: lockStatus.attemptsRemaining,
     });
   }
 
@@ -292,34 +304,10 @@ function generateSecureSecret() {
   return crypto.randomBytes(64).toString('hex');
 }
 
-/**
- * Clear rate limit for a specific IP or all IPs (admin function)
- * @param {string} identifier - IP address to clear, or null to clear all
- */
-function clearRateLimit(identifier = null) {
-  if (identifier) {
-    const cleared = failedAttempts.delete(identifier);
-    return {
-      success: true,
-      message: cleared ? `Rate limit cleared for ${identifier}` : `No rate limit found for ${identifier}`,
-      cleared,
-    };
-  } else {
-    const count = failedAttempts.size;
-    failedAttempts.clear();
-    return {
-      success: true,
-      message: `Cleared rate limits for ${count} IP address(es)`,
-      cleared: count,
-    };
-  }
-}
-
 module.exports = {
   authenticate,
   generateToken,
   verifyRefreshToken,
   generateSecureSecret,
-  clearRateLimit,
   JWT_SECRET, // Export for testing purposes only
 };

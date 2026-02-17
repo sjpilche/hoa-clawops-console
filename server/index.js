@@ -18,10 +18,6 @@
 
 require('dotenv').config({ path: '.env.local' });
 
-// SECURITY: Validate environment variables before starting server
-const { validateEnvironment } = require('./lib/secretManager');
-validateEnvironment();
-
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -39,23 +35,12 @@ const chatRoutes = require('./routes/chat');
 const runRoutes = require('./routes/runs');
 const resultRoutes = require('./routes/results');
 const settingRoutes = require('./routes/settings');
-const healthRoutes = require('./routes/health');
-const schedulesRoutes = require('./routes/schedules');
-const contactsRoutes = require('./routes/contacts');
-const auditRoutes = require('./routes/audit');
-const costsRoutes = require('./routes/costs');
-const leadGenRoutes = require('./routes/lead-gen');
-
-// v2.0 Multi-Domain Platform routes
-const domainRoutes = require('./routes/domains');
-const extensionRoutes = require('./routes/extensions');
-const toolRoutes = require('./routes/tools');
-const hierarchyRoutes = require('./routes/hierarchies');
-const teamRoutes = require('./routes/teams');
-const emailRoutes = require('./routes/email');
-
-// Digest watcher service
-const { DigestWatcher } = require('./services/digestWatcher');
+const leadGenQueueRoutes = require('./routes/leadGenQueue');
+const scannerRoutes = require('./routes/scanner');
+const scheduleRoutes = require('./routes/schedules');
+const contentQueueRoutes = require('./routes/contentQueue');
+const hoaContactsRoutes = require('./routes/hoaContacts');
+const hoaLeadsRoutes = require('./routes/hoaLeads');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -64,9 +49,6 @@ const IS_PRODUCTION = NODE_ENV === 'production';
 // Server configuration
 const PORT = process.env.SERVER_PORT || 3001;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
-
-// Digest watcher instance (module-level for graceful shutdown)
-let digestWatcherInstance = null;
 
 async function startServer() {
   try {
@@ -93,7 +75,7 @@ async function startServer() {
             fontSrc: ["'self'", 'data:'],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
-            frameSrc: ["'self'", 'http://localhost:*', 'http://127.0.0.1:*'],
+            frameSrc: ["'none'"],
           },
         },
         // Additional security headers
@@ -117,17 +99,12 @@ async function startServer() {
     // SECURITY: Tighten CORS - only allow specific origins
     const allowedOrigins = IS_PRODUCTION
       ? [process.env.PRODUCTION_FRONTEND_URL].filter(Boolean)
-      : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174'];
-
-    // In development, allow any localhost port for flexibility
-    const isAllowedOrigin = (origin) => {
-      if (IS_PRODUCTION) {
-        return allowedOrigins.includes(origin);
-      } else {
-        // Development: Allow localhost with any port
-        return /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
-      }
-    };
+      : [
+          'http://localhost:5173', 'http://127.0.0.1:5173',
+          'http://localhost:5174', 'http://localhost:5175',
+          'http://localhost:5176', 'http://localhost:5177',
+          'http://localhost:5178', 'http://localhost:5179'
+        ];
 
     app.use(
       cors({
@@ -135,7 +112,7 @@ async function startServer() {
           // Allow requests with no origin (mobile apps, Postman, etc.)
           if (!origin) return callback(null, true);
 
-          if (isAllowedOrigin(origin)) {
+          if (allowedOrigins.includes(origin)) {
             callback(null, true);
           } else {
             console.warn(`[Security] Blocked CORS request from origin: ${origin}`);
@@ -171,41 +148,12 @@ async function startServer() {
     app.use('/api/runs', runRoutes);
     app.use('/api/results', resultRoutes);
     app.use('/api/settings', settingRoutes);
-    app.use('/api/schedules', schedulesRoutes);
-    app.use('/api/contacts', contactsRoutes);
-    app.use('/api/audit', auditRoutes);
-    app.use('/api/costs', costsRoutes);
-    app.use('/api/lead-gen', leadGenRoutes);
-
-    // Facebook Lead Generation Integration
-    const facebookRoutes = require('./routes/facebook');
-    app.use('/api/facebook', facebookRoutes);
-
-    // Blitz Mode - Run all agents
-    const blitzRoutes = require('./routes/blitz');
-    app.use('/api/blitz', blitzRoutes);
-
-    // --- v2.0 Multi-Domain Platform Routes ---
-    app.use('/api/domains', domainRoutes);
-    app.use('/api/extensions', extensionRoutes);
-    app.use('/api/tools', toolRoutes);
-    app.use('/api/hierarchies', hierarchyRoutes);
-    app.use('/api/teams', teamRoutes);
-    app.use('/api/email', emailRoutes);
-
-    // --- HOA Website Content Publishing ---
-    // Authenticated proxy to push content to HOA website via signed webhooks
-    const hoaWebhookRoutes = require('./routes/hoaWebhook');
-    app.use('/api/hoa-webhook', hoaWebhookRoutes);
-
-    // --- Webhooks (Public Endpoint) ---
-    // No auth required - uses HMAC signature verification instead
-    const webhookRoutes = require('./routes/webhooks');
-    app.use('/api/webhooks', webhookRoutes);
-
-    // --- Health Check ---
-    // No auth required - provides comprehensive system health status
-    app.use('/api/health', healthRoutes);
+    app.use('/api/lead-gen', leadGenQueueRoutes);
+    app.use('/api/scanner', scannerRoutes);
+    app.use('/api/schedules', scheduleRoutes);
+    app.use('/api/content-queue', contentQueueRoutes);
+    app.use('/api/hoa-contacts', hoaContactsRoutes);
+    app.use('/api/hoa-leads', hoaLeadsRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {
@@ -215,6 +163,18 @@ async function startServer() {
     } else {
       console.log('[Security] ✅ Test routes disabled (production mode)');
     }
+
+    // --- Health Check ---
+    // No auth required, minimal information disclosure
+    app.get('/api/health', (_req, res) => {
+      res.json({
+        status: 'ok',
+        service: 'ClawOps Console BFF',
+        timestamp: new Date().toISOString(),
+        uptime: Math.floor(process.uptime()),
+        environment: NODE_ENV,
+      });
+    });
 
     // --- Security Headers Test Endpoint (dev only) ---
     if (!IS_PRODUCTION) {
@@ -257,16 +217,27 @@ async function startServer() {
       console.log(`   - Helmet security headers: ✅`);
       console.log(`   - Test routes: ${IS_PRODUCTION ? '❌ (disabled)' : '⚠️  (enabled - dev only)'}\n`);
 
-      // Start digest watcher
-      digestWatcherInstance = new DigestWatcher();
-      digestWatcherInstance.start();
+      // --- Start Platform Scanner (if credentials are configured) ---
+      if (process.env.REDDIT_CLIENT_ID || process.env.FACEBOOK_SESSION) {
+        const { startScheduler } = require('./services/scannerScheduler');
+        console.log('🔍 Platform Scanner:');
+        if (process.env.REDDIT_CLIENT_ID) {
+          console.log('   - Reddit: ✅ (enabled)');
+        }
+        if (process.env.FACEBOOK_SESSION) {
+          console.log('   - Facebook: ✅ (enabled)');
+        }
+        console.log('   - Scans run every 2 hours\n');
+        startScheduler();
+      } else {
+        console.log('🔍 Platform Scanner: ⏸️  (waiting for credentials)');
+        console.log('   - See REDDIT-SETUP.md to enable Reddit scanning\n');
+      }
     });
 
     // --- Graceful Shutdown ---
-
     process.on('SIGTERM', () => {
       console.log('\n[Server] SIGTERM received, shutting down gracefully...');
-      if (digestWatcherInstance) digestWatcherInstance.stop();
       httpServer.close(() => {
         console.log('[Server] HTTP server closed');
         process.exit(0);
@@ -275,7 +246,6 @@ async function startServer() {
 
     process.on('SIGINT', () => {
       console.log('\n[Server] SIGINT received, shutting down gracefully...');
-      if (digestWatcherInstance) digestWatcherInstance.stop();
       httpServer.close(() => {
         console.log('[Server] HTTP server closed');
         process.exit(0);
