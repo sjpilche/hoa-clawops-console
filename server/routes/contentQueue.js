@@ -1,6 +1,6 @@
 /**
  * @file contentQueue.js
- * @description Content queue routes — manage and publish social media posts.
+ * @description Content queue routes with campaign-level isolation — manage and publish social media posts.
  *
  * ENDPOINTS:
  *   GET    /api/content-queue              — List all queued posts
@@ -16,8 +16,12 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db/connection');
 const { authenticate } = require('../middleware/auth');
+const { optionalCampaignContext } = require('../middleware/campaignContext');
+const { optionalCampaignTableContext } = require('../middleware/campaignTableContext');
 
 router.use(authenticate);
+router.use(optionalCampaignContext);
+router.use(optionalCampaignTableContext);
 
 // ─── Facebook Graph API helper ─────────────────────────────────────────────
 
@@ -55,8 +59,9 @@ async function postToFacebook(content) {
 router.get('/', (req, res) => {
   try {
     const { status, platform, limit = 50 } = req.query;
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
 
-    let query = 'SELECT * FROM content_queue WHERE 1=1';
+    let query = `SELECT * FROM ${tableName} WHERE 1=1`;
     const params = [];
 
     if (status) {
@@ -84,6 +89,7 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const { content, topic, platform = 'facebook', post_type = 'page', scheduled_for, source_agent } = req.body;
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
 
     if (!content || content.trim().length === 0) {
       return res.status(400).json({ success: false, error: 'content is required' });
@@ -91,12 +97,12 @@ router.post('/', (req, res) => {
 
     const id = uuidv4();
     db.run(
-      `INSERT INTO content_queue (id, platform, post_type, content, topic, source_agent, status, scheduled_for)
+      `INSERT INTO ${tableName} (id, platform, post_type, content, topic, source_agent, status, scheduled_for)
        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
       [id, platform, post_type, content.trim(), topic || null, source_agent || null, scheduled_for || null]
     );
 
-    const post = db.get('SELECT * FROM content_queue WHERE id = ?', [id]);
+    const post = db.get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
     console.log(`[ContentQueue] ✅ Added post to queue: ${id} (${platform}/${post_type})`);
     res.status(201).json({ success: true, post });
   } catch (error) {
@@ -109,11 +115,14 @@ router.post('/', (req, res) => {
 
 router.delete('/:id', (req, res) => {
   try {
-    const post = db.get('SELECT * FROM content_queue WHERE id = ?', [req.params.id]);
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
+    const post = db.get(`SELECT * FROM ${tableName} WHERE id = ?`, [req.params.id]);
+
     if (!post) {
       return res.status(404).json({ success: false, error: 'Post not found' });
     }
-    db.run('DELETE FROM content_queue WHERE id = ?', [req.params.id]);
+
+    db.run(`DELETE FROM ${tableName} WHERE id = ?`, [req.params.id]);
     res.json({ success: true, message: 'Post deleted from queue' });
   } catch (error) {
     console.error('[ContentQueue] Error deleting post:', error);
@@ -125,7 +134,9 @@ router.delete('/:id', (req, res) => {
 
 router.post('/:id/publish', async (req, res) => {
   try {
-    const post = db.get('SELECT * FROM content_queue WHERE id = ?', [req.params.id]);
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
+    const post = db.get(`SELECT * FROM ${tableName} WHERE id = ?`, [req.params.id]);
+
     if (!post) {
       return res.status(404).json({ success: false, error: 'Post not found' });
     }
@@ -139,7 +150,7 @@ router.post('/:id/publish', async (req, res) => {
       const fbResult = await postToFacebook(post.content);
 
       db.run(
-        `UPDATE content_queue
+        `UPDATE ${tableName}
          SET status = 'posted', posted_at = datetime('now'), facebook_post_id = ?, updated_at = datetime('now')
          WHERE id = ?`,
         [fbResult.id, post.id]
@@ -149,7 +160,7 @@ router.post('/:id/publish', async (req, res) => {
       res.json({ success: true, facebook_post_id: fbResult.id, message: 'Published to Facebook successfully' });
     } catch (fbError) {
       db.run(
-        `UPDATE content_queue
+        `UPDATE ${tableName}
          SET status = 'failed', error_message = ?, updated_at = datetime('now')
          WHERE id = ?`,
         [fbError.message, post.id]
@@ -169,9 +180,11 @@ router.post('/:id/publish', async (req, res) => {
 
 router.post('/publish-due', async (req, res) => {
   try {
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
+
     // Find all pending posts that are scheduled for now or earlier (or have no schedule = post immediately)
     const duePosts = db.all(
-      `SELECT * FROM content_queue
+      `SELECT * FROM ${tableName}
        WHERE status = 'pending'
          AND (scheduled_for IS NULL OR scheduled_for <= datetime('now'))
        ORDER BY scheduled_for ASC, created_at ASC`,
@@ -192,7 +205,7 @@ router.post('/publish-due', async (req, res) => {
       try {
         const fbResult = await postToFacebook(post.content);
         db.run(
-          `UPDATE content_queue
+          `UPDATE ${tableName}
            SET status = 'posted', posted_at = datetime('now'), facebook_post_id = ?, updated_at = datetime('now')
            WHERE id = ?`,
           [fbResult.id, post.id]
@@ -202,7 +215,7 @@ router.post('/publish-due', async (req, res) => {
         console.log(`[ContentQueue] ✅ Published post ${post.id}: ${fbResult.id}`);
       } catch (fbError) {
         db.run(
-          `UPDATE content_queue
+          `UPDATE ${tableName}
            SET status = 'failed', error_message = ?, updated_at = datetime('now')
            WHERE id = ?`,
           [fbError.message, post.id]
@@ -226,6 +239,7 @@ router.post('/publish-due', async (req, res) => {
 router.post('/generate', async (req, res) => {
   try {
     const { topic, post_type = 'page', scheduled_for } = req.body;
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
 
     if (!topic) {
       return res.status(400).json({ success: false, error: 'topic is required' });
@@ -259,12 +273,12 @@ router.post('/generate', async (req, res) => {
     // Save to queue
     const id = uuidv4();
     db.run(
-      `INSERT INTO content_queue (id, platform, post_type, content, topic, source_agent, status, scheduled_for)
+      `INSERT INTO ${tableName} (id, platform, post_type, content, topic, source_agent, status, scheduled_for)
        VALUES (?, 'facebook', ?, ?, ?, 'hoa-social-media', 'pending', ?)`,
       [id, post_type, content.trim(), topic, scheduled_for || null]
     );
 
-    const post = db.get('SELECT * FROM content_queue WHERE id = ?', [id]);
+    const post = db.get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
     console.log(`[ContentQueue] ✅ Generated and queued post: ${id}`);
     res.status(201).json({ success: true, post });
   } catch (error) {

@@ -52,6 +52,11 @@ import EngagementQueue from '@/pages/EngagementQueue';
 import TradingPage from '@/pages/TradingPage';
 import ContentQueuePage from '@/pages/ContentQueuePage';
 import HOALeadsPage from '@/pages/HOALeadsPage';
+import DiscoveryDashboard from '@/pages/DiscoveryDashboard';
+import GlobalOverview from '@/pages/GlobalOverview';
+import CampaignDashboard from '@/pages/CampaignDashboard';
+import CampaignSettings from '@/pages/CampaignSettings';
+import { CampaignLayout } from '@/layouts/CampaignLayout';
 
 /**
  * Protected Route wrapper.
@@ -78,7 +83,8 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/" element={<GlobalOverview />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/domains" element={<DomainsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/agents/new" element={<AgentBuilderPage />} />
@@ -97,10 +103,17 @@ export default function App() {
         <Route path="/trading" element={<TradingPage />} />
         <Route path="/content-queue" element={<ContentQueuePage />} />
         <Route path="/hoa-leads" element={<HOALeadsPage />} />
+        <Route path="/discovery" element={<DiscoveryDashboard />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+
+        {/* Campaign-specific routes */}
+        <Route path="/c/:campaignSlug" element={<CampaignLayout />}>
+          <Route index element={<CampaignDashboard />} />
+          <Route path="settings" element={<CampaignSettings />} />
+        </Route>
       </Route>
 
       {/* Catch-all — redirect unknown routes to dashboard */}

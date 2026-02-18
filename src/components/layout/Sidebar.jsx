@@ -34,6 +34,7 @@ import {
   TrendingUp,
   Send,
   Building2,
+  MapPin,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -60,6 +61,7 @@ const iconMap = {
   TrendingUp,
   Send,
   Building2,
+  MapPin,
 };
 
 export default function Sidebar() {

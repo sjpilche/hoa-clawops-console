@@ -27,6 +27,14 @@ function getToken() {
 }
 
 /**
+ * Get the active campaign ID from localStorage.
+ * This is used to add the X-Campaign-ID header to all API requests.
+ */
+function getActiveCampaignId() {
+  return localStorage.getItem('activeCampaignId');
+}
+
+/**
  * Store the JWT token after login.
  */
 function setToken(token) {
@@ -51,10 +59,12 @@ function removeToken() {
 async function request(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
   const token = getToken();
+  const campaignId = getActiveCampaignId();
 
   const headers = {
     'Content-Type': 'application/json',
     ...(token && { Authorization: `Bearer ${token}` }),
+    ...(campaignId && { 'X-Campaign-ID': campaignId }),
     ...options.headers,
   };
 

@@ -126,7 +126,14 @@
       "Bash(CRON_SCHEDULE=\"\" MAX_LEADS_PER_RUN=10 npm run dev:*)",
       "Bash(npx ts-node:*)",
       "Bash(CRON_SCHEDULE=\"\" npm run dev:*)",
-      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZjNTBhY2U2LTQxZDEtNDg1OC04ZDQ2LTY1MzU5NTRkOTQyYiIsImVtYWlsIjoiYWRtaW5AY2xhd29wcy5sb2NhbCIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3MTM2ODc2MywiZXhwIjoxNzcxNDU1MTYzfQ.SwLBke5zLPm2wLkH_0DDIgUqoK4x4hyHmejiFZJNp80\")"
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZjNTBhY2U2LTQxZDEtNDg1OC04ZDQ2LTY1MzU5NTRkOTQyYiIsImVtYWlsIjoiYWRtaW5AY2xhd29wcy5sb2NhbCIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3MTM2ODc2MywiZXhwIjoxNzcxNDU1MTYzfQ.SwLBke5zLPm2wLkH_0DDIgUqoK4x4hyHmejiFZJNp80\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhZG1pbiIsImVtYWlsIjoiYWRtaW5AY2xhd29wcy5sb2NhbCIsImlhdCI6MTc3MTM3Mjc0NCwiZXhwIjoxNzcxNDU5MTQ0fQ.Rt2RUONu_6qX3_2y4IZirg_Rswk8T6_-xdmUHsTXWnQ\")",
+      "Bash(grep:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\SPilcher\\OpenClaw2.0 for linux - Copy"
     ]
   }
 }

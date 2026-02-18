@@ -1,6 +1,6 @@
 /**
  * @file hoaContacts.js
- * @description API routes for HOA Contact Finder
+ * @description API routes for HOA Contact Finder with campaign-level isolation
  *
  * ENDPOINTS:
  * - GET /api/hoa-contacts - List contacts with filtering
@@ -15,13 +15,15 @@
 const express = require('express');
 const { run, all, get } = require('../db/connection');
 const { authenticate: authenticateToken } = require('../middleware/auth');
+const { optionalCampaignContext } = require('../middleware/campaignContext');
+const { optionalCampaignTableContext } = require('../middleware/campaignTableContext');
 
 const router = express.Router();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /api/hoa-contacts - List contacts with filtering
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/', authenticateToken, (req, res) => {
+router.get('/', authenticateToken, optionalCampaignContext, optionalCampaignTableContext, (req, res) => {
   try {
     const {
       status = 'new',          // Filter by status
@@ -32,9 +34,12 @@ router.get('/', authenticateToken, (req, res) => {
       offset = 0,             // Pagination offset
     } = req.query;
 
+    // Use campaign-specific table if campaign context exists, otherwise use shared table
+    const tableName = req.campaignTables?.hoa_contacts || 'hoa_contacts';
+
     let query = `
       SELECT *
-      FROM hoa_contacts
+      FROM ${tableName}
       WHERE 1=1
     `;
     const params = [];
@@ -67,7 +72,7 @@ router.get('/', authenticateToken, (req, res) => {
     const contacts = all(query, params);
 
     // Get total count for pagination
-    let countQuery = `SELECT COUNT(*) as total FROM hoa_contacts WHERE 1=1`;
+    let countQuery = `SELECT COUNT(*) as total FROM ${tableName} WHERE 1=1`;
     const countParams = [];
 
     if (status && status !== 'all') {
@@ -112,31 +117,33 @@ router.get('/', authenticateToken, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /api/hoa-contacts/stats - Get statistics
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/stats', authenticateToken, (req, res) => {
+router.get('/stats', authenticateToken, optionalCampaignContext, optionalCampaignTableContext, (req, res) => {
   try {
+    const tableName = req.campaignTables?.hoa_contacts || 'hoa_contacts';
+
     const stats = {
-      total: get(`SELECT COUNT(*) as count FROM hoa_contacts`).count,
+      total: get(`SELECT COUNT(*) as count FROM ${tableName}`).count,
       by_status: all(`
         SELECT status, COUNT(*) as count
-        FROM hoa_contacts
+        FROM ${tableName}
         GROUP BY status
       `),
       by_state: all(`
         SELECT state, COUNT(*) as count
-        FROM hoa_contacts
+        FROM ${tableName}
         GROUP BY state
         ORDER BY count DESC
       `),
       by_city: all(`
         SELECT city, state, COUNT(*) as count
-        FROM hoa_contacts
+        FROM ${tableName}
         GROUP BY city, state
         ORDER BY count DESC
         LIMIT 10
       `),
-      avg_confidence: get(`SELECT AVG(confidence_score) as avg FROM hoa_contacts`).avg,
-      with_email: get(`SELECT COUNT(*) as count FROM hoa_contacts WHERE email IS NOT NULL`).count,
-      with_phone: get(`SELECT COUNT(*) as count FROM hoa_contacts WHERE phone IS NOT NULL`).count,
+      avg_confidence: get(`SELECT AVG(confidence_score) as avg FROM ${tableName}`).avg,
+      with_email: get(`SELECT COUNT(*) as count FROM ${tableName} WHERE email IS NOT NULL`).count,
+      with_phone: get(`SELECT COUNT(*) as count FROM ${tableName} WHERE phone IS NOT NULL`).count,
       recent_searches: all(`
         SELECT *
         FROM hoa_search_history
@@ -159,10 +166,12 @@ router.get('/stats', authenticateToken, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /api/hoa-contacts/:id - Get single contact
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/:id', authenticateToken, (req, res) => {
+router.get('/:id', authenticateToken, optionalCampaignContext, optionalCampaignTableContext, (req, res) => {
   try {
     const { id } = req.params;
-    const contact = get(`SELECT * FROM hoa_contacts WHERE id = ?`, [id]);
+    const tableName = req.campaignTables?.hoa_contacts || 'hoa_contacts';
+
+    const contact = get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
 
     if (!contact) {
       return res.status(404).json({
@@ -185,13 +194,14 @@ router.get('/:id', authenticateToken, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // PATCH /api/hoa-contacts/:id - Update contact
 // ═══════════════════════════════════════════════════════════════════════════
-router.patch('/:id', authenticateToken, (req, res) => {
+router.patch('/:id', authenticateToken, optionalCampaignContext, optionalCampaignTableContext, (req, res) => {
   try {
     const { id } = req.params;
     const { status, notes, contact_person, email, phone, title } = req.body;
+    const tableName = req.campaignTables?.hoa_contacts || 'hoa_contacts';
 
     // Check contact exists
-    const contact = get(`SELECT * FROM hoa_contacts WHERE id = ?`, [id]);
+    const contact = get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
     if (!contact) {
       return res.status(404).json({
         success: false,
@@ -244,12 +254,12 @@ router.patch('/:id', authenticateToken, (req, res) => {
     params.push(id);
 
     run(
-      `UPDATE hoa_contacts SET ${updates.join(', ')} WHERE id = ?`,
+      `UPDATE ${tableName} SET ${updates.join(', ')} WHERE id = ?`,
       params
     );
 
     // Fetch updated contact
-    const updated = get(`SELECT * FROM hoa_contacts WHERE id = ?`, [id]);
+    const updated = get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
 
     res.json({
       success: true,
@@ -268,11 +278,12 @@ router.patch('/:id', authenticateToken, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // DELETE /api/hoa-contacts/:id - Delete contact
 // ═══════════════════════════════════════════════════════════════════════════
-router.delete('/:id', authenticateToken, (req, res) => {
+router.delete('/:id', authenticateToken, optionalCampaignContext, optionalCampaignTableContext, (req, res) => {
   try {
     const { id } = req.params;
+    const tableName = req.campaignTables?.hoa_contacts || 'hoa_contacts';
 
-    const contact = get(`SELECT * FROM hoa_contacts WHERE id = ?`, [id]);
+    const contact = get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
     if (!contact) {
       return res.status(404).json({
         success: false,
@@ -280,7 +291,7 @@ router.delete('/:id', authenticateToken, (req, res) => {
       });
     }
 
-    run(`DELETE FROM hoa_contacts WHERE id = ?`, [id]);
+    run(`DELETE FROM ${tableName} WHERE id = ?`, [id]);
 
     res.json({
       success: true,
@@ -299,11 +310,12 @@ router.delete('/:id', authenticateToken, (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // GET /api/hoa-contacts/export/csv - Export to CSV
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/export/csv', authenticateToken, (req, res) => {
+router.get('/export/csv', authenticateToken, optionalCampaignContext, optionalCampaignTableContext, (req, res) => {
   try {
     const { status, city, state, min_confidence } = req.query;
+    const tableName = req.campaignTables?.hoa_contacts || 'hoa_contacts';
 
-    let query = `SELECT * FROM hoa_contacts WHERE 1=1`;
+    let query = `SELECT * FROM ${tableName} WHERE 1=1`;
     const params = [];
 
     if (status && status !== 'all') {

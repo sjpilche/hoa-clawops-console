@@ -18,6 +18,7 @@ const { all, get, run } = require('../db/connection');
 const { authenticate } = require('../middleware/auth');
 const { AppError } = require('../middleware/errorHandler');
 const { validateParams, validateQuery } = require('../middleware/validator');
+const campaignMetrics = require('../services/campaignMetrics');
 const { runIdParamSchema, listRunsQuerySchema } = require('../schemas');
 
 const router = Router();
@@ -350,60 +351,72 @@ View contacts at: /hoa-leads`;
     // ── END special handler: hoa_contact_scraper ────────────────────────────
 
     // ── Special handler: hoa_discovery ──────────────────────────────────────
-    // Agent 1: HOA Discovery - Scrapes public directories to find HOA communities
-    // Zero-cost scraping with Playwright (no paid APIs)
+    // Agent 1: HOA Google Maps Discovery - Scrapes Google Maps by geo-target
+    // Zero-cost Playwright scraping (no paid APIs, no LLM)
     if (agentConfig.special_handler === 'hoa_discovery') {
       try {
-        const { discoverHOAs } = require('../services/hoaDiscovery');
+        const { processGeoTarget, processMultipleGeoTargets } = require('../services/googleMapsDiscovery');
         const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using hoa_discovery handler`);
+        console.log(`[Runs] Agent "${agent.name}" using hoa_discovery (Google Maps) handler`);
 
-        // Parse discovery parameters from message
-        let discoveryParams = {};
+        // Parse parameters from message
+        let params = {};
         try {
-          // Try to parse as JSON first
-          discoveryParams = JSON.parse(message);
+          params = JSON.parse(message);
         } catch {
-          // Fallback: extract parameters from plain text
-          const sourceMatch = message.match(/source[:\s]+([a-z-]+)/i);
-          const stateMatch = message.match(/state[:\s]+([A-Z]{2})/i);
+          // Parse from plain text: "geo_target: south-florida", "limit: 2"
+          const geoMatch = message.match(/geo[_-]?target[:\s]+([a-z-]+)/i);
           const limitMatch = message.match(/limit[:\s]+(\d+)/i);
-
-          if (sourceMatch) discoveryParams.source = sourceMatch[1];
-          if (stateMatch) discoveryParams.state = stateMatch[1];
-          if (limitMatch) discoveryParams.limit = parseInt(limitMatch[1]);
+          if (geoMatch) params.geoTargetId = geoMatch[1];
+          if (limitMatch) params.limit = parseInt(limitMatch[1]);
         }
 
-        // Apply defaults from agent config
         const defaults = agentConfig.default_params || {};
-        discoveryParams = {
-          source: discoveryParams.source || defaults.source || 'mock',
-          state: discoveryParams.state || defaults.state || 'FL',
-          limit: discoveryParams.limit || defaults.limit || 100
-        };
+        const geoTargetId = params.geoTargetId || params.geo_target_id || defaults.geo_target_id || null;
+        const limit = params.limit || defaults.limit || 1;
 
-        console.log('[Runs] Discovery params:', discoveryParams);
+        console.log('[Runs] Discovery params:', { geoTargetId, limit });
 
-        const result = await discoverHOAs(discoveryParams);
+        // Run discovery
+        let result;
+        if (geoTargetId) {
+          result = await processGeoTarget(geoTargetId);
+        } else {
+          result = await processMultipleGeoTargets({ limit });
+        }
+
         const durationMs = Date.now() - startTime;
 
-        const summary = `✅ HOA DISCOVERY COMPLETE
+        // Build summary text
+        const topTarget = result.geo_target || (result.results && result.results[0]?.geo_target) || 'Unknown';
+        const totalNew = result.new_communities || result.total_new_communities || 0;
+        const totalFound = result.results_found || result.total_results_found || 0;
+        const summary = `✅ HOA GOOGLE MAPS DISCOVERY COMPLETE
 ==========================================
-Source: ${result.source}
-State: ${result.state}
-Limit: ${discoveryParams.limit}
+Geo-Target:  ${topTarget}
+Queries Run: ${result.queries_run || 0}
 
 RESULTS:
-  Communities Found:     ${result.communities_found}
-  Communities Added:     ${result.communities_added}
-  Duplicates Skipped:    ${result.duplicates_skipped}
+  Google Maps Results: ${totalFound}
+  New Communities:     ${totalNew}
+  Updated:             ${result.updated_communities || 0}
+  Mgmt Companies:      ${result.management_companies || 0}
+  Skipped:             ${result.skipped || 0}
 
 Duration: ${(durationMs / 1000).toFixed(2)}s
+Cost:     $0.00
 Database: hoa_leads.sqlite
+
+Pipeline flags set for each new community:
+  ✓ needs_review_scan = 1   → Agent 5 (Google Reviews Monitor)
+  ✓ needs_website_scrape = 1
+  ✓ needs_contact_enrichment = 1
+  ✓ needs_minutes_scan = 1  → Agent 2 (Minutes Monitor)
 
 Next steps:
   • Run Agent 2 (Minutes Monitor) to scan for capital signals
-  • View communities: SELECT * FROM hoa_communities ORDER BY priority DESC;`;
+  • Run Agent 5 (Reviews Monitor) to score by Google reviews
+  • View communities: SELECT * FROM hoa_communities WHERE source='google_maps';`;
 
         const finalResultData = JSON.stringify({
           sessionId: runId,
@@ -777,6 +790,110 @@ Next steps:
       }
     }
     // ── END special handler: hoa_outreach_drafter ───────────────────────────
+
+    // ── Special handler: google_reviews_monitor ─────────────────────────────
+    // Agent 5: Google Reviews Monitor - Monitors Google Maps reviews for capital signals
+    if (agentConfig.special_handler === 'google_reviews_monitor') {
+      try {
+        const { monitorMultipleHOAs } = require('../services/googleReviewsMonitor');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using google_reviews_monitor handler`);
+
+        // Parse monitoring parameters from message
+        let monitorParams = {};
+        try {
+          monitorParams = JSON.parse(message);
+        } catch {
+          const limitMatch = message.match(/limit[:\s]+(\d+)/i);
+          const tierMatch = message.match(/tier[:\s]+(HOT|WARM|MONITOR|COLD)/i);
+
+          if (limitMatch) monitorParams.limit = parseInt(limitMatch[1]);
+          if (tierMatch) monitorParams.tier = tierMatch[1];
+        }
+
+        // Apply defaults
+        const defaults = agentConfig.default_params || {};
+        monitorParams = {
+          limit: monitorParams.limit || defaults.limit || 10,
+          tier: monitorParams.tier || defaults.tier || null
+        };
+
+        console.log('[Runs] Monitoring params:', monitorParams);
+
+        const result = await monitorMultipleHOAs(monitorParams);
+        const durationMs = Date.now() - startTime;
+
+        const summary = `✅ GOOGLE REVIEWS MONITORING COMPLETE
+==========================================
+Total monitored: ${result.monitored_count}
+Success: ${result.success_count}
+Failed: ${result.failed_count}
+Tier upgrades: ${result.tier_upgrades}
+
+Tier filter: ${monitorParams.tier || 'All tiers'}
+
+Duration: ${(durationMs / 1000).toFixed(2)}s
+Database: hoa_leads.sqlite
+Cost: $0 (FREE!)
+
+Next steps:
+  • ${result.tier_upgrades} HOAs upgraded to HOT/WARM
+  • Run Agent 3 (Contact Enricher) for HOT leads
+  • View results: SELECT * FROM hoa_communities WHERE google_signal_tier = 'HOT';`;
+
+        const finalResultData = JSON.stringify({
+          sessionId: runId,
+          message,
+          output: null,
+          outputText: summary,
+          monitorResult: result,
+        });
+
+        run(
+          `UPDATE runs SET
+            status = 'completed',
+            completed_at = datetime('now'),
+            duration_ms = ?,
+            tokens_used = 0,
+            cost_usd = 0,
+            result_data = ?,
+            updated_at = datetime('now')
+          WHERE id = ?`,
+          [durationMs, finalResultData, runId]
+        );
+
+        run(
+          `UPDATE agents SET
+            status = 'idle',
+            total_runs = total_runs + 1,
+            last_run_at = datetime('now'),
+            updated_at = datetime('now')
+          WHERE id = ?`,
+          [agent.id]
+        );
+
+        return res.json({
+          success: true,
+          run: {
+            id: runId,
+            status: 'completed',
+            outputText: summary,
+            cost_usd: 0,
+            duration_ms: durationMs,
+            monitorResult: result,
+          },
+        });
+      } catch (monitorError) {
+        console.error('[Runs] Google Reviews monitoring error:', monitorError.message);
+        run(
+          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+          [monitorError.message, runId]
+        );
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`Google Reviews monitoring failed: ${monitorError.message}`, 'MONITORING_ERROR', 500);
+      }
+    }
+    // ── END special handler: google_reviews_monitor ─────────────────────────
 
     if (!agentConfig.openclaw_id) {
       // Mark run as failed

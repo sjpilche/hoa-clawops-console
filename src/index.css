@@ -47,6 +47,10 @@
   --color-chat-agent:     #1A2332;
   --color-chat-system:    #1C1917;
 
+  /* --- Campaign Theming --- */
+  /* This variable is dynamically set by CampaignThemeProvider */
+  --campaign-accent:      var(--color-accent-primary);
+
   /* --- Fonts --- */
   --font-sans:  'IBM Plex Sans', system-ui, sans-serif;
   --font-mono:  'IBM Plex Mono', ui-monospace, monospace;

@@ -41,6 +41,8 @@ const scheduleRoutes = require('./routes/schedules');
 const contentQueueRoutes = require('./routes/contentQueue');
 const hoaContactsRoutes = require('./routes/hoaContacts');
 const hoaLeadsRoutes = require('./routes/hoaLeads');
+const discoveryRoutes = require('./routes/discovery');
+const campaignRoutes = require('./routes/campaigns');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -58,6 +60,24 @@ async function startServer() {
 
     // Initialize database (creates tables on first run)
     await initDatabase();
+
+    // Ensure campaign-specific tables exist for all active campaigns
+    const { all } = require('./db/connection');
+    const campaignTableManager = require('./services/campaignTableManager');
+
+    console.log('[Startup] Checking campaign tables...');
+    const campaigns = all('SELECT id, slug, name FROM campaigns WHERE status != ?', ['archived']);
+
+    for (const campaign of campaigns) {
+      if (!campaignTableManager.tablesExist(campaign.slug)) {
+        console.log(`[Startup] Creating missing tables for campaign: ${campaign.name} (${campaign.slug})`);
+        await campaignTableManager.createCampaignTables(campaign.slug);
+      } else {
+        console.log(`[Startup] ✓ Tables exist for campaign: ${campaign.name}`);
+      }
+    }
+
+    console.log(`[Startup] Campaign tables verified for ${campaigns.length} campaign(s)\n`);
 
     const app = express();
 
@@ -143,6 +163,7 @@ async function startServer() {
 
     // --- API Routes ---
     app.use('/api/auth', authRoutes);
+    app.use('/api/campaigns', campaignRoutes);
     app.use('/api/agents', agentRoutes);
     app.use('/api/chat', chatRoutes);
     app.use('/api/runs', runRoutes);
@@ -154,6 +175,7 @@ async function startServer() {
     app.use('/api/content-queue', contentQueueRoutes);
     app.use('/api/hoa-contacts', hoaContactsRoutes);
     app.use('/api/hoa-leads', hoaLeadsRoutes);
+    app.use('/api/discovery', discoveryRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {

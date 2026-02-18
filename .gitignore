@@ -3,7 +3,11 @@ dist/
 .env.local
 data/
 *.db
+*.sqlite
 *.log
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+hoa_leads.sqlite
+backups/*.db
+backups/*.sqlite

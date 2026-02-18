@@ -11,6 +11,7 @@ import KillSwitch from './KillSwitch';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useAgentStore } from '@/stores/useAgentStore';
 import { NAV_ITEMS } from '@/lib/constants';
+import { CampaignSwitcher } from '../campaigns/CampaignSwitcher';
 
 export default function Header() {
   const location = useLocation();
@@ -27,8 +28,10 @@ export default function Header() {
       bg-bg-secondary border-b border-border
       shrink-0
     ">
-      {/* Left: Page title + agent count */}
+      {/* Left: Campaign switcher + Page title + agent count */}
       <div className="flex items-center gap-4">
+        <CampaignSwitcher />
+        <div className="h-6 w-px bg-border" />
         <h1 className="text-lg font-semibold text-text-primary">{pageTitle}</h1>
         {activeAgentCount > 0 && (
           <span className="text-xs font-mono text-accent-success bg-accent-success/10 px-2 py-0.5 rounded-full">
