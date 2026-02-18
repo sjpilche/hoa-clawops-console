@@ -895,6 +895,266 @@ Next steps:
     }
     // ── END special handler: google_reviews_monitor ─────────────────────────
 
+    // ── Special handler: mgmt_cai_scraper ─────────────────────────────────
+    // Agent 40: CAI Directory Scraper — Playwright scrapes CAI chapter directories
+    // Cost: $0 (pure Node.js + Playwright)
+    if (agentConfig.special_handler === 'mgmt_cai_scraper') {
+      try {
+        const { runCaiScraper } = require('../services/mgmtCaiScraper');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using mgmt_cai_scraper handler`);
+
+        let params = {};
+        try { params = JSON.parse(message); } catch { /* use defaults */ }
+
+        const result = await runCaiScraper(params);
+        const durationMs = Date.now() - startTime;
+
+        const summary = `✅ CAI DIRECTORY SCRAPE COMPLETE
+==========================================
+Chapters Scraped: ${result.chapters_scraped}
+Companies Found:  ${result.companies_found}
+New Companies:    ${result.new_companies}
+Updated:          ${result.updated_companies}
+AAMC Companies:   ${result.aamc_companies}
+Pipeline Queue:   ${result.new_to_pipeline}
+
+Duration: ${(durationMs / 1000).toFixed(2)}s
+Cost:     $0.00`;
+
+        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, caiResult: result });
+        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
+        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+
+        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, caiResult: result } });
+      } catch (caiError) {
+        console.error('[Runs] CAI scraper error:', caiError.message);
+        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [caiError.message, runId]);
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`CAI scraper failed: ${caiError.message}`, 'CAI_SCRAPER_ERROR', 500);
+      }
+    }
+    // ── END special handler: mgmt_cai_scraper ─────────────────────────────
+
+    // ── Special handler: mgmt_portfolio_scraper ───────────────────────────
+    // Agent 36: Portfolio Scraper — Playwright crawls management company websites
+    if (agentConfig.special_handler === 'mgmt_portfolio_scraper') {
+      try {
+        const { runPortfolioScraper } = require('../services/mgmtPortfolioScraper');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using mgmt_portfolio_scraper handler`);
+
+        let params = {};
+        try { params = JSON.parse(message); } catch {
+          throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
+        }
+
+        const result = await runPortfolioScraper(params);
+        const durationMs = Date.now() - startTime;
+
+        const summary = `✅ PORTFOLIO SCRAPE COMPLETE
+==========================================
+Company:         ${result.company_name}
+Communities:     ${result.communities_found}
+New Communities: ${result.new_communities}
+With Portals:    ${result.with_portals}
+
+Duration: ${(durationMs / 1000).toFixed(2)}s
+Cost:     $0.00`;
+
+        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, scraperResult: result });
+        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
+        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+
+        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, scraperResult: result } });
+      } catch (scraperError) {
+        console.error('[Runs] Portfolio scraper error:', scraperError.message);
+        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [scraperError.message, runId]);
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`Portfolio scraper failed: ${scraperError.message}`, 'PORTFOLIO_SCRAPER_ERROR', 500);
+      }
+    }
+    // ── END special handler: mgmt_portfolio_scraper ───────────────────────
+
+    // ── Special handler: mgmt_contact_puller ──────────────────────────────
+    // Agent 37: Contact Puller — Playwright scrapes /about, /team, /vendors
+    if (agentConfig.special_handler === 'mgmt_contact_puller') {
+      try {
+        const { runContactPuller } = require('../services/mgmtContactPuller');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using mgmt_contact_puller handler`);
+
+        let params = {};
+        try { params = JSON.parse(message); } catch {
+          throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
+        }
+
+        const result = await runContactPuller(params);
+        const durationMs = Date.now() - startTime;
+
+        const summary = `✅ CONTACT EXTRACTION COMPLETE
+==========================================
+Company:          ${result.company_name}
+Contacts Found:   ${result.contacts_found}
+Decision Makers:  ${result.decision_makers}
+Vendor Portal:    ${result.has_vendor_portal ? 'YES' : 'NO'}
+Email Pattern:    ${result.email_pattern || 'Not detected'}
+Outreach Priority: ${result.outreach_priority}
+
+Duration: ${(durationMs / 1000).toFixed(2)}s
+Cost:     $0.00`;
+
+        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, contactResult: result });
+        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
+        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+
+        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, contactResult: result } });
+      } catch (contactError) {
+        console.error('[Runs] Contact puller error:', contactError.message);
+        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [contactError.message, runId]);
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`Contact puller failed: ${contactError.message}`, 'CONTACT_PULLER_ERROR', 500);
+      }
+    }
+    // ── END special handler: mgmt_contact_puller ──────────────────────────
+
+    // ── Special handler: mgmt_portfolio_mapper ────────────────────────────
+    // Agent 38: Portfolio Mapper — Playwright Google Search for hidden HOAs
+    if (agentConfig.special_handler === 'mgmt_portfolio_mapper') {
+      try {
+        const { runPortfolioMapper } = require('../services/mgmtPortfolioMapper');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using mgmt_portfolio_mapper handler`);
+
+        let params = {};
+        try { params = JSON.parse(message); } catch {
+          throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
+        }
+
+        const result = await runPortfolioMapper(params);
+        const durationMs = Date.now() - startTime;
+
+        const summary = `✅ PORTFOLIO MAPPING COMPLETE
+==========================================
+Company:          ${result.company_name}
+Searches Run:     ${result.searches_run}
+Total Mapped:     ${result.total_mapped}
+New Discoveries:  ${result.new_discoveries}
+Website Known:    ${result.website_communities}
+Discovery Rate:   ${result.discovery_rate}
+${result.captcha_hit ? '⚠️  CAPTCHA hit — search stopped early' : ''}
+Duration: ${(durationMs / 1000).toFixed(2)}s
+Cost:     $0.00`;
+
+        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, mapperResult: result });
+        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
+        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+
+        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, mapperResult: result } });
+      } catch (mapperError) {
+        console.error('[Runs] Portfolio mapper error:', mapperError.message);
+        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [mapperError.message, runId]);
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`Portfolio mapper failed: ${mapperError.message}`, 'PORTFOLIO_MAPPER_ERROR', 500);
+      }
+    }
+    // ── END special handler: mgmt_portfolio_mapper ────────────────────────
+
+    // ── Special handler: mgmt_review_scanner ──────────────────────────────
+    // Agent 39: Review Scanner — THE MONEY AGENT — Playwright + keyword scoring
+    if (agentConfig.special_handler === 'mgmt_review_scanner') {
+      try {
+        const { runReviewScanner } = require('../services/mgmtReviewScanner');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using mgmt_review_scanner handler`);
+
+        let params = {};
+        try { params = JSON.parse(message); } catch {
+          throw new Error('Message must be JSON: {"company_name":"..."}');
+        }
+
+        const result = await runReviewScanner(params);
+        const durationMs = Date.now() - startTime;
+
+        const summary = `✅ REVIEW SCAN COMPLETE — THE MONEY AGENT
+==========================================
+Company:         ${result.company_name}
+Google Rating:   ${result.google_rating} (${result.total_google_reviews} reviews)
+Reviews Scraped: ${result.reviews_scraped}
+Signal Reviews:  ${result.signal_reviews}
+Hot Leads:       ${result.hot_leads}
+Critical Issues: ${result.critical_issues}
+Switching Signals: ${result.switching_signals}
+Company Health:  ${result.company_health}
+
+Duration: ${(durationMs / 1000).toFixed(2)}s
+Cost:     $0.00`;
+
+        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, reviewResult: result });
+        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
+        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+
+        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, reviewResult: result } });
+      } catch (reviewError) {
+        console.error('[Runs] Review scanner error:', reviewError.message);
+        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [reviewError.message, runId]);
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`Review scanner failed: ${reviewError.message}`, 'REVIEW_SCANNER_ERROR', 500);
+      }
+    }
+    // ── END special handler: mgmt_review_scanner ──────────────────────────
+
+    // ── Special handler: cfo_lead_scout ────────────────────────────────────
+    // CFO Lead Scout — Playwright Google scraping for $10M-$75M construction co's
+    // Cost: $0 (pure Node.js + Playwright, no LLM)
+    if (agentConfig.special_handler === 'cfo_lead_scout') {
+      try {
+        const { runLeadScout } = require('../services/cfoLeadScout');
+        const startTime = Date.now();
+        console.log(`[Runs] Agent "${agent.name}" using cfo_lead_scout handler`);
+
+        let params = {};
+        try { params = typeof message === 'string' ? JSON.parse(message) : (message || {}); } catch { /* use defaults */ }
+
+        const result = await runLeadScout(params);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const durationMs = Date.now() - startTime;
+
+        const outputText = [
+          `CFO Lead Scout complete in ${elapsed}s`,
+          `Searches run: ${result.stats.searches}`,
+          `New leads inserted: ${result.stats.inserted}`,
+          `Duplicates skipped: ${result.stats.skipped}`,
+          '',
+          result.leads.slice(0, 10).map(l =>
+            `  • ${l.company_name} (${l.erp_type}) — Score: ${l.pilot_fit_score} — ${l.website || 'no website'}`
+          ).join('\n'),
+        ].filter(Boolean).join('\n');
+
+        const finalResultData = JSON.stringify({ outputText, stats: result.stats });
+
+        run(
+          `UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`,
+          [durationMs, finalResultData, runId]
+        );
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+
+        return res.status(200).json({
+          message: 'Lead Scout completed',
+          runId,
+          stats: result.stats,
+          leads_found: result.leads.length,
+          cost_usd: 0,
+        });
+      } catch (scoutError) {
+        console.error('[Runs] CFO Lead Scout error:', scoutError);
+        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [scoutError.message, runId]);
+        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
+        throw new AppError(`Lead Scout failed: ${scoutError.message}`, 'LEAD_SCOUT_ERROR', 500);
+      }
+    }
+    // ── END special handler: cfo_lead_scout ────────────────────────────────
+
     if (!agentConfig.openclaw_id) {
       // Mark run as failed
       run(
@@ -991,6 +1251,50 @@ Next steps:
         WHERE id = ?`,
         [agent.id]
       );
+
+      // 9.5 CFO agent post-processing: save output to cfo_* tables as draft
+      try {
+        const agentId = agent.id;
+        if ((agentId === 'cfo-content-engine' || agentId.includes('cfo-content')) && outputText) {
+          let parsed = null;
+          try { parsed = JSON.parse(outputText); } catch {
+            // Try to extract JSON from markdown code block
+            const match = outputText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (match) try { parsed = JSON.parse(match[1]); } catch { /* ignore */ }
+          }
+          if (parsed && parsed.content_markdown) {
+            run(
+              `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, status)
+               VALUES (?, ?, ?, ?, ?, 'draft')`,
+              [parsed.pillar || 'general', parsed.channel || 'linkedin', parsed.title || 'Untitled', parsed.content_markdown, parsed.cta || '']
+            );
+            console.log('[Runs] CFO content piece saved as draft');
+          }
+        }
+        if ((agentId === 'cfo-outreach-agent' || agentId.includes('cfo-outreach')) && outputText) {
+          let parsed = null;
+          try { parsed = JSON.parse(outputText); } catch {
+            const match = outputText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (match) try { parsed = JSON.parse(match[1]); } catch { /* ignore */ }
+          }
+          if (parsed && parsed.email_body) {
+            // Extract lead_id from original message if provided
+            let leadId = null;
+            try {
+              const msg = typeof message === 'string' ? JSON.parse(message) : message;
+              leadId = msg.lead_id || null;
+            } catch { /* ignore */ }
+            run(
+              `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, status)
+               VALUES (?, 'blitz', ?, ?, ?, 'draft')`,
+              [leadId, parsed.email_subject || 'Outreach', parsed.email_body, parsed.pilot_offer || null]
+            );
+            console.log('[Runs] CFO outreach sequence saved as draft');
+          }
+        }
+      } catch (saveErr) {
+        console.warn('[Runs] CFO post-processing error (non-fatal):', saveErr.message);
+      }
 
       // 10. Emit WebSocket event (if available)
       try {

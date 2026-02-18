@@ -71,8 +71,24 @@ async function scrapeHOAReviews(hoa, options = {}) {
       await page.goto(searchUrl, { timeout: CONFIG.timeout });
       await page.waitForTimeout(3000);
 
-      // Get current URL (this is the Maps listing)
+      // Check if we landed on search results (multiple listings) vs a single place
       mapsUrl = page.url();
+      if (mapsUrl.includes('/search/') && !mapsUrl.includes('/place/')) {
+        console.log(`[Scraper]    Search results page — clicking first result...`);
+        try {
+          // Click the first result in the feed
+          const firstResult = page.locator('[role="feed"] > div a[aria-label]').first();
+          if (await firstResult.isVisible({ timeout: 3000 })) {
+            await firstResult.click();
+            await page.waitForTimeout(3000);
+            mapsUrl = page.url();
+            console.log(`[Scraper]    Clicked into: ${mapsUrl.substring(0, 80)}...`);
+          }
+        } catch (e) {
+          console.log(`[Scraper]    Could not click first result: ${e.message}`);
+        }
+      }
+
       console.log(`[Scraper]    Found URL: ${mapsUrl.substring(0, 60)}...`);
     } else {
       // Navigate directly to stored URL

@@ -42,6 +42,8 @@ const contentQueueRoutes = require('./routes/contentQueue');
 const hoaContactsRoutes = require('./routes/hoaContacts');
 const hoaLeadsRoutes = require('./routes/hoaLeads');
 const discoveryRoutes = require('./routes/discovery');
+const mgmtResearchRoutes = require('./routes/mgmtResearch');
+const cfoMarketingRoutes = require('./routes/cfoMarketing');
 const campaignRoutes = require('./routes/campaigns');
 
 // SECURITY: Only load test routes in development
@@ -176,6 +178,8 @@ async function startServer() {
     app.use('/api/hoa-contacts', hoaContactsRoutes);
     app.use('/api/hoa-leads', hoaLeadsRoutes);
     app.use('/api/discovery', discoveryRoutes);
+    app.use('/api/mgmt-research', mgmtResearchRoutes);
+    app.use('/api/cfo-marketing', cfoMarketingRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {
@@ -255,6 +259,10 @@ async function startServer() {
         console.log('🔍 Platform Scanner: ⏸️  (waiting for credentials)');
         console.log('   - See REDDIT-SETUP.md to enable Reddit scanning\n');
       }
+
+      // --- Start Schedule Runner (fires DB-stored cron schedules) ---
+      const { startScheduleRunner } = require('./services/scheduleRunner');
+      startScheduleRunner();
     });
 
     // --- Graceful Shutdown ---

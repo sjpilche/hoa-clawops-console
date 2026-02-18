@@ -26,7 +26,6 @@ import Button from '@/components/ui/Button';
 
 export default function LeadGenPage() {
   const [queue, setQueue] = useState([]);
-  const [communities, setCommunities] = useState([]);
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending_review');
@@ -41,15 +40,13 @@ export default function LeadGenPage() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [queueData, communitiesData, statsData] = await Promise.all([
-        api.get(`/lead-gen/networker/queue?status=${statusFilter}&limit=50`),
-        api.get('/lead-gen/networker/communities'),
-        api.get('/lead-gen/networker/stats'),
+      const [queueData, statsData] = await Promise.all([
+        api.get(`/lead-gen/queue?status=${statusFilter}&limit=50`),
+        api.get('/lead-gen/queue/stats'),
       ]);
 
-      setQueue(queueData.opportunities || []);
-      setCommunities(communitiesData.communities || []);
-      setStats(statsData.stats || {});
+      setQueue(queueData.data || []);
+      setStats(statsData.data || {});
     } catch (error) {
       console.error('[LeadGenPage] Failed to fetch data:', error);
     } finally {
@@ -59,13 +56,14 @@ export default function LeadGenPage() {
 
   const handleAction = async (opportunityId, action, customResponse = null, customNotes = null) => {
     try {
-      await api.patch(`/lead-gen/networker/queue/${opportunityId}`, {
-        action,
-        draft_response: customResponse,
-        notes: customNotes,
-      });
+      if (action === 'approve') {
+        await api.post(`/lead-gen/queue/${opportunityId}/approve`);
+      } else if (action === 'reject') {
+        await api.post(`/lead-gen/queue/${opportunityId}/reject`);
+      } else if (action === 'edit' && customResponse) {
+        await api.put(`/lead-gen/queue/${opportunityId}`, { draft_response: customResponse });
+      }
 
-      // Refresh queue
       await fetchData();
       setSelectedOpportunity(null);
       setEditedResponse('');
@@ -77,7 +75,7 @@ export default function LeadGenPage() {
 
   const handlePost = async (opportunityId) => {
     try {
-      await api.post(`/lead-gen/networker/queue/${opportunityId}/post`);
+      await api.post(`/lead-gen/queue/${opportunityId}/post`);
       await fetchData();
     } catch (error) {
       console.error('[LeadGenPage] Failed to post response:', error);

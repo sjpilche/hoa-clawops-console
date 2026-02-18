@@ -1,0 +1,166 @@
+{
+  "description": "Priority management companies to process first. Sorted by estimated portfolio size.",
+  "last_updated": "2025-02-17",
+  "targets": [
+    {
+      "name": "FirstService Residential",
+      "website": "https://www.fsresidential.com",
+      "est_communities": 8500,
+      "states": ["FL", "CA", "CO"],
+      "notes": "Largest in North America. AAMC designated.",
+      "priority": 1
+    },
+    {
+      "name": "Associa",
+      "website": "https://www.associaonline.com",
+      "est_communities": 6500,
+      "states": ["FL", "CA", "CO"],
+      "notes": "Second largest. AAMC. Strong TX/FL presence.",
+      "priority": 2
+    },
+    {
+      "name": "RealManage",
+      "website": "https://www.realmanage.com",
+      "est_communities": 1800,
+      "states": ["FL", "CA", "CO"],
+      "notes": "AAMC. Growing via acquisition.",
+      "priority": 3
+    },
+    {
+      "name": "Sentry Management",
+      "website": "https://sentrymgt.com",
+      "est_communities": 1400,
+      "states": ["FL"],
+      "notes": "Major FL player. Good website with community list.",
+      "priority": 4
+    },
+    {
+      "name": "Leland Management",
+      "website": "https://www.lelandmanagement.com",
+      "est_communities": 800,
+      "states": ["FL"],
+      "notes": "Central FL dominant. Good community portal list.",
+      "priority": 5
+    },
+    {
+      "name": "Castle Group",
+      "website": "https://www.castlegroup.com",
+      "est_communities": 600,
+      "states": ["FL"],
+      "notes": "SE Florida focused. High-rise specialist.",
+      "priority": 6
+    },
+    {
+      "name": "CCMC",
+      "website": "https://ccmcnet.com",
+      "est_communities": 500,
+      "states": ["FL", "CA", "CO"],
+      "notes": "Master-planned community specialist.",
+      "priority": 7
+    },
+    {
+      "name": "Hammersmith Management",
+      "website": "https://hammersmithmgmt.com",
+      "est_communities": 400,
+      "states": ["CO"],
+      "notes": "Colorado dominant. AAMC.",
+      "priority": 8
+    },
+    {
+      "name": "Vesta Property Services",
+      "website": "https://vestapropertyservices.com",
+      "est_communities": 300,
+      "states": ["FL"],
+      "notes": "NE Florida focused. Growing.",
+      "priority": 9
+    },
+    {
+      "name": "Seacrest Services",
+      "website": "https://seacrestservices.com",
+      "est_communities": 300,
+      "states": ["FL"],
+      "notes": "SE Florida. High-end communities.",
+      "priority": 10
+    },
+    {
+      "name": "KW Property Management",
+      "website": "https://www.kwpmc.com",
+      "est_communities": 350,
+      "states": ["FL"],
+      "notes": "SE Florida high-rise specialist.",
+      "priority": 11
+    },
+    {
+      "name": "Greenacre Properties",
+      "website": "https://www.greenacreproperties.com",
+      "est_communities": 250,
+      "states": ["FL"],
+      "notes": "Central FL. Good mix of condo + HOA.",
+      "priority": 12
+    },
+    {
+      "name": "MSI (Managed Services Inc)",
+      "website": "https://www.msicommunities.com",
+      "est_communities": 200,
+      "states": ["CO"],
+      "notes": "Colorado HOA specialist.",
+      "priority": 13
+    },
+    {
+      "name": "Action Property Management",
+      "website": "https://www.actionlife.com",
+      "est_communities": 300,
+      "states": ["CA"],
+      "notes": "Southern California focused.",
+      "priority": 14
+    },
+    {
+      "name": "Keystone Pacific Property Management",
+      "website": "https://www.keystonepacific.com",
+      "est_communities": 250,
+      "states": ["CA"],
+      "notes": "Orange County CA dominant.",
+      "priority": 15
+    },
+    {
+      "name": "Avalon Management Group",
+      "website": "https://www.amghoa.com",
+      "est_communities": 150,
+      "states": ["CA"],
+      "notes": "Northern California.",
+      "priority": 16
+    },
+    {
+      "name": "Advanced HOA",
+      "website": "https://www.advancedhoa.com",
+      "est_communities": 200,
+      "states": ["CO"],
+      "notes": "Denver metro focus.",
+      "priority": 17
+    },
+    {
+      "name": "GRS Management",
+      "website": "https://www.grsmgmt.com",
+      "est_communities": 150,
+      "states": ["FL"],
+      "notes": "SW Florida.",
+      "priority": 18
+    },
+    {
+      "name": "Evergreen Lifestyles Management",
+      "website": "https://www.evgreenlifestyles.com",
+      "est_communities": 130,
+      "states": ["FL"],
+      "notes": "Central FL and growing.",
+      "priority": 19
+    },
+    {
+      "name": "Sterling Association Services",
+      "website": "https://www.sterlingassociationservices.com",
+      "est_communities": 120,
+      "states": ["FL"],
+      "notes": "South FL community management.",
+      "priority": 20
+    }
+  ]
+}

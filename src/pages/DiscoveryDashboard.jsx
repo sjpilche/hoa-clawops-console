@@ -86,6 +86,195 @@ function StatCard({ label, value, sub, accent = "#f97316" }) {
   );
 }
 
+// ── Communities Browser ──────────────────────────────────────────
+function CommunitiesBrowser() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [state, setState] = useState("");
+  const [geoTargetId, setGeoTargetId] = useState("");
+  const [maxRating, setMaxRating] = useState("");
+  const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("google_rating");
+
+  const fetchCommunities = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page, limit: 50, sortBy, sortDir: "desc" });
+      if (search) params.set("search", search);
+      if (state) params.set("state", state);
+      if (geoTargetId) params.set("geoTargetId", geoTargetId);
+      if (maxRating) params.set("maxRating", maxRating);
+      const res = await fetch(`/api/discovery/communities?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, sortBy, search, state, geoTargetId, maxRating]);
+
+  useEffect(() => { fetchCommunities(); }, [fetchCommunities]);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [search, state, geoTargetId, maxRating]);
+
+  const ratingColor = (r) => {
+    if (!r) return "#555";
+    if (r <= 2.5) return "#ef4444";
+    if (r <= 3.5) return "#f97316";
+    return "#22c55e";
+  };
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, city, address..."
+          style={{
+            flex: "2 1 220px", padding: "8px 12px", background: "#111",
+            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
+            fontSize: 13, outline: "none",
+          }}
+        />
+        <select
+          value={geoTargetId}
+          onChange={e => setGeoTargetId(e.target.value)}
+          style={{
+            flex: "1 1 180px", padding: "8px 12px", background: "#111",
+            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
+            fontSize: 13, cursor: "pointer",
+          }}
+        >
+          <option value="">All Markets</option>
+          {(data?.geoTargets || []).map(g => (
+            <option key={g.id} value={g.id}>{g.name} ({g.count})</option>
+          ))}
+        </select>
+        <select
+          value={state}
+          onChange={e => setState(e.target.value)}
+          style={{
+            flex: "0 1 110px", padding: "8px 12px", background: "#111",
+            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
+            fontSize: 13, cursor: "pointer",
+          }}
+        >
+          <option value="">All States</option>
+          {(data?.states || []).map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select
+          value={maxRating}
+          onChange={e => setMaxRating(e.target.value)}
+          style={{
+            flex: "0 1 170px", padding: "8px 12px", background: "#111",
+            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
+            fontSize: 13, cursor: "pointer",
+          }}
+        >
+          <option value="">All Ratings</option>
+          <option value="2.5">Low (≤ 2.5★) — Hot leads</option>
+          <option value="3.0">Under 3.0★</option>
+          <option value="3.5">Under 3.5★</option>
+        </select>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value)}
+          style={{
+            flex: "0 1 160px", padding: "8px 12px", background: "#111",
+            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
+            fontSize: 13, cursor: "pointer",
+          }}
+        >
+          <option value="google_rating">Sort: Rating ↓</option>
+          <option value="review_count">Sort: Reviews ↓</option>
+          <option value="name">Sort: Name A–Z</option>
+          <option value="discovered_at">Sort: Newest</option>
+        </select>
+      </div>
+
+      {/* Results count */}
+      <div style={{ fontSize: 12, color: "#555", marginBottom: 12 }}>
+        {loading ? "Loading..." : `${(data?.total || 0).toLocaleString()} communities${data?.pages > 1 ? ` — page ${page} of ${data.pages}` : ""}`}
+      </div>
+
+      {/* Table */}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid #222", color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Name</th>
+              <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>City, State</th>
+              <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Market</th>
+              <th style={{ textAlign: "right", padding: "8px 0", paddingRight: 16 }}>Rating</th>
+              <th style={{ textAlign: "right", padding: "8px 0", paddingRight: 16 }}>Reviews</th>
+              <th style={{ textAlign: "left", padding: "8px 0" }}>Links</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.communities || []).map((c, i) => (
+              <tr key={c.id || i} style={{ borderBottom: "1px solid #161616" }}>
+                <td style={{ padding: "9px 0", paddingRight: 16, fontWeight: 500, color: "#ddd", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.name}
+                </td>
+                <td style={{ padding: "9px 0", paddingRight: 16, color: "#888", whiteSpace: "nowrap" }}>
+                  {c.city ? `${c.city}, ${c.state || ""}` : (c.state || "—")}
+                </td>
+                <td style={{ padding: "9px 0", paddingRight: 16, color: "#555", fontSize: 11, whiteSpace: "nowrap", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {c.geo_target_id
+                    ? c.geo_target_id.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase())
+                    : "—"}
+                </td>
+                <td style={{ padding: "9px 0", paddingRight: 16, textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: ratingColor(c.google_rating) }}>
+                  {c.google_rating ? `★ ${c.google_rating}` : "—"}
+                </td>
+                <td style={{ padding: "9px 0", paddingRight: 16, textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#666" }}>
+                  {c.review_count?.toLocaleString() || "—"}
+                </td>
+                <td style={{ padding: "9px 0" }}>
+                  {c.google_maps_url && (
+                    <a href={c.google_maps_url} target="_blank" rel="noopener" style={{ color: "#60a5fa", fontSize: 12, marginRight: 8, textDecoration: "none" }}>Maps</a>
+                  )}
+                  {c.website_url && (
+                    <a href={c.website_url} target="_blank" rel="noopener" style={{ color: "#a78bfa", fontSize: 12, textDecoration: "none" }}>Site</a>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {data?.pages > 1 && (
+        <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "center" }}>
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1}
+            style={{ padding: "6px 14px", background: "#161616", color: page === 1 ? "#333" : "#888", border: "1px solid #2a2a2a", borderRadius: 6, cursor: page === 1 ? "default" : "pointer", fontSize: 13 }}
+          >
+            ← Prev
+          </button>
+          <span style={{ padding: "6px 14px", color: "#666", fontSize: 13 }}>
+            {page} / {data.pages}
+          </span>
+          <button
+            onClick={() => setPage(p => Math.min(data.pages, p + 1))}
+            disabled={page === data.pages}
+            style={{ padding: "6px 14px", background: "#161616", color: page === data.pages ? "#333" : "#888", border: "1px solid #2a2a2a", borderRadius: 6, cursor: page === data.pages ? "default" : "pointer", fontSize: 13 }}
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────
 export default function DiscoveryDashboard() {
   const [stats, setStats] = useState(null);
@@ -180,6 +369,7 @@ export default function DiscoveryDashboard() {
 
   const tabs = [
     { id: "overview", label: "Overview" },
+    { id: "communities", label: "Communities" },
     { id: "runs", label: "Run History" },
     { id: "signals", label: "Hot Signals" },
     { id: "geo", label: "Geo Coverage" },
@@ -555,6 +745,22 @@ export default function DiscoveryDashboard() {
         </div>
       )}
 
+      {activeTab === "communities" && (
+        <div
+          style={{
+            background: "#111",
+            border: "1px solid #1e1e1e",
+            borderRadius: 10,
+            padding: 20,
+          }}
+        >
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#888", marginTop: 0, marginBottom: 16 }}>
+            Discovered Communities
+          </h3>
+          <CommunitiesBrowser />
+        </div>
+      )}
+
       {activeTab === "runs" && (
         <div
           style={{
@@ -780,67 +986,60 @@ export default function DiscoveryDashboard() {
             padding: 20,
           }}
         >
-          <h3
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#888",
-              marginTop: 0,
-              marginBottom: 16,
-            }}
-          >
-            Geo-Target Coverage
-          </h3>
-          <div style={{ color: "#555", fontSize: 13 }}>
-            Geo-target status is loaded from the /api/discovery/next-target
-            endpoint. Run the seed script to populate targets, then the
-            discovery agent will process them in priority order.
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#888", margin: 0 }}>
+              Market Coverage — {data.geoTargets?.length || 19} Geo-Targets
+            </h3>
+            <div style={{ fontSize: 12, color: "#555" }}>
+              2 runs/day · full cycle ~10 days
+            </div>
           </div>
-          {data.byState.length > 0 && (
-            <div
-              style={{
-                marginTop: 20,
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-                gap: 8,
-              }}
-            >
-              {data.byState.map((s) => (
-                <div
-                  key={s.state}
-                  style={{
-                    background: "#0d0d0d",
-                    border: "1px solid #1a1a1a",
-                    borderRadius: 8,
-                    padding: "14px 16px",
-                    textAlign: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      color: "#f97316",
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}
-                  >
-                    {s.state}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginTop: 4,
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}
-                  >
-                    {s.count.toLocaleString()}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
-                    communities
-                  </div>
-                </div>
-              ))}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #222", color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Market</th>
+                <th style={{ textAlign: "right", padding: "8px 0", paddingRight: 16 }}>HOAs Found</th>
+                <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Last Sweep</th>
+                <th style={{ textAlign: "left", padding: "8px 0" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.geoTargets || []).map((gt) => {
+                const swept = !!gt.last_sweep_at;
+                const sweepDate = swept ? new Date(gt.last_sweep_at).toLocaleDateString() : null;
+                const daysSince = swept
+                  ? Math.floor((Date.now() - new Date(gt.last_sweep_at)) / 86400000)
+                  : null;
+                return (
+                  <tr key={gt.id} style={{ borderBottom: "1px solid #161616" }}>
+                    <td style={{ padding: "9px 0", paddingRight: 16, fontWeight: 500, color: "#ddd" }}>
+                      {gt.name}
+                    </td>
+                    <td style={{ padding: "9px 0", paddingRight: 16, textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: gt.community_count > 0 ? "#f97316" : "#333" }}>
+                      {gt.community_count > 0 ? gt.community_count.toLocaleString() : "—"}
+                    </td>
+                    <td style={{ padding: "9px 0", paddingRight: 16, color: "#666", fontSize: 12 }}>
+                      {sweepDate ? `${sweepDate} (${daysSince}d ago)` : "—"}
+                    </td>
+                    <td style={{ padding: "9px 0" }}>
+                      {swept ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#0d2818", color: "#22c55e", border: "1px solid #166534" }}>
+                          ● done
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#1c1917", color: "#a3a3a3", border: "1px solid #404040" }}>
+                          ○ pending
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {(!data.geoTargets || data.geoTargets.length === 0) && (
+            <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>
+              No geo-targets found. Run: node scripts/seed-geo-targets.js
             </div>
           )}
         </div>

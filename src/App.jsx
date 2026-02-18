@@ -53,6 +53,8 @@ import TradingPage from '@/pages/TradingPage';
 import ContentQueuePage from '@/pages/ContentQueuePage';
 import HOALeadsPage from '@/pages/HOALeadsPage';
 import DiscoveryDashboard from '@/pages/DiscoveryDashboard';
+import MgmtResearchPage from '@/pages/MgmtResearchPage';
+import CfoMarketingPage from '@/pages/CfoMarketingPage';
 import GlobalOverview from '@/pages/GlobalOverview';
 import CampaignDashboard from '@/pages/CampaignDashboard';
 import CampaignSettings from '@/pages/CampaignSettings';
@@ -104,6 +106,8 @@ export default function App() {
         <Route path="/content-queue" element={<ContentQueuePage />} />
         <Route path="/hoa-leads" element={<HOALeadsPage />} />
         <Route path="/discovery" element={<DiscoveryDashboard />} />
+        <Route path="/mgmt-research" element={<MgmtResearchPage />} />
+        <Route path="/cfo-marketing" element={<CfoMarketingPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />

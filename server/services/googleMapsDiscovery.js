@@ -648,6 +648,12 @@ function upsertCommunity(db, result, geoTargetId, searchQuery, fallbackCity, fal
       result.placeId || null,
       existingId,
     ]);
+    // Also tag this community under the current geo-target (multi-geo-target support)
+    if (geoTargetId) {
+      try {
+        dbRun(db, `INSERT OR IGNORE INTO community_geo_targets (community_id, geo_target_id) VALUES (?, ?)`, [existingId, geoTargetId]);
+      } catch (e) { /* junction table may not exist yet on old DBs */ }
+    }
     return { action: 'updated', id: existingId };
   }
 
@@ -695,6 +701,16 @@ function upsertCommunity(db, result, geoTargetId, searchQuery, fallbackCity, fal
     nowIso,
     nowIso,
   ]);
+
+  // Also write to junction table for multi-geo-target tracking
+  if (geoTargetId) {
+    try {
+      const newRow = dbGet(db, 'SELECT id FROM hoa_communities WHERE LOWER(name) = LOWER(?) AND LOWER(city) = LOWER(?)', [result.name, city]);
+      if (newRow) {
+        dbRun(db, `INSERT OR IGNORE INTO community_geo_targets (community_id, geo_target_id) VALUES (?, ?)`, [newRow.id, geoTargetId]);
+      }
+    } catch (e) { /* non-fatal */ }
+  }
 
   return { action: 'inserted' };
 }
@@ -1015,9 +1031,12 @@ async function getPipelineStats() {
     ORDER BY google_rating ASC LIMIT 20
   `);
   const geoTargets = dbAll(db, `
-    SELECT id, name, priority, is_active, last_sweep_at,
-      (SELECT COUNT(*) FROM hoa_communities WHERE geo_target_id = geo_targets.id) as community_count
-    FROM geo_targets ORDER BY priority ASC
+    SELECT g.id, g.name, g.priority, g.is_active, g.last_sweep_at,
+      COUNT(cgt.community_id) as community_count
+    FROM geo_targets g
+    LEFT JOIN community_geo_targets cgt ON cgt.geo_target_id = g.id
+    GROUP BY g.id
+    ORDER BY g.priority ASC
   `);
 
   db.close();

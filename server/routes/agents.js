@@ -457,7 +457,7 @@ router.post(
       // Extract the OpenClaw agent ID from the stored config
       const agentConfig = agent.config ? JSON.parse(agent.config) : {};
 
-      if (!agentConfig.openclaw_id) {
+      if (!agentConfig.openclaw_id && !agentConfig.special_handler) {
         throw new AppError(
           `Agent "${agent.name}" is not registered with OpenClaw. ` +
           `Use the Register button on the Agents page to register it, then try again.`,

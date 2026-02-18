@@ -181,9 +181,13 @@ const listAgentsQuerySchema = z.object({
 
 /**
  * Route parameter validation (agent ID)
+ * Accepts both UUID v4 and slug-style IDs (e.g., "mgmt-cai-scraper", "hoa-discovery")
  */
 const agentIdParamSchema = z.object({
-  id: uuidSchema,
+  id: z.string()
+    .min(1, 'Agent ID is required')
+    .max(128, 'Agent ID must not exceed 128 characters')
+    .regex(/^[a-zA-Z0-9_-]+$/, 'Agent ID must contain only alphanumeric characters, dashes, and underscores'),
 });
 
 module.exports = {

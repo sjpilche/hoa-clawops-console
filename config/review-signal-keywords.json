@@ -1,0 +1,97 @@
+{
+  "description": "Signal keywords for Agent 39 Review Scanner. Organized by tier with point values.",
+  "last_updated": "2025-02-17",
+  "tier1": {
+    "label": "Deferred Maintenance — Direct capital need signals",
+    "points_per_hit": 5,
+    "keywords": [
+      "roof", "roofing", "re-roof", "reroof",
+      "leak", "leaking", "leaks", "water leak",
+      "water damage", "water intrusion", "moisture",
+      "mold", "mildew", "black mold",
+      "flooding", "flood", "flooded",
+      "elevator", "elevators", "elevator broken",
+      "pool", "pool deck", "pool resurfacing", "pool pump",
+      "concrete", "concrete repair", "cracking", "cracks",
+      "sidewalk", "sidewalks", "trip hazard",
+      "paving", "repaving", "parking lot", "asphalt",
+      "plumbing", "pipe", "pipes", "burst pipe", "pipe burst",
+      "sewer", "sewer line", "drain", "drainage",
+      "fire alarm", "fire safety", "sprinkler system", "fire suppression",
+      "stucco", "siding", "wood rot", "rotting", "termite", "termites",
+      "paint", "painting", "peeling", "fading", "exterior paint",
+      "balcony", "balconies", "railing", "railings",
+      "structural", "foundation", "structural damage", "structural integrity",
+      "HVAC", "AC", "air conditioning", "boiler", "heating",
+      "window", "windows", "window replacement", "window seal",
+      "electrical", "wiring", "electrical panel"
+    ]
+  },
+  "tier2": {
+    "label": "Financial Distress — Assessment/budget signals",
+    "points_per_hit": 4,
+    "keywords": [
+      "special assessment", "assessment",
+      "reserve fund", "reserves", "underfunded", "unfunded",
+      "reserve study", "reserve deficit",
+      "fee increase", "dues increase", "maintenance fee increase",
+      "budget", "budget shortfall", "deficit",
+      "bankrupt", "bankruptcy", "broke", "insolvent",
+      "loan", "financing", "can't afford", "cannot afford",
+      "insurance", "insurance increase", "insurance premium",
+      "coverage gap", "uninsured",
+      "delinquent", "delinquencies", "unpaid dues",
+      "collection", "collections", "liens"
+    ]
+  },
+  "tier3": {
+    "label": "Management Failure — Opportunity signals",
+    "points_per_hit": 3,
+    "keywords": [
+      "won't fix", "refused to fix", "refuse to repair",
+      "ignoring", "ignored", "ignore our requests",
+      "no response", "unresponsive", "never responds",
+      "months", "years", "waited months", "waited years",
+      "incompetent", "negligent", "negligence",
+      "worst management", "worst company", "terrible management",
+      "switching companies", "switch management", "fire them",
+      "fired", "terminated", "replacing management",
+      "new management", "looking for new", "RFP",
+      "board meeting", "vote", "recall", "petition",
+      "lawsuit", "litigation", "sued", "suing",
+      "attorney", "lawyer", "legal action", "legal",
+      "code violation", "city notice", "county notice",
+      "fine", "fined", "citation",
+      "health hazard", "safety hazard", "unsafe",
+      "building department", "inspector", "inspection failed"
+    ]
+  },
+  "tier4": {
+    "label": "General Negative — Context signals",
+    "points_per_hit": 1,
+    "keywords": [
+      "terrible", "horrible", "worst", "awful", "disgusting",
+      "scam", "dishonest", "corrupt", "fraud",
+      "overcharged", "hidden fees", "surprise fees",
+      "never again", "avoid", "run away", "stay away",
+      "regret", "mistake", "nightmare",
+      "unprofessional", "rude", "disrespectful"
+    ]
+  },
+  "switching_signals": {
+    "label": "Management Switching — High-opportunity signals",
+    "keywords": [
+      "switching management",
+      "changing management companies",
+      "looking for new management",
+      "fired our management",
+      "terminating contract",
+      "RFP for management",
+      "request for proposal",
+      "interviewing management companies",
+      "transition to new management",
+      "self-managed",
+      "going self-managed"
+    ]
+  }
+}

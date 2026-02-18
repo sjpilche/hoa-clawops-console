@@ -16,7 +16,11 @@ const {
  * List runs with optional filtering and pagination
  */
 const listRunsQuerySchema = z.object({
-  agent_id: uuidSchema.optional(),
+  agent_id: z.string()
+    .min(1)
+    .max(128)
+    .regex(/^[a-zA-Z0-9_-]+$/, 'Agent ID must contain only alphanumeric characters, dashes, and underscores')
+    .optional(),
 
   status: runStatusSchema.optional(),
 

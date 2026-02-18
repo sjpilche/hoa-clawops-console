@@ -16,6 +16,8 @@ export const NAV_ITEMS = [
   { path: '/results', label: 'Results', icon: 'Database' },
   { path: '/lead-gen', label: 'Lead Gen', icon: 'Users' },
   { path: '/discovery', label: 'Discovery', icon: 'MapPin' },
+  { path: '/mgmt-research', label: 'Mgmt Research', icon: 'Building' },
+  { path: '/cfo-marketing', label: 'CFO Marketing', icon: 'Briefcase' },
   { path: '/hoa-leads', label: 'HOA Contacts', icon: 'Building2' },
   { path: '/engagement-queue', label: 'Engagement Queue', icon: 'MessageSquare' },
   { path: '/facebook-leads', label: 'FB Leads', icon: 'Facebook' },
