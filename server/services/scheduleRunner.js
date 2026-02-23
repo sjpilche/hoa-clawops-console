@@ -2,7 +2,8 @@
  * Schedule Runner — fires DB-stored agent schedules based on cron expressions.
  *
  * Checks every minute whether any enabled schedule is due to run.
- * Calls the same internal execution path as POST /api/runs/:id/confirm.
+ * Uses the shared SPECIAL_HANDLERS registry from runs.js for all special-handler agents,
+ * falls back to OpenClaw bridge for LLM agents.
  */
 
 const { get, all, run } = require('../db/connection');
@@ -59,113 +60,101 @@ function alreadyRanThisMinute(lastRunAt) {
   );
 }
 
-// ── Execute one schedule via the internal run pipeline ────────────────────────
+// ── Lazy-load the SPECIAL_HANDLERS from runs.js (avoids circular dep at init) ──
+let _handlers = null;
+function getHandlers() {
+  if (!_handlers) {
+    _handlers = require('../routes/runs').SPECIAL_HANDLERS || {};
+  }
+  return _handlers;
+}
+
+// ── Execute one schedule ──────────────────────────────────────────────────────
 async function executeSchedule(schedule) {
   console.log(`[ScheduleRunner] 🚀 Firing: "${schedule.name}" (agent: ${schedule.agent_id})`);
 
   // Mark as last_run_at immediately to prevent double-fire within the same minute
   run("UPDATE schedules SET last_run_at = datetime('now') WHERE id = ?", [schedule.id]);
 
+  const agent = get('SELECT * FROM agents WHERE id = ?', [schedule.agent_id]);
+  if (!agent) {
+    console.error(`[ScheduleRunner] Agent not found: ${schedule.agent_id}`);
+    return;
+  }
+
+  const agentConfig = JSON.parse(agent.config || '{}');
+  const runId = crypto.randomUUID();
+  const message = schedule.message || '';
+  const startTime = Date.now();
+
+  // Insert a run record
+  run(`
+    INSERT INTO runs (id, agent_id, status, trigger, result_data, created_at, updated_at)
+    VALUES (?, ?, 'running', 'scheduled', ?, datetime('now'), datetime('now'))
+  `, [runId, agent.id, JSON.stringify({ message, sessionId: runId, json: true })]);
+
   try {
-    const agent = get('SELECT * FROM agents WHERE id = ?', [schedule.agent_id]);
-    if (!agent) {
-      console.error(`[ScheduleRunner] Agent not found: ${schedule.agent_id}`);
-      return;
-    }
+    const handlers = getHandlers();
+    const handler = agentConfig.special_handler ? handlers[agentConfig.special_handler] : null;
 
-    const agentConfig = JSON.parse(agent.config || '{}');
-    const runId = crypto.randomUUID();
-    const message = schedule.message || '';
+    if (handler) {
+      // ── Special handler (deterministic, usually $0) ──
+      const result = await handler({ message, runId, agent, agentConfig });
+      const durationMs = result.durationMs || (Date.now() - startTime);
+      const costUsd = result.costUsd || 0;
+      const tokensUsed = result.tokensUsed || 0;
+      const outputText = result.outputText || 'Done';
+      const resultData = JSON.stringify({ sessionId: runId, message, outputText, ...(result.extra || {}) });
 
-    // Insert a run record using the actual schema (result_data stores message/session context)
-    run(`
-      INSERT INTO runs (id, agent_id, status, trigger, result_data, created_at, updated_at)
-      VALUES (?, ?, 'running', 'scheduled', ?, datetime('now'), datetime('now'))
-    `, [runId, agent.id, JSON.stringify({ message, sessionId: runId, json: true })]);
-
-    // Lazy-require the execution logic to avoid circular deps
-    if (agentConfig.special_handler === 'hoa_discovery') {
-      const { processGeoTarget, processMultipleGeoTargets } = require('./googleMapsDiscovery');
-
-      let params = {};
-      try { params = JSON.parse(message); } catch { /* use defaults */ }
-
-      const limit = params.limit || 1;
-      const geoTargetId = params.geo_target_id || null;
-
-      const startTime = Date.now();
-      let result;
-      if (geoTargetId) {
-        result = await processGeoTarget(geoTargetId);
-      } else {
-        result = await processMultipleGeoTargets(limit);
-      }
-
-      const duration = Math.round((Date.now() - startTime) / 1000);
-      const output = JSON.stringify({
-        type: 'result',
-        result: `Discovery complete: ${result.new_communities || result.total_new || 0} new communities found across ${result.targets_processed || 1} geo-target(s). Duration: ${duration}s. Cost: $0`,
-        total_cost_usd: 0,
-      });
-
-      run(`
-        UPDATE runs SET status = 'completed', result_data = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
-      `, [output, runId]);
-
-      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — ${result.new_communities || result.total_new || 0} new HOAs, $0 cost`);
-
-    } else if (agentConfig.special_handler === 'mgmt_review_scanner') {
-      // Agent 39: Review Scanner batch — daily 4am scan of management companies
-      const { runReviewScannerBatch } = require('./mgmtReviewScanner');
-      let params = {};
-      try { params = JSON.parse(message); } catch { /* use defaults */ }
-      const startTime = Date.now();
-      const result = await runReviewScannerBatch(params);
-      const duration = Math.round((Date.now() - startTime) / 1000);
-      const output = JSON.stringify({
-        type: 'result',
-        result: `Review scan batch: ${result.batch_size} companies, ${result.total_signals} signals, ${result.total_hot_leads} hot leads. Duration: ${duration}s. Cost: $0`,
-        total_cost_usd: 0,
-      });
-      run("UPDATE runs SET status = 'completed', result_data = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?", [output, runId]);
-      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — ${result.total_signals} signals, ${result.total_hot_leads} hot leads, $0`);
-
-    } else if (agentConfig.special_handler === 'mgmt_cai_scraper') {
-      // Agent 40: CAI Directory Scraper — weekly Sunday refresh
-      const { runCaiScraper } = require('./mgmtCaiScraper');
-      let params = {};
-      try { params = JSON.parse(message); } catch { /* use defaults */ }
-      const startTime = Date.now();
-      const result = await runCaiScraper(params);
-      const duration = Math.round((Date.now() - startTime) / 1000);
-      const output = JSON.stringify({
-        type: 'result',
-        result: `CAI directory: ${result.companies_found} found, ${result.new_companies} new, ${result.aamc_companies} AAMC. Duration: ${duration}s. Cost: $0`,
-        total_cost_usd: 0,
-      });
-      run("UPDATE runs SET status = 'completed', result_data = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?", [output, runId]);
-      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — ${result.new_companies} new companies, $0`);
-
-    } else if (agentConfig.special_handler === 'github_publisher') {
-      const { publishPost } = require('./githubPublisher');
-      const pubResult = await publishPost(message);
-      const output = JSON.stringify({ type: 'result', result: pubResult.message || 'Published', total_cost_usd: 0 });
-      run("UPDATE runs SET status = 'completed', result_data = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?", [output, runId]);
-      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — github_publisher done`);
+      run(
+        `UPDATE runs SET status='completed', completed_at=datetime('now'), duration_ms=?, tokens_used=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?`,
+        [durationMs, tokensUsed, costUsd, resultData, runId]
+      );
+      run(
+        `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+        [agent.id]
+      );
+      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — ${outputText.substring(0, 100)}`);
 
     } else {
-      // LLM agent — use the bridge
+      // ── LLM agent — use the bridge ──
       const bridge = require('./openclawBridge');
-      const bridgeResult = await bridge.runAgent(agent.id, { message, sessionId: runId });
-      const cost = bridgeResult.cost || 0;
-      const output = bridgeResult.output || JSON.stringify({ type: 'result', result: bridgeResult.result || 'Done', total_cost_usd: cost });
-      run("UPDATE runs SET status = 'completed', result_data = ?, cost_usd = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?", [output, cost, runId]);
-      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — cost: $${cost.toFixed(4)}`);
+      // Pass agent.name as agentId (matches OpenClaw registration slug), NOT the UUID
+      const bridgeResult = await bridge.runAgent(agent.name, {
+        openclawId: agentConfig.openclaw_id || agent.name,
+        message,
+        sessionId: runId,
+      });
+      const parsed = bridge.constructor.parseOutput(bridgeResult.output);
+      const durationMs = Date.now() - startTime;
+      const costUsd = parsed.costUsd || 0;
+      const tokensUsed = parsed.tokensUsed || 0;
+      const outputText = parsed.text || bridgeResult.output || 'Done';
+      const resultData = JSON.stringify({ sessionId: runId, message, outputText });
+
+      run(
+        `UPDATE runs SET status='completed', completed_at=datetime('now'), duration_ms=?, tokens_used=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?`,
+        [durationMs, tokensUsed, costUsd, resultData, runId]
+      );
+      run(
+        `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+        [agent.id]
+      );
+      console.log(`[ScheduleRunner] ✅ "${schedule.name}" — cost: $${costUsd.toFixed(4)}`);
     }
 
   } catch (err) {
+    const durationMs = Date.now() - startTime;
     console.error(`[ScheduleRunner] ❌ "${schedule.name}" failed:`, err.message);
-    // We don't reset last_run_at — prevents infinite retry on broken schedules
+    // Mark the run as failed so it shows in the UI (don't leave in 'running' state forever)
+    run(
+      `UPDATE runs SET status='failed', error_msg=?, duration_ms=?, completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+      [err.message, durationMs, runId]
+    );
+    run(
+      `UPDATE agents SET status='idle', updated_at=datetime('now') WHERE id=?`,
+      [agent.id]
+    );
   }
 }
 

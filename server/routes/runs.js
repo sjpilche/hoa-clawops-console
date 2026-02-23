@@ -1,15 +1,13 @@
 /**
  * @file runs.js (routes)
- * @description Agent run management endpoints.
- * Mostly scaffolded for Phase 3 — the OpenClaw bridge will populate these.
+ * @description Agent run management — confirmation gate, special handlers, OpenClaw execution.
  *
  * ENDPOINTS:
  *   GET  /api/runs              — List recent runs
  *   GET  /api/runs/:id          — Get run details
- *   GET  /api/runs/:id/status   — Poll run status (Phase 2.1)
- *   POST /api/runs/:id/confirm  — Confirm and execute pending run (Phase 2.1) ⭐
- *   POST /api/runs/:id/cancel   — Cancel pending run (Phase 2.1)
- *   POST /api/runs/:id/stop     — Stop a running agent (Phase 3)
+ *   GET  /api/runs/:id/status   — Poll run status
+ *   POST /api/runs/:id/confirm  — Confirm and execute pending run
+ *   POST /api/runs/:id/cancel   — Cancel pending run
  */
 
 const { Router } = require('express');
@@ -18,15 +16,321 @@ const { all, get, run } = require('../db/connection');
 const { authenticate } = require('../middleware/auth');
 const { AppError } = require('../middleware/errorHandler');
 const { validateParams, validateQuery } = require('../middleware/validator');
-const campaignMetrics = require('../services/campaignMetrics');
 const { runIdParamSchema, listRunsQuerySchema } = require('../schemas');
 
 const router = Router();
 router.use(authenticate);
 
+// ════════════════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS — eliminates ~180 lines of duplication across 13 handlers
+// ════════════════════════════════════════════════════════════════════════════
+
+function markRunCompleted(runId, agentId, durationMs, resultData, costUsd = 0, tokensUsed = 0) {
+  run(
+    `UPDATE runs SET status='completed', completed_at=datetime('now'), duration_ms=?, tokens_used=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?`,
+    [durationMs, tokensUsed, costUsd, typeof resultData === 'string' ? resultData : JSON.stringify(resultData), runId]
+  );
+  run(
+    `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+    [agentId]
+  );
+}
+
+function markRunFailed(runId, agentId, errorMsg) {
+  run(
+    `UPDATE runs SET status='failed', error_msg=?, completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
+    [errorMsg, runId]
+  );
+  run(
+    `UPDATE agents SET status='idle', updated_at=datetime('now') WHERE id=?`,
+    [agentId]
+  );
+}
+
+function buildResultData(runId, message, outputText, extra = {}) {
+  return JSON.stringify({ sessionId: runId, message, output: null, outputText, ...extra });
+}
+
+function parseMessageParams(message) {
+  try {
+    return JSON.parse(message);
+  } catch {
+    return {};
+  }
+}
+
+function parseTextParams(message, patterns) {
+  const params = {};
+  for (const [key, regex] of Object.entries(patterns)) {
+    const match = message.match(regex);
+    if (match) params[key] = match[1];
+  }
+  return params;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SPECIAL HANDLER REGISTRY — each handler is a function, not an inline block
+// ════════════════════════════════════════════════════════════════════════════
+
+const SPECIAL_HANDLERS = {
+  github_publisher: async ({ message, runId, agent }) => {
+    const { publishPost } = require('../services/githubPublisher');
+    const startTime = Date.now();
+    const summary = await publishPost(message);
+    return { outputText: summary, durationMs: Date.now() - startTime };
+  },
+
+  hoa_contact_scraper: async ({ message, runId, agent, agentConfig }) => {
+    const { searchHOAContacts } = require('../services/hoaContactScraper');
+    const startTime = Date.now();
+
+    let searchParams = parseMessageParams(message);
+    if (!searchParams.city) {
+      const text = parseTextParams(message, {
+        city: /city[:\s]+([a-zA-Z\s]+?)(?:\s*,|\s*$)/i,
+        state: /state[:\s]+([A-Z]{2})/i,
+        zip_code: /zip[:\s]+(\d{5})/i,
+      });
+      searchParams = { ...searchParams, ...text };
+    }
+    if (!searchParams.city) throw new Error('Search parameters must include a city. Example: {"city":"San Diego","state":"CA"}');
+
+    const result = await searchHOAContacts(searchParams);
+    const durationMs = Date.now() - startTime;
+    const outputText = `HOA Contact Search: ${result.results.total_found} found, ${result.results.new_contacts} new (${searchParams.city}, ${searchParams.state || 'US'}) in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { searchResult: result } };
+  },
+
+  hoa_discovery: async ({ message, runId, agent, agentConfig }) => {
+    const { processGeoTarget, processMultipleGeoTargets } = require('../services/googleMapsDiscovery');
+    const startTime = Date.now();
+
+    let params = parseMessageParams(message);
+    if (!params.geoTargetId && !params.geo_target_id) {
+      const text = parseTextParams(message, {
+        geoTargetId: /geo[_-]?target[:\s]+([a-z-]+)/i,
+        limit: /limit[:\s]+(\d+)/i,
+      });
+      params = { ...params, ...text };
+    }
+
+    const defaults = agentConfig.default_params || {};
+    const geoTargetId = params.geoTargetId || params.geo_target_id || defaults.geo_target_id || null;
+    const limit = parseInt(params.limit || defaults.limit || 1);
+
+    const result = geoTargetId
+      ? await processGeoTarget(geoTargetId)
+      : await processMultipleGeoTargets({ limit });
+
+    const durationMs = Date.now() - startTime;
+    const topTarget = result.geo_target || (result.results && result.results[0]?.geo_target) || 'Unknown';
+    const totalNew = result.new_communities || result.total_new_communities || 0;
+    const outputText = `HOA Discovery: ${topTarget} — ${totalNew} new communities, ${result.queries_run || 0} queries in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { discoveryResult: result } };
+  },
+
+  hoa_minutes_monitor: async ({ message, runId, agent, agentConfig }) => {
+    const { scanMultipleHOAs } = require('../services/hoaMinutesMonitor');
+    const startTime = Date.now();
+
+    let params = parseMessageParams(message);
+    if (!params.limit) {
+      const text = parseTextParams(message, {
+        limit: /limit[:\s]+(\d+)/i,
+        state: /state[:\s]+([A-Z]{2})/i,
+        priority_min: /priority[:\s]+(\d+)/i,
+      });
+      params = { ...params, ...text };
+    }
+
+    const defaults = agentConfig.default_params || {};
+    const scanParams = {
+      limit: parseInt(params.limit || defaults.limit || 20),
+      state: params.state || defaults.state || null,
+      priority_min: parseInt(params.priority_min || defaults.priority_min || 5),
+    };
+
+    const result = await scanMultipleHOAs(scanParams);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Minutes Scan: ${result.scanned_count} HOAs — ${result.hot_count} HOT, ${result.warm_count} WARM in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { scanResult: result } };
+  },
+
+  hoa_contact_enricher: async ({ message, runId, agent, agentConfig }) => {
+    const { enrichMultipleLeads } = require('../services/hoaContactEnricher');
+    const startTime = Date.now();
+
+    let params = parseMessageParams(message);
+    if (!params.limit) {
+      const text = parseTextParams(message, {
+        limit: /limit[:\s]+(\d+)/i,
+        tier: /tier[:\s]+(HOT|WARM|WATCH)/i,
+      });
+      params = { ...params, ...text };
+    }
+
+    const defaults = agentConfig.default_params || {};
+    const enrichParams = {
+      limit: parseInt(params.limit || defaults.limit || 10),
+      tier: params.tier || defaults.tier || null,
+    };
+
+    const result = await enrichMultipleLeads(enrichParams);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Contact Enrichment: ${result.success_count}/${result.enriched_count} enriched (${enrichParams.tier || 'all tiers'}) in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { enrichResult: result } };
+  },
+
+  hoa_outreach_drafter: async ({ message, runId, agent, agentConfig }) => {
+    const { draftMultipleOutreach } = require('../services/hoaOutreachDrafter');
+    const startTime = Date.now();
+
+    let params = parseMessageParams(message);
+    if (!params.limit) {
+      const text = parseTextParams(message, {
+        limit: /limit[:\s]+(\d+)/i,
+        tier: /tier[:\s]+(HOT|WARM|WATCH)/i,
+      });
+      params = { ...params, ...text };
+    }
+
+    const defaults = agentConfig.default_params || {};
+    const draftParams = {
+      limit: parseInt(params.limit || defaults.limit || 10),
+      tier: params.tier || defaults.tier || null,
+    };
+
+    const result = await draftMultipleOutreach(draftParams);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Outreach Drafting: ${result.success_count}/${result.drafted_count} drafted, ${result.success_count * 3} emails in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { draftResult: result } };
+  },
+
+  google_reviews_monitor: async ({ message, runId, agent, agentConfig }) => {
+    const { monitorMultipleHOAs } = require('../services/googleReviewsMonitor');
+    const startTime = Date.now();
+
+    let params = parseMessageParams(message);
+    if (!params.limit) {
+      const text = parseTextParams(message, {
+        limit: /limit[:\s]+(\d+)/i,
+        tier: /tier[:\s]+(HOT|WARM|MONITOR|COLD)/i,
+      });
+      params = { ...params, ...text };
+    }
+
+    const defaults = agentConfig.default_params || {};
+    const monitorParams = {
+      limit: parseInt(params.limit || defaults.limit || 10),
+      tier: params.tier || defaults.tier || null,
+    };
+
+    const result = await monitorMultipleHOAs(monitorParams);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Reviews Monitor: ${result.monitored_count} monitored, ${result.tier_upgrades} upgrades in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { monitorResult: result } };
+  },
+
+  mgmt_cai_scraper: async ({ message, runId, agent }) => {
+    const { runCaiScraper } = require('../services/mgmtCaiScraper');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const result = await runCaiScraper(params);
+    const durationMs = Date.now() - startTime;
+    const outputText = `CAI Scrape: ${result.chapters_scraped} chapters, ${result.new_companies} new companies in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { caiResult: result } };
+  },
+
+  mgmt_portfolio_scraper: async ({ message, runId, agent }) => {
+    const { runPortfolioScraper } = require('../services/mgmtPortfolioScraper');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    if (!params.company_name) throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
+    const result = await runPortfolioScraper(params);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Portfolio Scrape: ${result.company_name} — ${result.new_communities} new communities in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, extra: { scraperResult: result } };
+  },
+
+  mgmt_contact_puller: async ({ message, runId, agent }) => {
+    const { runContactPuller } = require('../services/mgmtContactPuller');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    if (!params.company_name) throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
+    const result = await runContactPuller(params);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Contact Pull: ${result.company_name} — ${result.contacts_found} contacts, ${result.decision_makers} decision makers`;
+    return { outputText, durationMs, extra: { contactResult: result } };
+  },
+
+  mgmt_portfolio_mapper: async ({ message, runId, agent }) => {
+    const { runPortfolioMapper } = require('../services/mgmtPortfolioMapper');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    if (!params.company_name) throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
+    const result = await runPortfolioMapper(params);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Portfolio Map: ${result.company_name} — ${result.new_discoveries} discoveries from ${result.searches_run} searches`;
+    return { outputText, durationMs, extra: { mapperResult: result } };
+  },
+
+  mgmt_review_scanner: async ({ message, runId, agent }) => {
+    const { runReviewScanner } = require('../services/mgmtReviewScanner');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    if (!params.company_name) throw new Error('Message must be JSON: {"company_name":"..."}');
+    const result = await runReviewScanner(params);
+    const durationMs = Date.now() - startTime;
+    const outputText = `Review Scan: ${result.company_name} — ${result.google_rating} stars, ${result.hot_leads} hot leads, health: ${result.company_health}`;
+    return { outputText, durationMs, extra: { reviewResult: result } };
+  },
+
+  cfo_lead_scout: async ({ message, runId, agent }) => {
+    const { runLeadScout } = require('../services/cfoLeadScout');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const result = await runLeadScout(params);
+    const durationMs = Date.now() - startTime;
+    const outputText = [
+      `CFO Lead Scout: ${result.stats.inserted} new, ${result.stats.skipped} dupes in ${(durationMs / 1000).toFixed(1)}s`,
+      ...result.leads.slice(0, 5).map(l => `  ${l.company_name} (${l.erp_type}) — Score: ${l.pilot_fit_score}`),
+    ].join('\n');
+    return { outputText, durationMs, extra: { stats: result.stats } };
+  },
+
+  daily_debrief: async ({ message, runId, agent }) => {
+    const { collectDebrief } = require('../services/debriefCollector');
+    const startTime = Date.now();
+
+    // Collect all operational data ($0, <200ms)
+    const params = parseMessageParams(message);
+    const data = await collectDebrief(params.date || undefined);
+
+    // Send collected data to the LLM for assessment (~$0.01)
+    const openclawBridge = require('../services/openclawBridge');
+    const prompt = `Here is today's operational data. Write the Daily Debrief report following your SOUL.md format exactly.\n\n${JSON.stringify(data, null, 2)}`;
+
+    const result = await openclawBridge.runAgent('daily-debrief', {
+      openclawId: 'daily-debrief',
+      message: prompt,
+      sessionId: `debrief-${data.date}-${runId}`,
+    });
+
+    const parsed = openclawBridge.constructor.parseOutput(result.output);
+    const durationMs = Date.now() - startTime;
+    const outputText = parsed.text || result.output || 'Debrief generation failed';
+    const costUsd = parsed.costUsd || 0;
+
+    return { outputText, durationMs, costUsd, tokensUsed: parsed.tokensUsed || 0 };
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// ROUTES
+// ════════════════════════════════════════════════════════════════════════════
+
 /**
  * GET /api/runs?limit=50&agent_id=xxx&status=running
- * List recent runs with optional filtering
  */
 router.get('/', validateQuery(listRunsQuerySchema), (req, res, next) => {
   try {
@@ -35,32 +339,15 @@ router.get('/', validateQuery(listRunsQuerySchema), (req, res, next) => {
     let query = 'SELECT runs.*, agents.name AS agent_name FROM runs LEFT JOIN agents ON runs.agent_id = agents.id WHERE 1=1';
     const params = [];
 
-    // Apply filters
-    if (agent_id) {
-      query += ' AND runs.agent_id = ?';
-      params.push(agent_id);
-    }
-
-    if (status) {
-      query += ' AND runs.status = ?';
-      params.push(status);
-    }
-
-    if (start_date) {
-      query += ' AND runs.created_at >= ?';
-      params.push(start_date);
-    }
-
-    if (end_date) {
-      query += ' AND runs.created_at <= ?';
-      params.push(end_date);
-    }
+    if (agent_id) { query += ' AND runs.agent_id = ?'; params.push(agent_id); }
+    if (status) { query += ' AND runs.status = ?'; params.push(status); }
+    if (start_date) { query += ' AND runs.created_at >= ?'; params.push(start_date); }
+    if (end_date) { query += ' AND runs.created_at <= ?'; params.push(end_date); }
 
     query += ' ORDER BY runs.created_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
-    const runs = all(query, params);
-    res.json({ runs, limit, offset });
+    res.json({ runs: all(query, params), limit, offset });
   } catch (error) {
     next(error);
   }
@@ -68,16 +355,12 @@ router.get('/', validateQuery(listRunsQuerySchema), (req, res, next) => {
 
 /**
  * GET /api/runs/:id
- * Get detailed information about a specific run
  */
 router.get('/:id', validateParams(runIdParamSchema), (req, res, next) => {
   try {
-    const runId = req.validated.params.id;
-    const run = get('SELECT * FROM runs WHERE id = ?', [runId]);
-    if (!run) {
-      throw new AppError(`Run with ID "${runId}" not found.`, 'RUN_NOT_FOUND', 404);
-    }
-    res.json({ run });
+    const runData = get('SELECT * FROM runs WHERE id = ?', [req.validated.params.id]);
+    if (!runData) throw new AppError(`Run not found.`, 'RUN_NOT_FOUND', 404);
+    res.json({ run: runData });
   } catch (error) {
     next(error);
   }
@@ -85,29 +368,15 @@ router.get('/:id', validateParams(runIdParamSchema), (req, res, next) => {
 
 /**
  * GET /api/runs/:id/status
- * Poll the current status of a run (for pending runs awaiting confirmation).
- * Phase 2.1: Confirmation Gates
  */
 router.get('/:id/status', validateParams(runIdParamSchema), (req, res, next) => {
   try {
-    const runId = req.validated.params.id;
     const runData = get(
       'SELECT id, status, started_at, completed_at, duration_ms, error_msg FROM runs WHERE id = ?',
-      [runId]
+      [req.validated.params.id]
     );
-
-    if (!runData) {
-      throw new AppError(`Run with ID "${runId}" not found.`, 'RUN_NOT_FOUND', 404);
-    }
-
-    res.json({
-      id: runData.id,
-      status: runData.status,
-      started_at: runData.started_at,
-      completed_at: runData.completed_at,
-      duration_ms: runData.duration_ms,
-      error_msg: runData.error_msg,
-    });
+    if (!runData) throw new AppError(`Run not found.`, 'RUN_NOT_FOUND', 404);
+    res.json(runData);
   } catch (error) {
     next(error);
   }
@@ -115,1228 +384,185 @@ router.get('/:id/status', validateParams(runIdParamSchema), (req, res, next) => 
 
 /**
  * POST /api/runs/:id/confirm
- * =============================
- * PHASE 2.1: CONFIRMATION GATE ⭐
- * =============================
- *
- * Confirms and executes a pending run.
- * This is the human-in-the-loop gate - no agent can run without confirmation.
- *
- * Flow:
- * 1. POST /api/agents/:id/run → creates pending run record
- * 2. Client displays ConfirmationDialog with cost estimate, permissions, domains
- * 3. User confirms → POST /api/runs/:id/confirm
- * 4. This endpoint executes the agent and updates run status
+ * Confirmation gate — executes a pending run via special handler OR OpenClaw.
  */
 router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, next) => {
   try {
     const runId = req.validated.params.id;
     const userId = req.user.id;
 
-    // 1. Fetch the pending run
+    // 1. Fetch pending run
     const runData = get('SELECT * FROM runs WHERE id = ?', [runId]);
-    if (!runData) {
-      throw new AppError(`Run with ID "${runId}" not found.`, 'RUN_NOT_FOUND', 404);
-    }
-
-    // 2. Verify status is 'pending'
+    if (!runData) throw new AppError(`Run not found.`, 'RUN_NOT_FOUND', 404);
     if (runData.status !== 'pending') {
-      throw new AppError(
-        `Run is not pending. Current status: ${runData.status}. Only pending runs can be confirmed.`,
-        'RUN_NOT_PENDING',
-        400
-      );
+      throw new AppError(`Run is ${runData.status}, not pending.`, 'RUN_NOT_PENDING', 400);
     }
 
-    // 3. Get the agent details
+    // 2. Get agent
     const agent = get('SELECT * FROM agents WHERE id = ?', [runData.agent_id]);
-    if (!agent) {
-      throw new AppError(`Agent for this run not found.`, 'AGENT_NOT_FOUND', 404);
-    }
+    if (!agent) throw new AppError(`Agent not found.`, 'AGENT_NOT_FOUND', 404);
 
-    // 4. Parse the result_data to get the original message
+    // 3. Parse run params
     let message = 'Run agent';
     let sessionId = null;
-    let jsonOutput = true;
     try {
-      const resultData = JSON.parse(runData.result_data || '{}');
-      message = resultData.message || message;
-      sessionId = resultData.sessionId;
-      jsonOutput = resultData.json !== false;
-    } catch {
-      // Use defaults
-    }
+      const rd = JSON.parse(runData.result_data || '{}');
+      message = rd.message || message;
+      sessionId = rd.sessionId;
+    } catch { /* use defaults */ }
 
-    // 5. Update run status to 'running' and record confirmation
+    const agentConfig = agent.config ? JSON.parse(agent.config) : {};
+
+    // 4. Mark as running
     run(
-      `UPDATE runs SET
-        status = 'running',
-        confirmed_by = ?,
-        confirmed_at = datetime('now'),
-        started_at = datetime('now'),
-        updated_at = datetime('now')
-      WHERE id = ?`,
+      `UPDATE runs SET status='running', confirmed_by=?, confirmed_at=datetime('now'), started_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
       [userId, runId]
     );
 
-    // 6. Execute the agent via OpenClaw (or special handler)
-    const useMock = process.env.USE_MOCK_OPENCLAW === 'true';
-    const openclawBridge = useMock
-      ? require('../services/mockOpenClaw')
-      : require('../services/openclawBridge');
-    const agentConfig = agent.config ? JSON.parse(agent.config) : {};
+    // 5. Socket.io helper
+    const io = req.app.get('io');
+    const emitLog = (line) => {
+      try { if (io) io.emit('run:log', { runId, line, timestamp: new Date().toISOString() }); } catch {}
+    };
 
-    // ── Special handler: github_publisher ──────────────────────────────────
-    // Agents with special_handler: 'github_publisher' run deterministic Node.js
-    // code instead of an LLM. They publish blog posts to GitHub via API.
-    if (agentConfig.special_handler === 'github_publisher') {
+    // ── SPECIAL HANDLERS ──────────────────────────────────────────────────
+    const handler = SPECIAL_HANDLERS[agentConfig.special_handler];
+    if (handler) {
       try {
-        const { publishPost } = require('../services/githubPublisher');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using github_publisher handler`);
+        emitLog(`Starting ${agentConfig.special_handler} handler for "${agent.name}"...`);
+        const result = await handler({ message, runId, agent, agentConfig });
+        const resultData = buildResultData(runId, message, result.outputText, result.extra || {});
+        const handlerCost = result.costUsd || 0;
+        const handlerTokens = result.tokensUsed || 0;
 
-        const summary = await publishPost(message);
-        const durationMs = Date.now() - startTime;
+        markRunCompleted(runId, agent.id, result.durationMs, resultData, handlerCost, handlerTokens);
+        emitLog(`${agentConfig.special_handler} completed.`);
 
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
+        if (io) {
+          try { io.emit('run:completed', { runId, agentId: agent.id, status: 'completed', cost: handlerCost, duration: result.durationMs }); } catch {}
+        }
 
         return res.json({
           success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-          },
+          run: { id: runId, status: 'completed', outputText: result.outputText, cost_usd: handlerCost, duration_ms: result.durationMs, ...(result.extra || {}) },
         });
-      } catch (publishError) {
-        console.error('[Runs] GitHub publisher error:', publishError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [publishError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Publisher failed: ${publishError.message}`, 'PUBLISHER_ERROR', 500);
+      } catch (handlerError) {
+        console.error(`[Runs] ${agentConfig.special_handler} error:`, handlerError.message);
+        markRunFailed(runId, agent.id, handlerError.message);
+        emitLog(`${agentConfig.special_handler} failed: ${handlerError.message}`);
+        throw new AppError(`${agentConfig.special_handler} failed: ${handlerError.message}`, 'HANDLER_ERROR', 500);
       }
     }
-    // ── END special handler ────────────────────────────────────────────────
 
-    // ── Special handler: hoa_contact_scraper ────────────────────────────────
-    // Agents with special_handler: 'hoa_contact_scraper' run web scraping
-    // to find HOA contact information from public sources.
-    if (agentConfig.special_handler === 'hoa_contact_scraper') {
-      try {
-        const { searchHOAContacts } = require('../services/hoaContactScraper');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using hoa_contact_scraper handler`);
-
-        // Parse search parameters from message
-        let searchParams = {};
-        try {
-          // Try to parse as JSON first
-          searchParams = JSON.parse(message);
-        } catch {
-          // Fallback: extract city from plain text message
-          const cityMatch = message.match(/city[:\s]+([a-zA-Z\s]+?)(?:\s*,|\s*$)/i);
-          const stateMatch = message.match(/state[:\s]+([A-Z]{2})/i);
-          const zipMatch = message.match(/zip[:\s]+(\d{5})/i);
-
-          if (cityMatch) searchParams.city = cityMatch[1].trim();
-          if (stateMatch) searchParams.state = stateMatch[1];
-          if (zipMatch) searchParams.zip_code = zipMatch[1];
-        }
-
-        if (!searchParams.city) {
-          throw new Error('Search parameters must include a city. Example: {"city":"San Diego","state":"CA"}');
-        }
-
-        const result = await searchHOAContacts(searchParams);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ HOA CONTACT SEARCH COMPLETE
-==========================================
-Location: ${result.params.city}, ${result.params.state}${result.params.zip_code ? ` ${result.params.zip_code}` : ''}
-
-RESULTS:
-  Total Found:       ${result.results.total_found}
-  New Contacts:      ${result.results.new_contacts}
-  Duplicates Skipped: ${result.results.duplicates_skipped}
-
-Search ID: ${result.search_id}
-Duration: ${(durationMs / 1000).toFixed(2)}s
-
-View contacts at: /hoa-leads`;
-
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-          searchResult: result,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
-
-        return res.json({
-          success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-            searchResult: result,
-          },
-        });
-      } catch (scraperError) {
-        console.error('[Runs] HOA contact scraper error:', scraperError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [scraperError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Scraper failed: ${scraperError.message}`, 'SCRAPER_ERROR', 500);
-      }
-    }
-    // ── END special handler: hoa_contact_scraper ────────────────────────────
-
-    // ── Special handler: hoa_discovery ──────────────────────────────────────
-    // Agent 1: HOA Google Maps Discovery - Scrapes Google Maps by geo-target
-    // Zero-cost Playwright scraping (no paid APIs, no LLM)
-    if (agentConfig.special_handler === 'hoa_discovery') {
-      try {
-        const { processGeoTarget, processMultipleGeoTargets } = require('../services/googleMapsDiscovery');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using hoa_discovery (Google Maps) handler`);
-
-        // Parse parameters from message
-        let params = {};
-        try {
-          params = JSON.parse(message);
-        } catch {
-          // Parse from plain text: "geo_target: south-florida", "limit: 2"
-          const geoMatch = message.match(/geo[_-]?target[:\s]+([a-z-]+)/i);
-          const limitMatch = message.match(/limit[:\s]+(\d+)/i);
-          if (geoMatch) params.geoTargetId = geoMatch[1];
-          if (limitMatch) params.limit = parseInt(limitMatch[1]);
-        }
-
-        const defaults = agentConfig.default_params || {};
-        const geoTargetId = params.geoTargetId || params.geo_target_id || defaults.geo_target_id || null;
-        const limit = params.limit || defaults.limit || 1;
-
-        console.log('[Runs] Discovery params:', { geoTargetId, limit });
-
-        // Run discovery
-        let result;
-        if (geoTargetId) {
-          result = await processGeoTarget(geoTargetId);
-        } else {
-          result = await processMultipleGeoTargets({ limit });
-        }
-
-        const durationMs = Date.now() - startTime;
-
-        // Build summary text
-        const topTarget = result.geo_target || (result.results && result.results[0]?.geo_target) || 'Unknown';
-        const totalNew = result.new_communities || result.total_new_communities || 0;
-        const totalFound = result.results_found || result.total_results_found || 0;
-        const summary = `✅ HOA GOOGLE MAPS DISCOVERY COMPLETE
-==========================================
-Geo-Target:  ${topTarget}
-Queries Run: ${result.queries_run || 0}
-
-RESULTS:
-  Google Maps Results: ${totalFound}
-  New Communities:     ${totalNew}
-  Updated:             ${result.updated_communities || 0}
-  Mgmt Companies:      ${result.management_companies || 0}
-  Skipped:             ${result.skipped || 0}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Cost:     $0.00
-Database: hoa_leads.sqlite
-
-Pipeline flags set for each new community:
-  ✓ needs_review_scan = 1   → Agent 5 (Google Reviews Monitor)
-  ✓ needs_website_scrape = 1
-  ✓ needs_contact_enrichment = 1
-  ✓ needs_minutes_scan = 1  → Agent 2 (Minutes Monitor)
-
-Next steps:
-  • Run Agent 2 (Minutes Monitor) to scan for capital signals
-  • Run Agent 5 (Reviews Monitor) to score by Google reviews
-  • View communities: SELECT * FROM hoa_communities WHERE source='google_maps';`;
-
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-          discoveryResult: result,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
-
-        return res.json({
-          success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-            discoveryResult: result,
-          },
-        });
-      } catch (discoveryError) {
-        console.error('[Runs] HOA discovery error:', discoveryError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [discoveryError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Discovery failed: ${discoveryError.message}`, 'DISCOVERY_ERROR', 500);
-      }
-    }
-    // ── END special handler: hoa_discovery ──────────────────────────────────
-
-    // ── Special handler: hoa_minutes_monitor ────────────────────────────────
-    // Agent 2: Minutes Monitor - Scans meeting minutes and scores for capital signals
-    if (agentConfig.special_handler === 'hoa_minutes_monitor') {
-      try {
-        const { scanMultipleHOAs } = require('../services/hoaMinutesMonitor');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using hoa_minutes_monitor handler`);
-
-        // Parse scan parameters from message
-        let scanParams = {};
-        try {
-          scanParams = JSON.parse(message);
-        } catch {
-          const limitMatch = message.match(/limit[:\s]+(\d+)/i);
-          const stateMatch = message.match(/state[:\s]+([A-Z]{2})/i);
-          const priorityMatch = message.match(/priority[:\s]+(\d+)/i);
-
-          if (limitMatch) scanParams.limit = parseInt(limitMatch[1]);
-          if (stateMatch) scanParams.state = stateMatch[1];
-          if (priorityMatch) scanParams.priority_min = parseInt(priorityMatch[1]);
-        }
-
-        // Apply defaults
-        const defaults = agentConfig.default_params || {};
-        scanParams = {
-          limit: scanParams.limit || defaults.limit || 20,
-          state: scanParams.state || defaults.state || null,
-          priority_min: scanParams.priority_min || defaults.priority_min || 5
-        };
-
-        console.log('[Runs] Scan params:', scanParams);
-
-        const result = await scanMultipleHOAs(scanParams);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ HOA MINUTES SCAN COMPLETE
-==========================================
-Scanned: ${result.scanned_count} HOAs
-State: ${scanParams.state || 'All states'}
-Priority min: ${scanParams.priority_min}
-
-RESULTS:
-  🔥 HOT leads:     ${result.hot_count}
-  🟡 WARM leads:    ${result.warm_count}
-  🟢 WATCH leads:   ${result.watch_count}
-  ⚪ ARCHIVE:       ${result.archive_count}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Database: hoa_leads.sqlite
-
-Next steps:
-  • ${result.hot_count + result.warm_count} leads ready for Agent 3 (Contact Enricher)
-  • View leads: SELECT * FROM scored_leads ORDER BY score DESC;
-  • View HOT leads: SELECT * FROM hot_leads_dashboard;`;
-
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-          scanResult: result,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
-
-        return res.json({
-          success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-            scanResult: result,
-          },
-        });
-      } catch (scanError) {
-        console.error('[Runs] Minutes scan error:', scanError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [scanError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Minutes scan failed: ${scanError.message}`, 'SCAN_ERROR', 500);
-      }
-    }
-    // ── END special handler: hoa_minutes_monitor ────────────────────────────
-
-    // ── Special handler: hoa_contact_enricher ───────────────────────────────
-    // Agent 3: Contact Enricher - Zero-cost email enrichment for HOT/WARM leads
-    if (agentConfig.special_handler === 'hoa_contact_enricher') {
-      try {
-        const { enrichMultipleLeads } = require('../services/hoaContactEnricher');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using hoa_contact_enricher handler`);
-
-        // Parse enrichment parameters from message
-        let enrichParams = {};
-        try {
-          enrichParams = JSON.parse(message);
-        } catch {
-          const limitMatch = message.match(/limit[:\s]+(\d+)/i);
-          const tierMatch = message.match(/tier[:\s]+(HOT|WARM|WATCH)/i);
-
-          if (limitMatch) enrichParams.limit = parseInt(limitMatch[1]);
-          if (tierMatch) enrichParams.tier = tierMatch[1];
-        }
-
-        // Apply defaults
-        const defaults = agentConfig.default_params || {};
-        enrichParams = {
-          limit: enrichParams.limit || defaults.limit || 10,
-          tier: enrichParams.tier || defaults.tier || null
-        };
-
-        console.log('[Runs] Enrichment params:', enrichParams);
-
-        const result = await enrichMultipleLeads(enrichParams);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ CONTACT ENRICHMENT COMPLETE
-==========================================
-Total enriched: ${result.enriched_count}
-Success: ${result.success_count}
-Failed: ${result.failed_count}
-Success rate: ${result.enriched_count > 0 ? Math.round((result.success_count / result.enriched_count) * 100) : 0}%
-
-Tier filter: ${enrichParams.tier || 'All tiers (HOT, WARM)'}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Database: hoa_leads.sqlite
-Cost: $0 (zero-cost enrichment!)
-
-Next steps:
-  • ${result.success_count} leads ready for Agent 4 (Outreach Drafter)
-  • View contacts: SELECT * FROM contacts ORDER BY created_at DESC;
-  • View enrichment status: SELECT * FROM scored_leads WHERE contact_enrichment_status = 'complete';`;
-
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-          enrichResult: result,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
-
-        return res.json({
-          success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-            enrichResult: result,
-          },
-        });
-      } catch (enrichError) {
-        console.error('[Runs] Contact enrichment error:', enrichError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [enrichError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Contact enrichment failed: ${enrichError.message}`, 'ENRICHMENT_ERROR', 500);
-      }
-    }
-    // ── END special handler: hoa_contact_enricher ───────────────────────────
-
-    // ── Special handler: hoa_outreach_drafter ───────────────────────────────
-    // Agent 4: Outreach Drafter - Generates personalized email sequences for enriched leads
-    if (agentConfig.special_handler === 'hoa_outreach_drafter') {
-      try {
-        const { draftMultipleOutreach } = require('../services/hoaOutreachDrafter');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using hoa_outreach_drafter handler`);
-
-        // Parse drafting parameters from message
-        let draftParams = {};
-        try {
-          draftParams = JSON.parse(message);
-        } catch {
-          const limitMatch = message.match(/limit[:\s]+(\d+)/i);
-          const tierMatch = message.match(/tier[:\s]+(HOT|WARM|WATCH)/i);
-
-          if (limitMatch) draftParams.limit = parseInt(limitMatch[1]);
-          if (tierMatch) draftParams.tier = tierMatch[1];
-        }
-
-        // Apply defaults
-        const defaults = agentConfig.default_params || {};
-        draftParams = {
-          limit: draftParams.limit || defaults.limit || 10,
-          tier: draftParams.tier || defaults.tier || null
-        };
-
-        console.log('[Runs] Drafting params:', draftParams);
-
-        const result = await draftMultipleOutreach(draftParams);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ OUTREACH DRAFTING COMPLETE
-==========================================
-Total drafted: ${result.drafted_count}
-Success: ${result.success_count}
-Failed: ${result.failed_count}
-Success rate: ${result.drafted_count > 0 ? Math.round((result.success_count / result.drafted_count) * 100) : 0}%
-
-Tier filter: ${draftParams.tier || 'All tiers (HOT, WARM)'}
-Emails per lead: 3 (initial + 2 follow-ups)
-Total emails drafted: ${result.success_count * 3}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Database: hoa_leads.sqlite
-Cost: $0 (template mode)
-
-Next steps:
-  • Review ${result.success_count} email sequences in /hoa-outreach-queue page
-  • Approve or edit drafts
-  • Send approved outreach emails`;
-
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-          draftResult: result,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
-
-        return res.json({
-          success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-            draftResult: result,
-          },
-        });
-      } catch (draftError) {
-        console.error('[Runs] Outreach drafting error:', draftError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [draftError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Outreach drafting failed: ${draftError.message}`, 'DRAFTING_ERROR', 500);
-      }
-    }
-    // ── END special handler: hoa_outreach_drafter ───────────────────────────
-
-    // ── Special handler: google_reviews_monitor ─────────────────────────────
-    // Agent 5: Google Reviews Monitor - Monitors Google Maps reviews for capital signals
-    if (agentConfig.special_handler === 'google_reviews_monitor') {
-      try {
-        const { monitorMultipleHOAs } = require('../services/googleReviewsMonitor');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using google_reviews_monitor handler`);
-
-        // Parse monitoring parameters from message
-        let monitorParams = {};
-        try {
-          monitorParams = JSON.parse(message);
-        } catch {
-          const limitMatch = message.match(/limit[:\s]+(\d+)/i);
-          const tierMatch = message.match(/tier[:\s]+(HOT|WARM|MONITOR|COLD)/i);
-
-          if (limitMatch) monitorParams.limit = parseInt(limitMatch[1]);
-          if (tierMatch) monitorParams.tier = tierMatch[1];
-        }
-
-        // Apply defaults
-        const defaults = agentConfig.default_params || {};
-        monitorParams = {
-          limit: monitorParams.limit || defaults.limit || 10,
-          tier: monitorParams.tier || defaults.tier || null
-        };
-
-        console.log('[Runs] Monitoring params:', monitorParams);
-
-        const result = await monitorMultipleHOAs(monitorParams);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ GOOGLE REVIEWS MONITORING COMPLETE
-==========================================
-Total monitored: ${result.monitored_count}
-Success: ${result.success_count}
-Failed: ${result.failed_count}
-Tier upgrades: ${result.tier_upgrades}
-
-Tier filter: ${monitorParams.tier || 'All tiers'}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Database: hoa_leads.sqlite
-Cost: $0 (FREE!)
-
-Next steps:
-  • ${result.tier_upgrades} HOAs upgraded to HOT/WARM
-  • Run Agent 3 (Contact Enricher) for HOT leads
-  • View results: SELECT * FROM hoa_communities WHERE google_signal_tier = 'HOT';`;
-
-        const finalResultData = JSON.stringify({
-          sessionId: runId,
-          message,
-          output: null,
-          outputText: summary,
-          monitorResult: result,
-        });
-
-        run(
-          `UPDATE runs SET
-            status = 'completed',
-            completed_at = datetime('now'),
-            duration_ms = ?,
-            tokens_used = 0,
-            cost_usd = 0,
-            result_data = ?,
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-
-        run(
-          `UPDATE agents SET
-            status = 'idle',
-            total_runs = total_runs + 1,
-            last_run_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?`,
-          [agent.id]
-        );
-
-        return res.json({
-          success: true,
-          run: {
-            id: runId,
-            status: 'completed',
-            outputText: summary,
-            cost_usd: 0,
-            duration_ms: durationMs,
-            monitorResult: result,
-          },
-        });
-      } catch (monitorError) {
-        console.error('[Runs] Google Reviews monitoring error:', monitorError.message);
-        run(
-          `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-          [monitorError.message, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Google Reviews monitoring failed: ${monitorError.message}`, 'MONITORING_ERROR', 500);
-      }
-    }
-    // ── END special handler: google_reviews_monitor ─────────────────────────
-
-    // ── Special handler: mgmt_cai_scraper ─────────────────────────────────
-    // Agent 40: CAI Directory Scraper — Playwright scrapes CAI chapter directories
-    // Cost: $0 (pure Node.js + Playwright)
-    if (agentConfig.special_handler === 'mgmt_cai_scraper') {
-      try {
-        const { runCaiScraper } = require('../services/mgmtCaiScraper');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using mgmt_cai_scraper handler`);
-
-        let params = {};
-        try { params = JSON.parse(message); } catch { /* use defaults */ }
-
-        const result = await runCaiScraper(params);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ CAI DIRECTORY SCRAPE COMPLETE
-==========================================
-Chapters Scraped: ${result.chapters_scraped}
-Companies Found:  ${result.companies_found}
-New Companies:    ${result.new_companies}
-Updated:          ${result.updated_companies}
-AAMC Companies:   ${result.aamc_companies}
-Pipeline Queue:   ${result.new_to_pipeline}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Cost:     $0.00`;
-
-        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, caiResult: result });
-        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
-        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-
-        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, caiResult: result } });
-      } catch (caiError) {
-        console.error('[Runs] CAI scraper error:', caiError.message);
-        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [caiError.message, runId]);
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`CAI scraper failed: ${caiError.message}`, 'CAI_SCRAPER_ERROR', 500);
-      }
-    }
-    // ── END special handler: mgmt_cai_scraper ─────────────────────────────
-
-    // ── Special handler: mgmt_portfolio_scraper ───────────────────────────
-    // Agent 36: Portfolio Scraper — Playwright crawls management company websites
-    if (agentConfig.special_handler === 'mgmt_portfolio_scraper') {
-      try {
-        const { runPortfolioScraper } = require('../services/mgmtPortfolioScraper');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using mgmt_portfolio_scraper handler`);
-
-        let params = {};
-        try { params = JSON.parse(message); } catch {
-          throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
-        }
-
-        const result = await runPortfolioScraper(params);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ PORTFOLIO SCRAPE COMPLETE
-==========================================
-Company:         ${result.company_name}
-Communities:     ${result.communities_found}
-New Communities: ${result.new_communities}
-With Portals:    ${result.with_portals}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Cost:     $0.00`;
-
-        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, scraperResult: result });
-        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
-        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-
-        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, scraperResult: result } });
-      } catch (scraperError) {
-        console.error('[Runs] Portfolio scraper error:', scraperError.message);
-        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [scraperError.message, runId]);
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Portfolio scraper failed: ${scraperError.message}`, 'PORTFOLIO_SCRAPER_ERROR', 500);
-      }
-    }
-    // ── END special handler: mgmt_portfolio_scraper ───────────────────────
-
-    // ── Special handler: mgmt_contact_puller ──────────────────────────────
-    // Agent 37: Contact Puller — Playwright scrapes /about, /team, /vendors
-    if (agentConfig.special_handler === 'mgmt_contact_puller') {
-      try {
-        const { runContactPuller } = require('../services/mgmtContactPuller');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using mgmt_contact_puller handler`);
-
-        let params = {};
-        try { params = JSON.parse(message); } catch {
-          throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
-        }
-
-        const result = await runContactPuller(params);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ CONTACT EXTRACTION COMPLETE
-==========================================
-Company:          ${result.company_name}
-Contacts Found:   ${result.contacts_found}
-Decision Makers:  ${result.decision_makers}
-Vendor Portal:    ${result.has_vendor_portal ? 'YES' : 'NO'}
-Email Pattern:    ${result.email_pattern || 'Not detected'}
-Outreach Priority: ${result.outreach_priority}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Cost:     $0.00`;
-
-        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, contactResult: result });
-        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
-        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-
-        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, contactResult: result } });
-      } catch (contactError) {
-        console.error('[Runs] Contact puller error:', contactError.message);
-        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [contactError.message, runId]);
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Contact puller failed: ${contactError.message}`, 'CONTACT_PULLER_ERROR', 500);
-      }
-    }
-    // ── END special handler: mgmt_contact_puller ──────────────────────────
-
-    // ── Special handler: mgmt_portfolio_mapper ────────────────────────────
-    // Agent 38: Portfolio Mapper — Playwright Google Search for hidden HOAs
-    if (agentConfig.special_handler === 'mgmt_portfolio_mapper') {
-      try {
-        const { runPortfolioMapper } = require('../services/mgmtPortfolioMapper');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using mgmt_portfolio_mapper handler`);
-
-        let params = {};
-        try { params = JSON.parse(message); } catch {
-          throw new Error('Message must be JSON: {"company_name":"...","company_url":"..."}');
-        }
-
-        const result = await runPortfolioMapper(params);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ PORTFOLIO MAPPING COMPLETE
-==========================================
-Company:          ${result.company_name}
-Searches Run:     ${result.searches_run}
-Total Mapped:     ${result.total_mapped}
-New Discoveries:  ${result.new_discoveries}
-Website Known:    ${result.website_communities}
-Discovery Rate:   ${result.discovery_rate}
-${result.captcha_hit ? '⚠️  CAPTCHA hit — search stopped early' : ''}
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Cost:     $0.00`;
-
-        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, mapperResult: result });
-        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
-        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-
-        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, mapperResult: result } });
-      } catch (mapperError) {
-        console.error('[Runs] Portfolio mapper error:', mapperError.message);
-        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [mapperError.message, runId]);
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Portfolio mapper failed: ${mapperError.message}`, 'PORTFOLIO_MAPPER_ERROR', 500);
-      }
-    }
-    // ── END special handler: mgmt_portfolio_mapper ────────────────────────
-
-    // ── Special handler: mgmt_review_scanner ──────────────────────────────
-    // Agent 39: Review Scanner — THE MONEY AGENT — Playwright + keyword scoring
-    if (agentConfig.special_handler === 'mgmt_review_scanner') {
-      try {
-        const { runReviewScanner } = require('../services/mgmtReviewScanner');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using mgmt_review_scanner handler`);
-
-        let params = {};
-        try { params = JSON.parse(message); } catch {
-          throw new Error('Message must be JSON: {"company_name":"..."}');
-        }
-
-        const result = await runReviewScanner(params);
-        const durationMs = Date.now() - startTime;
-
-        const summary = `✅ REVIEW SCAN COMPLETE — THE MONEY AGENT
-==========================================
-Company:         ${result.company_name}
-Google Rating:   ${result.google_rating} (${result.total_google_reviews} reviews)
-Reviews Scraped: ${result.reviews_scraped}
-Signal Reviews:  ${result.signal_reviews}
-Hot Leads:       ${result.hot_leads}
-Critical Issues: ${result.critical_issues}
-Switching Signals: ${result.switching_signals}
-Company Health:  ${result.company_health}
-
-Duration: ${(durationMs / 1000).toFixed(2)}s
-Cost:     $0.00`;
-
-        const finalResultData = JSON.stringify({ sessionId: runId, message, output: null, outputText: summary, reviewResult: result });
-        run(`UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`, [durationMs, finalResultData, runId]);
-        run(`UPDATE agents SET status = 'idle', total_runs = total_runs + 1, last_run_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-
-        return res.json({ success: true, run: { id: runId, status: 'completed', outputText: summary, cost_usd: 0, duration_ms: durationMs, reviewResult: result } });
-      } catch (reviewError) {
-        console.error('[Runs] Review scanner error:', reviewError.message);
-        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [reviewError.message, runId]);
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Review scanner failed: ${reviewError.message}`, 'REVIEW_SCANNER_ERROR', 500);
-      }
-    }
-    // ── END special handler: mgmt_review_scanner ──────────────────────────
-
-    // ── Special handler: cfo_lead_scout ────────────────────────────────────
-    // CFO Lead Scout — Playwright Google scraping for $10M-$75M construction co's
-    // Cost: $0 (pure Node.js + Playwright, no LLM)
-    if (agentConfig.special_handler === 'cfo_lead_scout') {
-      try {
-        const { runLeadScout } = require('../services/cfoLeadScout');
-        const startTime = Date.now();
-        console.log(`[Runs] Agent "${agent.name}" using cfo_lead_scout handler`);
-
-        let params = {};
-        try { params = typeof message === 'string' ? JSON.parse(message) : (message || {}); } catch { /* use defaults */ }
-
-        const result = await runLeadScout(params);
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        const durationMs = Date.now() - startTime;
-
-        const outputText = [
-          `CFO Lead Scout complete in ${elapsed}s`,
-          `Searches run: ${result.stats.searches}`,
-          `New leads inserted: ${result.stats.inserted}`,
-          `Duplicates skipped: ${result.stats.skipped}`,
-          '',
-          result.leads.slice(0, 10).map(l =>
-            `  • ${l.company_name} (${l.erp_type}) — Score: ${l.pilot_fit_score} — ${l.website || 'no website'}`
-          ).join('\n'),
-        ].filter(Boolean).join('\n');
-
-        const finalResultData = JSON.stringify({ outputText, stats: result.stats });
-
-        run(
-          `UPDATE runs SET status = 'completed', completed_at = datetime('now'), duration_ms = ?, tokens_used = 0, cost_usd = 0, result_data = ?, updated_at = datetime('now') WHERE id = ?`,
-          [durationMs, finalResultData, runId]
-        );
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-
-        return res.status(200).json({
-          message: 'Lead Scout completed',
-          runId,
-          stats: result.stats,
-          leads_found: result.leads.length,
-          cost_usd: 0,
-        });
-      } catch (scoutError) {
-        console.error('[Runs] CFO Lead Scout error:', scoutError);
-        run(`UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`, [scoutError.message, runId]);
-        run(`UPDATE agents SET status = 'idle', updated_at = datetime('now') WHERE id = ?`, [agent.id]);
-        throw new AppError(`Lead Scout failed: ${scoutError.message}`, 'LEAD_SCOUT_ERROR', 500);
-      }
-    }
-    // ── END special handler: cfo_lead_scout ────────────────────────────────
-
-    if (!agentConfig.openclaw_id) {
-      // Mark run as failed
-      run(
-        `UPDATE runs SET status = 'failed', error_msg = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-        ['Agent not registered with OpenClaw', runId]
-      );
-      throw new AppError(
-        `Agent "${agent.name}" is not registered with OpenClaw.`,
-        'AGENT_NOT_REGISTERED',
-        400
-      );
-    }
-
+    // ── OPENCLAW AGENT EXECUTION ──────────────────────────────────────────
     const openclawId = agentConfig.openclaw_id;
+    if (!openclawId) {
+      markRunFailed(runId, agent.id, 'Agent not registered with OpenClaw');
+      throw new AppError(`Agent "${agent.name}" has no openclaw_id configured.`, 'AGENT_NOT_REGISTERED', 400);
+    }
+
+    const RUN_TIMEOUT_MS = parseInt(process.env.MAX_DURATION_PER_RUN || '300', 10) * 1000;
+    const withTimeout = (promise, ms) =>
+      Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`Agent timed out after ${ms / 1000}s`)), ms))]);
 
     try {
-      const runResult = await openclawBridge.runAgent(agent.id, {
-        openclawId,
-        message,
-        sessionId,
-        json: jsonOutput,
-      });
+      emitLog(`Starting OpenClaw agent "${agent.name}" (${openclawId})...`);
 
-      // 7. Extract metrics from OpenClaw output
-      // Claude Code CLI returns JSON format: { type, result, total_cost_usd, usage, modelUsage, ... }
-      let durationMs = null;
-      let tokensUsed = 0;
-      let costUsd = 0;
-      let outputText = '';
+      const openclawBridge = require('../services/openclawBridge');
+      const runResult = await withTimeout(
+        openclawBridge.runAgent(agent.id, { openclawId, message, sessionId }),
+        RUN_TIMEOUT_MS
+      );
+
+      emitLog(`Agent "${agent.name}" completed.`);
+
+      // Parse OpenClaw output
+      let durationMs = null, tokensUsed = 0, costUsd = 0, outputText = '';
       try {
         const parsed = JSON.parse(runResult.output || '{}');
-
-        // Claude Code CLI format
-        if (parsed.type === 'result') {
+        if (parsed.payloads?.[0]?.text) {
+          // Native OpenClaw format: { payloads: [{ text }], meta: { durationMs, agentMeta: { usage } } }
+          outputText = parsed.payloads[0].text;
+          durationMs = parsed.meta?.durationMs || null;
+          const usage = parsed.meta?.agentMeta?.usage || {};
+          tokensUsed = usage.total || ((usage.input || 0) + (usage.output || 0));
+          costUsd = (usage.input || 0) * 0.0000025 + (usage.output || 0) * 0.00001;
+        } else if (parsed.type === 'result') {
+          // Legacy bridge format
           outputText = parsed.result || '';
           durationMs = parsed.duration_ms || null;
           costUsd = parsed.total_cost_usd || 0;
-
-          // Calculate total tokens from usage
           const usage = parsed.usage || {};
-          tokensUsed = (usage.input_tokens || 0) +
-                       (usage.output_tokens || 0) +
-                       (usage.cache_read_input_tokens || 0) +
-                       (usage.cache_creation_input_tokens || 0);
-        }
-        // Legacy format (if still using old OpenClaw)
-        else if (parsed.meta) {
-          if (parsed.meta?.durationMs) durationMs = parsed.meta.durationMs;
-          if (parsed.meta?.agentMeta?.usage?.total) tokensUsed = parsed.meta.agentMeta.usage.total;
-          const usage = parsed.meta?.agentMeta?.usage || {};
-          costUsd = (usage.input || 0) * 0.00000015 + (usage.output || 0) * 0.0000006;
-          if (parsed.payloads?.[0]?.text) outputText = parsed.payloads[0].text;
+          tokensUsed = (usage.input_tokens || 0) + (usage.output_tokens || 0);
         }
       } catch {
         outputText = runResult.output || '';
       }
 
-      const finalResultData = JSON.stringify({
+      const resultData = buildResultData(runId, message, outputText, {
         sessionId: runResult.sessionId,
-        message,
-        output: runResult.output || null,
-        outputText,
+        rawOutput: runResult.output || null,
       });
 
-      // 8. Update run record with results
+      // Update DB
       run(
-        `UPDATE runs SET
-          status = ?,
-          completed_at = ?,
-          duration_ms = ?,
-          tokens_used = ?,
-          cost_usd = ?,
-          result_data = ?,
-          updated_at = datetime('now')
-        WHERE id = ?`,
-        [
-          runResult.status || 'success',
-          runResult.completedAt || new Date().toISOString(),
-          durationMs,
-          tokensUsed,
-          costUsd,
-          finalResultData,
-          runId,
-        ]
+        `UPDATE runs SET status=?, completed_at=?, duration_ms=?, tokens_used=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?`,
+        [runResult.status || 'completed', runResult.completedAt || new Date().toISOString(), durationMs, tokensUsed, costUsd, resultData, runId]
       );
-
-      // 9. Update agent stats
       run(
-        `UPDATE agents SET
-          status = 'idle',
-          total_runs = total_runs + 1,
-          last_run_at = datetime('now'),
-          updated_at = datetime('now')
-        WHERE id = ?`,
+        `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
         [agent.id]
       );
 
-      // 9.5 CFO agent post-processing: save output to cfo_* tables as draft
+      // CFO agent post-processing: save LLM output as drafts
       try {
-        const agentId = agent.id;
-        if ((agentId === 'cfo-content-engine' || agentId.includes('cfo-content')) && outputText) {
-          let parsed = null;
-          try { parsed = JSON.parse(outputText); } catch {
-            // Try to extract JSON from markdown code block
-            const match = outputText.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (match) try { parsed = JSON.parse(match[1]); } catch { /* ignore */ }
+        if (agent.id.includes('cfo-content') && outputText) {
+          let p = null;
+          try { p = JSON.parse(outputText); } catch {
+            const m = outputText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (m) try { p = JSON.parse(m[1]); } catch {}
           }
-          if (parsed && parsed.content_markdown) {
-            run(
-              `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, status)
-               VALUES (?, ?, ?, ?, ?, 'draft')`,
-              [parsed.pillar || 'general', parsed.channel || 'linkedin', parsed.title || 'Untitled', parsed.content_markdown, parsed.cta || '']
-            );
-            console.log('[Runs] CFO content piece saved as draft');
+          if (p?.content_markdown) {
+            run(`INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, status) VALUES (?, ?, ?, ?, ?, 'draft')`,
+              [p.pillar || 'general', p.channel || 'linkedin', p.title || 'Untitled', p.content_markdown, p.cta || '']);
           }
         }
-        if ((agentId === 'cfo-outreach-agent' || agentId.includes('cfo-outreach')) && outputText) {
-          let parsed = null;
-          try { parsed = JSON.parse(outputText); } catch {
-            const match = outputText.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (match) try { parsed = JSON.parse(match[1]); } catch { /* ignore */ }
+        if (agent.id.includes('cfo-outreach') && outputText) {
+          let p = null;
+          try { p = JSON.parse(outputText); } catch {
+            const m = outputText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (m) try { p = JSON.parse(m[1]); } catch {}
           }
-          if (parsed && parsed.email_body) {
-            // Extract lead_id from original message if provided
+          if (p?.email_body) {
             let leadId = null;
-            try {
-              const msg = typeof message === 'string' ? JSON.parse(message) : message;
-              leadId = msg.lead_id || null;
-            } catch { /* ignore */ }
-            run(
-              `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, status)
-               VALUES (?, 'blitz', ?, ?, ?, 'draft')`,
-              [leadId, parsed.email_subject || 'Outreach', parsed.email_body, parsed.pilot_offer || null]
-            );
-            console.log('[Runs] CFO outreach sequence saved as draft');
+            try { leadId = JSON.parse(message)?.lead_id || null; } catch {}
+            run(`INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, status) VALUES (?, 'blitz', ?, ?, ?, 'draft')`,
+              [leadId, p.email_subject || 'Outreach', p.email_body, p.pilot_offer || null]);
           }
         }
       } catch (saveErr) {
-        console.warn('[Runs] CFO post-processing error (non-fatal):', saveErr.message);
+        console.warn('[Runs] CFO post-processing (non-fatal):', saveErr.message);
       }
 
-      // 10. Emit WebSocket event (if available)
+      // WebSocket events
       try {
-        const io = req.app.get('io');
-        if (io) {
-          io.emit('run:completed', {
-            runId,
-            agentId: agent.id,
-            status: runResult.status || 'success',
-            cost: costUsd,
-            duration: durationMs,
-          });
-        }
-      } catch {
-        // WebSocket not available, skip
-      }
+        if (io) io.emit('run:completed', { runId, agentId: agent.id, status: 'completed', cost: costUsd, duration: durationMs });
+      } catch {}
 
-      // 11. Return success response
       res.json({
-        message: `Agent "${agent.name}" completed successfully`,
-        run: {
-          id: runId,
-          status: runResult.status || 'success',
-          duration_ms: durationMs,
-          tokens_used: tokensUsed,
-          cost_usd: costUsd,
-          outputText,
-        },
+        message: `Agent "${agent.name}" completed`,
+        run: { id: runId, status: 'completed', duration_ms: durationMs, tokens_used: tokensUsed, cost_usd: costUsd, outputText },
       });
     } catch (error) {
-      // Execution failed - update run status
-      run(
-        `UPDATE runs SET
-          status = 'failed',
-          error_msg = ?,
-          completed_at = datetime('now'),
-          updated_at = datetime('now')
-        WHERE id = ?`,
-        [error.message, runId]
-      );
-
-      throw new AppError(`Agent execution failed: ${error.message}`, 'AGENT_EXECUTION_FAILED', 500);
+      const isTimeout = error.message.includes('timed out');
+      markRunFailed(runId, agent.id, error.message);
+      try {
+        if (io) {
+          io.emit('run:log', { runId, line: `Error: ${error.message}`, timestamp: new Date().toISOString() });
+          io.emit('run:failed', { runId, agentId: agent.id, error: error.message, isTimeout });
+        }
+      } catch {}
+      throw new AppError(`Agent failed: ${error.message}`, 'AGENT_EXECUTION_FAILED', 500);
     }
   } catch (error) {
     next(error);
@@ -1345,39 +571,22 @@ Cost:     $0.00`;
 
 /**
  * POST /api/runs/:id/cancel
- * Cancel a pending run before it starts.
- * Phase 2.1: Confirmation Gates
  */
 router.post('/:id/cancel', validateParams(runIdParamSchema), (req, res, next) => {
   try {
     const runId = req.validated.params.id;
-
     const runData = get('SELECT * FROM runs WHERE id = ?', [runId]);
-    if (!runData) {
-      throw new AppError(`Run with ID "${runId}" not found.`, 'RUN_NOT_FOUND', 404);
-    }
-
+    if (!runData) throw new AppError(`Run not found.`, 'RUN_NOT_FOUND', 404);
     if (runData.status !== 'pending') {
-      throw new AppError(
-        `Cannot cancel run - current status: ${runData.status}. Only pending runs can be cancelled.`,
-        'RUN_NOT_PENDING',
-        400
-      );
+      throw new AppError(`Cannot cancel — status is ${runData.status}.`, 'RUN_NOT_PENDING', 400);
     }
-
-    run(
-      `UPDATE runs SET status = 'cancelled', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
-      [runId]
-    );
-
-    res.json({
-      message: 'Run cancelled successfully',
-      id: runId,
-      status: 'cancelled',
-    });
+    run(`UPDATE runs SET status='cancelled', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`, [runId]);
+    res.json({ message: 'Run cancelled', id: runId, status: 'cancelled' });
   } catch (error) {
     next(error);
   }
 });
 
+// Export both router and handler registry
+router.SPECIAL_HANDLERS = SPECIAL_HANDLERS;
 module.exports = router;
