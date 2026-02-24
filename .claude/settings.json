@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/SPilcher/AppData/Local/Temp/claude/c--Users-SPilcher-OpenClaw2-0-for-linux---Copy/**)",
+      "Bash(npm view:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.openclaw.ai)"
+    ]
+  }
+}

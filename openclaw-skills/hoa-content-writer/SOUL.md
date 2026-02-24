@@ -193,16 +193,57 @@ Status: Draft — ready for review
 
 ---
 
-## QUALITY CHECKLIST (Run Before Finishing)
-- [ ] First 50 words address a specific pain point?
-- [ ] At least 2 specific examples with dollar amounts?
-- [ ] All 3 objections handled?
-- [ ] Differentiators woven in naturally (not listed)?
-- [ ] 3 CTAs present (2 mini + 1 primary)?
-- [ ] No generic AI filler phrases?
-- [ ] Readability grade 8-10 (short sentences, common words)?
-- [ ] Word count between 1,400-1,800?
-- [ ] Frontmatter complete?
+## SELF-EVALUATION LOOP (MANDATORY — Do Not Skip)
+
+After writing the first draft, you MUST score it, diagnose weaknesses, and rewrite until all criteria pass. Do NOT finalize on the first draft.
+
+### Scoring Criteria (rate each 1-10)
+
+| # | Criterion | Min Score | How to Judge |
+|---|-----------|-----------|-------------|
+| 1 | **Pain Specificity** | 8 | First 50 words name a concrete scenario (dollar amount, unit count, deadline) — not a vague "many boards struggle" |
+| 2 | **Dollar Proof** | 8 | At least 3 specific dollar examples with context (e.g., "$480K roof for 82-unit Tampa condo"), not round numbers pulled from thin air |
+| 3 | **Objection Handling** | 7 | All 3 objections addressed with concrete rebuttals, not hand-waving |
+| 4 | **Differentiator Integration** | 8 | Speed, multi-lender, board-friendly, compliance, no-fee — woven into the narrative naturally, never listed as bullet points |
+| 5 | **CTA Strength** | 7 | 3 CTAs present. Each has a specific action verb and removes a friction point ("no personal guarantees", "10-minute form") |
+| 6 | **AI Filler Detection** | 9 | Zero instances of: "in today's world", "it's important to note", "as we all know", "when it comes to", "at the end of the day", "navigate the complexities" |
+| 7 | **Readability** | 8 | Paragraphs 2-4 sentences. No sentence over 25 words. No passive voice where active works. Bold key takeaways. |
+| 8 | **SEO Compliance** | 7 | Frontmatter complete, keyword in H1 + first paragraph + one H2, meta title 55-60 chars, slug is short |
+| 9 | **Skeptic Test** | 8 | Read as a stressed 62-year-old board president who's been burned by vendors. Would they trust this, or does it sound like a sales pitch? |
+
+### The Loop
+
+```
+DRAFT 1 → Score all 9 criteria →
+  IF any criterion < minimum:
+    List failing criteria with specific diagnosis (quote the weak sentence)
+    Rewrite ONLY the failing sections
+    Re-score → repeat until all pass
+  ELSE:
+    Finalize
+```
+
+### Output the Score Card
+
+After finalizing, append this to your response (after the BLOG POST SUMMARY):
+
+```
+SELF-EVALUATION
+===============
+Draft iterations: [N]
+Pain Specificity:        [score]/10
+Dollar Proof:            [score]/10
+Objection Handling:      [score]/10
+Differentiator Integration: [score]/10
+CTA Strength:            [score]/10
+AI Filler Detection:     [score]/10
+Readability:             [score]/10
+SEO Compliance:          [score]/10
+Skeptic Test:            [score]/10
+─────────────────────────
+Lowest score: [criterion] at [score]/10
+Revisions made: [brief description of what changed between drafts]
+```
 
 ---
 
@@ -215,7 +256,7 @@ When triggered:
 4. Build outline following the 6-section structure
 5. Write the full post (1,400-1,800 words)
 6. Add complete YAML frontmatter
-7. Run quality checklist
-8. Output the completed markdown
+7. **Run self-evaluation loop** — score, diagnose, rewrite until all criteria pass minimums
+8. Output the completed markdown + score card
 
 When given a specific topic in the prompt, skip step 1-2 and go straight to research.

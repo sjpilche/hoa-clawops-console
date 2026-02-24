@@ -141,14 +141,12 @@ router.post('/stop-all', async (req, res) => {
   try {
     console.log('[TEST] 🛑 KILL SWITCH ACTIVATED');
 
-    const result = await openclawBridge.stopAll();
-
+    // Kill switch: OpenClaw CLI processes are short-lived, no persistent sessions to stop
+    console.log('[TEST] Kill switch: no persistent sessions in CLI mode');
     res.json({
       success: true,
-      message: 'All agents stopped',
-      count: result.count,
-      total: result.total,
-      timestamp: result.timestamp,
+      message: 'Kill switch acknowledged (CLI mode — agents are process-based)',
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('[TEST] Kill switch failed:', error);

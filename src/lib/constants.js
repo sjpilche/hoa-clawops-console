@@ -6,6 +6,7 @@
 /** Navigation items for the sidebar */
 export const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: 'LayoutDashboard' },
+  { path: '/chat', label: 'Agent Chat', icon: 'MessageSquare' },
   { path: '/domains', label: 'Domains', icon: 'Globe' },
   { path: '/agents', label: 'Agents', icon: 'Bot' },
   { path: '/hierarchy', label: 'Hierarchy', icon: 'GitBranch' },

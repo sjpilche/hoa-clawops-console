@@ -5,8 +5,11 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../db/connection');
+const { all, get, run } = require('../db/connection');
 const openclawBridge = require('../services/openclawBridge');
+const { authenticate } = require('../middleware/auth');
+
+router.use(authenticate);
 
 // Test prompts for each agent
 const AGENT_PROMPTS = {
@@ -76,7 +79,7 @@ router.post('/run', async (req, res) => {
     console.log('[Blitz] Starting new blitz run...');
 
     // 1. Get all active agents
-    const agents = await db.all(
+    const agents = all(
       `SELECT id, name, config FROM agents WHERE status = 'active' ORDER BY name`
     );
 
@@ -88,19 +91,20 @@ router.post('/run', async (req, res) => {
     }
 
     // 2. Create blitz run record
-    const runResult = await db.run(
+    run(
       `INSERT INTO blitz_runs (status, total_agents) VALUES ('running', ?)`,
       [agents.length]
     );
 
-    const runId = runResult.lastID;
+    const blitzRun = get(`SELECT id FROM blitz_runs ORDER BY rowid DESC LIMIT 1`);
+    const runId = blitzRun.id;
     console.log(`[Blitz] Created run ${runId} with ${agents.length} agents`);
 
     // 3. Create pending result records for each agent
     for (const agent of agents) {
       const prompt = AGENT_PROMPTS[agent.name] || `Provide a brief introduction of your capabilities and role in the HOA Project Funding marketing system.`;
 
-      await db.run(
+      run(
         `INSERT INTO blitz_results (blitz_run_id, agent_id, agent_name, prompt, status)
          VALUES (?, ?, ?, ?, 'pending')`,
         [runId, agent.id, agent.name, prompt]
@@ -144,7 +148,7 @@ async function executeBlitzRun(runId, agents) {
     console.log(`[Blitz] Running agent: ${agent.name}`);
 
     // Update status to running
-    await db.run(
+    run(
       `UPDATE blitz_results
        SET status = 'running', started_at = datetime('now')
        WHERE blitz_run_id = ? AND agent_id = ?`,
@@ -155,7 +159,8 @@ async function executeBlitzRun(runId, agents) {
       const startTime = Date.now();
 
       // Run agent via OpenClaw Bridge
-      const openclawId = agent.config?.openclaw_id || agent.name.toLowerCase().replace(/\s+/g, '-');
+      const agentConfig = agent.config ? JSON.parse(agent.config) : {};
+      const openclawId = agentConfig.openclaw_id || agent.name.toLowerCase().replace(/\s+/g, '-');
 
       const result = await openclawBridge.runAgent(agent.id, {
         openclawId,
@@ -165,18 +170,29 @@ async function executeBlitzRun(runId, agents) {
 
       const duration = Date.now() - startTime;
 
+      // Extract clean text output (OpenClaw native format)
+      let outputText = result.output || 'No output';
+      try {
+        const parsed = JSON.parse(outputText);
+        if (parsed.payloads?.[0]?.text) {
+          outputText = parsed.payloads[0].text;
+        } else if (parsed.type === 'result' && parsed.result) {
+          outputText = parsed.result;
+        }
+      } catch { /* use raw */ }
+
       console.log(`[Blitz] ✅ ${agent.name} completed in ${duration}ms`);
 
       // Update result with output
-      await db.run(
+      run(
         `UPDATE blitz_results
          SET output = ?, status = 'completed', duration_ms = ?, completed_at = datetime('now')
          WHERE blitz_run_id = ? AND agent_id = ?`,
-        [result.output || 'No output', duration, runId, agent.id]
+        [outputText, duration, runId, agent.id]
       );
 
       // Increment completed count
-      await db.run(
+      run(
         `UPDATE blitz_runs SET completed_agents = completed_agents + 1 WHERE id = ?`,
         [runId]
       );
@@ -185,7 +201,7 @@ async function executeBlitzRun(runId, agents) {
       console.error(`[Blitz] ❌ ${agent.name} failed:`, error.message);
 
       // Update result with error
-      await db.run(
+      run(
         `UPDATE blitz_results
          SET status = 'failed', error = ?, completed_at = datetime('now')
          WHERE blitz_run_id = ? AND agent_id = ?`,
@@ -193,7 +209,7 @@ async function executeBlitzRun(runId, agents) {
       );
 
       // Increment failed count
-      await db.run(
+      run(
         `UPDATE blitz_runs SET failed_agents = failed_agents + 1, completed_agents = completed_agents + 1 WHERE id = ?`,
         [runId]
       );
@@ -203,7 +219,7 @@ async function executeBlitzRun(runId, agents) {
   // Mark run as completed
   const totalDuration = Date.now() - runStartTime;
 
-  await db.run(
+  run(
     `UPDATE blitz_runs
      SET status = 'completed', completed_at = datetime('now'), total_duration_ms = ?
      WHERE id = ?`,
@@ -221,19 +237,19 @@ router.get('/status/:runId', async (req, res) => {
   try {
     const { runId } = req.params;
 
-    const run = await db.get(
+    const blitzRun = get(
       `SELECT * FROM blitz_runs WHERE id = ?`,
       [runId]
     );
 
-    if (!run) {
+    if (!blitzRun) {
       return res.status(404).json({
         success: false,
         error: 'Blitz run not found'
       });
     }
 
-    const results = await db.all(
+    const results = all(
       `SELECT id, agent_name, status, duration_ms, error
        FROM blitz_results
        WHERE blitz_run_id = ?
@@ -243,13 +259,13 @@ router.get('/status/:runId', async (req, res) => {
 
     res.json({
       success: true,
-      run,
+      run: blitzRun,
       results,
       progress: {
-        total: run.total_agents,
-        completed: run.completed_agents,
-        failed: run.failed_agents,
-        percentage: Math.round((run.completed_agents / run.total_agents) * 100)
+        total: blitzRun.total_agents,
+        completed: blitzRun.completed_agents,
+        failed: blitzRun.failed_agents,
+        percentage: Math.round((blitzRun.completed_agents / blitzRun.total_agents) * 100)
       }
     });
 
@@ -270,26 +286,26 @@ router.get('/results/:runId', async (req, res) => {
   try {
     const { runId } = req.params;
 
-    const run = await db.get(
+    const blitzRun = get(
       `SELECT * FROM blitz_runs WHERE id = ?`,
       [runId]
     );
 
-    if (!run) {
+    if (!blitzRun) {
       return res.status(404).json({
         success: false,
         error: 'Blitz run not found'
       });
     }
 
-    const results = await db.all(
+    const results = all(
       `SELECT * FROM blitz_results WHERE blitz_run_id = ? ORDER BY id`,
       [runId]
     );
 
     res.json({
       success: true,
-      run,
+      run: blitzRun,
       results
     });
 
@@ -308,7 +324,7 @@ router.get('/results/:runId', async (req, res) => {
  */
 router.get('/history', async (req, res) => {
   try {
-    const runs = await db.all(
+    const runs = all(
       `SELECT id, status, started_at, completed_at, total_agents, completed_agents, failed_agents, total_duration_ms
        FROM blitz_runs
        ORDER BY started_at DESC

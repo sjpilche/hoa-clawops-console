@@ -1,0 +1,30 @@
+nsg-cfo-ai-suite-marketing/
+├── README.md                          ← Start here
+├── MASTER_PLAN_V2.md                  ← Single source of truth (integrated full plan)
+├── AGENTS.md                          ← Global OpenClaw rules + human gates
+├── skills/                            ← One SKILL.md per agent (ready for Claude to code)
+│   ├── 01_content_engine.skill.md
+│   ├── 02_social_scheduler.skill.md
+│   ├── 03_lead_scout.skill.md
+│   ├── 04_outreach_agent.skill.md
+│   ├── 05_analytics_monitor.skill.md
+│   ├── 06_offer_proof_builder.skill.md     ← NEW blitz agent
+│   └── 07_pilot_deliverer.skill.md         ← NEW (artifact generation)
+├── phase0_blitz/                      ← Everything for the 14-day paid pilot sprint
+│   ├── PAID_PILOT_OFFERS.md
+│   ├── PROOF_PACK.md
+│   ├── LANDING_PAGE_AR.md
+│   ├── LANDING_PAGE_CLOSE.md
+│   ├── LANDING_PAGE_SPEND.md
+│   └── BLITZ_EMAIL_SEQUENCES.md
+├── content/
+│   ├── CALENDAR_WEEKS_1_8.md
+│   └── TEMPLATES/
+│       ├── linkedin_steve_voice.md
+│       ├── blog_template.md
+│       └── proof_artifact_loom_script.md
+├── leads/
+│   └── BLITZ_ICP_TARGET_LIST_TEMPLATE.md
+├── kpis/
+│   └── DASHBOARD_TEMPLATE.md
+└── NEXT_STEPS_IMPLEMENTATION.md       ← Day-by-day checklist for Claude + VS Code

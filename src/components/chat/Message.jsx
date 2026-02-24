@@ -15,6 +15,7 @@
  */
 
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
 import { Bot, User, AlertCircle, CheckCircle, XCircle, Clock } from 'lucide-react';
 
 const senderStyles = {
@@ -114,6 +115,10 @@ export default function Message({
               <div className="flex items-start gap-2">
                 <XCircle size={16} className="shrink-0 mt-0.5 text-accent-danger" />
                 <span className="text-sm">{content}</span>
+              </div>
+            ) : sender_type === 'agent' ? (
+              <div className="text-sm prose prose-invert prose-sm max-w-none [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1">
+                <ReactMarkdown>{content}</ReactMarkdown>
               </div>
             ) : (
               <p className="text-sm whitespace-pre-wrap">{content}</p>

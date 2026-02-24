@@ -345,3 +345,83 @@ Before saving any post, verify:
 - "Convert blog to LinkedIn post targeting property managers"
 
 When given any of these prompts, follow the process above to create platform-optimized social content that drives traffic to www.hoaprojectfunding.com and converts visitors to fill out the application or book a free consult.
+
+---
+
+## SELF-EVALUATION LOOP (MANDATORY — Do Not Skip)
+
+After writing the first draft of each platform's post, you MUST score it, diagnose weaknesses, and rewrite until all criteria pass. Evaluate EACH platform post separately.
+
+### Scoring Criteria (rate each 1-10)
+
+**Facebook Company Page Post:**
+
+| # | Criterion | Min Score | How to Judge |
+|---|-----------|-----------|-------------|
+| 1 | **Thumb-Stop Power** | 8 | First line makes a scrolling board member stop. Specific scenario or emotion — not "Are you an HOA board member?" |
+| 2 | **Value Before CTA** | 8 | Post teaches or reframes something before asking for anything. Reader gets value even if they never click. |
+| 3 | **CTA Clarity** | 8 | Exactly one primary CTA (application OR consult). Action verb, friction remover ("no personal guarantees", "10 minutes"). |
+| 4 | **Word Count** | 7 | 100-150 words. Not a wall of text on mobile. |
+| 5 | **Anti-Corporate** | 8 | Sounds like a helpful neighbor, not a bank's marketing department. No "leverage", "solutions", "offerings". |
+
+**Facebook Group Post:**
+
+| # | Criterion | Min Score | How to Judge |
+|---|-----------|-----------|-------------|
+| 1 | **Discussion Spark** | 9 | Ends with a question that real board members would actually answer from experience — not rhetorical |
+| 2 | **Zero Sales** | 9 | NO link, NO "check out our site", NO pitch. A moderator would approve this. |
+| 3 | **Genuine Value** | 8 | Shares an insight or framing that helps boards — not just sets up a pitch |
+| 4 | **Peer Voice** | 8 | Reads like a fellow board member sharing experience, not a company posting content |
+
+**LinkedIn Post:**
+
+| # | Criterion | Min Score | How to Judge |
+|---|-----------|-----------|-------------|
+| 1 | **PM/CAM Relevance** | 8 | Written for property managers/CAMs, not board members. Addresses their workflow. |
+| 2 | **Thought Leadership** | 8 | Contains an insight, framework, or data point — not just a summary of the blog |
+| 3 | **Professional Tone** | 8 | LinkedIn-appropriate. No emojis except one at CTA. No exclamation marks. |
+| 4 | **Hashtag Quality** | 7 | 5 relevant hashtags. No generic #business or #success. |
+
+### The Loop (per platform)
+
+```
+DRAFT 1 → Score criteria for that platform →
+  IF any criterion < minimum:
+    Diagnose (quote the weak line)
+    Rewrite ONLY failing sections
+    Re-score → repeat until all pass
+  ELSE:
+    Move to next platform
+```
+
+### Output the Score Card
+
+After the output summary, append:
+
+```
+SELF-EVALUATION
+===============
+Draft iterations: FB Page [N] / FB Group [N] / LinkedIn [N]
+
+Facebook Page:
+  Thumb-Stop Power:  [score]/10
+  Value Before CTA:  [score]/10
+  CTA Clarity:       [score]/10
+  Word Count:        [score]/10
+  Anti-Corporate:    [score]/10
+
+Facebook Group:
+  Discussion Spark:  [score]/10
+  Zero Sales:        [score]/10
+  Genuine Value:     [score]/10
+  Peer Voice:        [score]/10
+
+LinkedIn:
+  PM/CAM Relevance:  [score]/10
+  Thought Leadership: [score]/10
+  Professional Tone: [score]/10
+  Hashtag Quality:   [score]/10
+
+Lowest score: [platform] → [criterion] at [score]/10
+Revisions made: [what changed between drafts]
+```

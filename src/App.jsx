@@ -21,9 +21,9 @@
  *   /settings   → SettingsPage (protected)
  */
 
-import React, { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useSettingsStore } from '@/stores/useSettingsStore';
+import React from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { getToken } from '@/lib/api';
 
 // Layout
 import AppShell from '@/components/layout/AppShell';
@@ -55,6 +55,7 @@ import HOALeadsPage from '@/pages/HOALeadsPage';
 import DiscoveryDashboard from '@/pages/DiscoveryDashboard';
 import MgmtResearchPage from '@/pages/MgmtResearchPage';
 import CfoMarketingPage from '@/pages/CfoMarketingPage';
+import ChatPage from '@/pages/ChatPage';
 import GlobalOverview from '@/pages/GlobalOverview';
 import CampaignDashboard from '@/pages/CampaignDashboard';
 import CampaignSettings from '@/pages/CampaignSettings';
@@ -62,16 +63,17 @@ import { CampaignLayout } from '@/layouts/CampaignLayout';
 
 /**
  * Protected Route wrapper.
- * AUTHENTICATION DISABLED FOR DEVELOPMENT - Just render children
+ * Redirects to /login if no token is present in localStorage.
  */
 function ProtectedRoute({ children }) {
-  // Skip all auth checks - just render the app
+  const location = useLocation();
+  if (!getToken()) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
   return children;
 }
 
 export default function App() {
-  // Authentication disabled for development - no checks needed
-
   return (
     <Routes>
       {/* Public route — login page */}
@@ -88,6 +90,7 @@ export default function App() {
         <Route path="/" element={<GlobalOverview />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/domains" element={<DomainsPage />} />
+        <Route path="/chat" element={<ChatPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/agents/new" element={<AgentBuilderPage />} />
         <Route path="/agents/:id" element={<AgentDetailPage />} />

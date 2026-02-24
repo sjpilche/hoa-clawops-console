@@ -135,12 +135,14 @@ async function executeCommand(cmd, threadId, userId) {
           });
         }
 
-        // Execute agent via OpenClaw Bridge
+        // Execute agent via OpenClaw CLI
+        const agentConfig = agent.config ? JSON.parse(agent.config) : {};
+        const openclawId = agentConfig.openclaw_id || agent.id;
         const sessionId = `session-${Date.now()}-${agent.id}`;
         const result = await openclawBridge.runAgent(agent.id, {
+          openclawId,
           message: cmd.message,
           sessionId,
-          json: false,
         });
 
         // Create run record
@@ -163,12 +165,16 @@ async function executeCommand(cmd, threadId, userId) {
           ]
         );
 
+        // Parse OpenClaw output
+        const OpenClawBridge = require('./openclawBridge');
+        const parsed = OpenClawBridge.constructor.parseOutput(result.output);
+
         // Add agent response message
         messages.push({
           id: uuidv4(),
           thread_id: threadId,
           sender_type: 'agent',
-          content: result.output || 'Task completed',
+          content: parsed.text || result.output || 'Task completed',
           msg_type: 'text',
           metadata: JSON.stringify({
             sessionId: result.sessionId,
@@ -206,28 +212,23 @@ async function executeCommand(cmd, threadId, userId) {
       }
 
       case 'help': {
-        const helpText = `**Available Commands:**
+        const helpText = `**Chat with your agents in natural language or use commands:**
 
-\`/run <agent-name> <message>\`
-Execute an OpenClaw agent with a task
+**Commands:**
+\`/run <agent-name> <message>\` — Run a specific agent
+\`/list\` — Show all agents
+\`/help\` — This help message
 
-\`/list\`
-Show all configured agents
-
-\`/stop <session-id>\`
-Stop a running agent
-
-\`/help\`
-Show this help message
-
-**Examples:**
-\`/run invoice-extractor Get latest invoices from Sage 300\`
-\`/run job-reporter Pull job costs for project 12345\`
+**Natural Language:**
+Just type what you want done — the AI will figure out which agent to use.
+- "Write a blog post about HOA funding"
+- "Find new HOA leads in San Diego"
+- "Draft outreach emails for hot leads"
 
 **Tips:**
 - Agent names are case-insensitive and support partial matching
-- All executions are logged for audit (see AGENT-SAFETY.md)
-- Press Enter to send, Shift+Enter for new line`.trim();
+- All executions are logged for audit
+- Conversations are multi-turn — agents remember context`.trim();
 
         messages.push({
           id: uuidv4(),
@@ -253,13 +254,11 @@ Show this help message
           break;
         }
 
-        await openclawBridge.stopAgent(cmd.sessionId);
-
         messages.push({
           id: uuidv4(),
           thread_id: threadId,
           sender_type: 'system',
-          content: `🛑 Stopped agent session: ${cmd.sessionId}`,
+          content: `Stop is not yet supported for OpenClaw CLI sessions. Close the terminal or restart the server to kill running agents.`,
           msg_type: 'status',
           created_at: new Date().toISOString(),
         });

@@ -44,7 +44,9 @@ const hoaLeadsRoutes = require('./routes/hoaLeads');
 const discoveryRoutes = require('./routes/discovery');
 const mgmtResearchRoutes = require('./routes/mgmtResearch');
 const cfoMarketingRoutes = require('./routes/cfoMarketing');
+const costsRoutes = require('./routes/costs');
 const campaignRoutes = require('./routes/campaigns');
+const blitzRoutes = require('./routes/blitz');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -97,7 +99,7 @@ async function startServer() {
             fontSrc: ["'self'", 'data:'],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
-            frameSrc: ["'none'"],
+            frameSrc: ["'self'", 'http://127.0.0.1:18789'], // Allow OpenClaw Monitor embed
           },
         },
         // Additional security headers
@@ -180,6 +182,8 @@ async function startServer() {
     app.use('/api/discovery', discoveryRoutes);
     app.use('/api/mgmt-research', mgmtResearchRoutes);
     app.use('/api/cfo-marketing', cfoMarketingRoutes);
+    app.use('/api/costs', costsRoutes);
+    app.use('/api/blitz', blitzRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {

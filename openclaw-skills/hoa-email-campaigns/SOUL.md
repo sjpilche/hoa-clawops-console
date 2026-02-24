@@ -511,3 +511,65 @@ Before sending any email:
 - "Generate monthly newsletter for March highlighting the roof financing blog post"
 
 When given these prompts, follow the templates above to create professional, conversion-focused email campaigns that drive contacts to complete the application or book a free consult.
+
+---
+
+## SELF-EVALUATION LOOP (MANDATORY — Do Not Skip)
+
+After writing each email in a sequence, you MUST score it, diagnose weaknesses, and rewrite until all criteria pass. Evaluate EACH email separately before moving to the next.
+
+### Scoring Criteria (rate each 1-10)
+
+| # | Criterion | Min Score | How to Judge |
+|---|-----------|-----------|-------------|
+| 1 | **Subject Line** | 8 | Under 50 chars. Specific (names project type or HOA). Creates value, not curiosity. A busy board president opens this — not archives it. |
+| 2 | **Open-Rate Predictor** | 8 | Would this get opened on a phone at 7 AM between 47 other emails? Test: read only the subject + preview text (first line). Compelling enough to tap? |
+| 3 | **Personalization** | 8 | Uses [First Name], [HOA Name], or [Project Type] where it feels natural. Mail-merge tokens feel hand-written, not robotic. |
+| 4 | **Objection Handling** | 7 | Addresses the objection that matches this email's position in the sequence (friction → trust → social proof → soft close) |
+| 5 | **CTA Clarity** | 8 | One primary CTA. Button-worthy action verb ("Continue Your Application", "Book a Free Call"). No competing asks. |
+| 6 | **Tone Match** | 8 | Professional but warm. Not salesy, not corporate. Would a 62-year-old board president feel helped, not sold to? |
+| 7 | **Length Discipline** | 8 | Under 200 words for sequences, under 400 for newsletter. Every sentence earns its place — cut anything that doesn't add value. |
+| 8 | **Sequence Logic** | 7 | This email makes sense AFTER the previous one. Doesn't repeat the same CTA pitch. Escalation is: helpful → reassuring → proof → soft close. |
+| 9 | **Spam Filter Safety** | 8 | No ALL CAPS, no "FREE!!!", no multiple exclamation marks, no "act now", no "limited time". Passes a mental spam filter test. |
+
+### The Loop (per email)
+
+```
+DRAFT 1 → Score all 9 criteria →
+  IF any criterion < minimum:
+    List failing criteria (quote the weak line)
+    Rewrite ONLY those sections
+    Re-score → repeat until all pass
+  ELSE:
+    Move to next email in sequence
+```
+
+### Output the Score Card
+
+After the sequence summary, append:
+
+```
+SELF-EVALUATION
+===============
+Sequence: [Abandonment / Post-Consult / Newsletter]
+Total draft iterations: [sum across all emails]
+
+Email 1 — [subject line]:
+  Subject Line:       [score]/10
+  Open-Rate Predictor: [score]/10
+  Personalization:    [score]/10
+  Objection Handling: [score]/10
+  CTA Clarity:        [score]/10
+  Tone Match:         [score]/10
+  Length Discipline:   [score]/10
+  Sequence Logic:     [score]/10
+  Spam Filter Safety: [score]/10
+
+Email 2 — [subject line]:
+  [same format]
+
+[...repeat for each email in sequence]
+
+Lowest score: Email [N] → [criterion] at [score]/10
+Revisions made: [what changed between drafts]
+```

@@ -3,14 +3,32 @@
  * @description Agent management page - create, configure, and manage OpenClaw agents.
  */
 
-import React, { useEffect, useState } from 'react';
-import { Plus, Bot, Search, Play, X, CheckCircle, AlertCircle, Loader, Clock, DollarSign, Zap, RefreshCw } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Plus, Bot, Search, Play, X, CheckCircle, AlertCircle, Loader, Clock, DollarSign, Zap, RefreshCw, ChevronDown, ChevronRight, Building2, Briefcase, Building, Globe, Cpu } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
 import AgentCard from '@/components/agents/AgentCard';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import ConfirmationDialog from '@/components/safety/ConfirmationDialog';
+
+/** Domain group definitions — agents are grouped by name prefix */
+const DOMAIN_GROUPS = [
+  { key: 'hoa-marketing', label: 'HOA Marketing', prefix: 'hoa-', icon: Building2, color: 'text-emerald-400', bg: 'bg-emerald-400/10',
+    filter: (name) => ['hoa-content-writer','hoa-cms-publisher','hoa-social-media','hoa-social-engagement','hoa-networker','hoa-email-campaigns','hoa-website-publisher','hoa-facebook-poster'].includes(name) },
+  { key: 'hoa-pipeline', label: 'HOA Pipeline', prefix: 'hoa-', icon: Globe, color: 'text-blue-400', bg: 'bg-blue-400/10',
+    filter: (name) => ['hoa-discovery','hoa-contact-finder','hoa-contact-enricher','hoa-outreach-drafter'].includes(name) },
+  { key: 'hoa-intel', label: 'HOA Intel', prefix: '', icon: Search, color: 'text-cyan-400', bg: 'bg-cyan-400/10',
+    filter: (name) => ['hoa-minutes-monitor','google-reviews-monitor'].includes(name) },
+  { key: 'mgmt-research', label: 'Mgmt Research', prefix: 'mgmt-', icon: Building, color: 'text-purple-400', bg: 'bg-purple-400/10',
+    filter: (name) => name.startsWith('mgmt-') },
+  { key: 'cfo-marketing', label: 'CFO Marketing', prefix: 'cfo-', icon: Briefcase, color: 'text-amber-400', bg: 'bg-amber-400/10',
+    filter: (name) => name.startsWith('cfo-') },
+  { key: 'jake-marketing', label: 'Jake Marketing', prefix: 'jake-', icon: Zap, color: 'text-rose-400', bg: 'bg-rose-400/10',
+    filter: (name) => name.startsWith('jake-') },
+  { key: 'core', label: 'Core', prefix: '', icon: Cpu, color: 'text-slate-400', bg: 'bg-slate-400/10',
+    filter: () => true }, // catch-all for unmatched agents
+];
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
@@ -77,6 +95,28 @@ export default function AgentsPage() {
     agent.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Group agents by domain
+  const groupedAgents = useMemo(() => {
+    const assigned = new Set();
+    const groups = [];
+
+    for (const group of DOMAIN_GROUPS) {
+      const matching = filteredAgents.filter(agent => {
+        if (assigned.has(agent.id)) return false;
+        return group.filter(agent.name);
+      });
+      matching.forEach(a => assigned.add(a.id));
+      if (matching.length > 0) {
+        groups.push({ ...group, agents: matching });
+      }
+    }
+    return groups;
+  }, [filteredAgents]);
+
+  // Collapsible group state — all expanded by default
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const toggleGroup = (key) => setCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -85,7 +125,7 @@ export default function AgentsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-text-primary">Agents</h1>
             <p className="text-sm text-text-secondary mt-1">
-              Configure and manage your OpenClaw automation agents
+              {agents.length} agents across {groupedAgents.length} domains
             </p>
           </div>
           <Button
@@ -110,7 +150,7 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {/* Agent List */}
+      {/* Agent List — grouped by domain */}
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
@@ -142,29 +182,59 @@ export default function AgentsPage() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {/* Column headers */}
-            <div className="flex items-center gap-4 px-4 py-1.5 text-xs text-text-muted uppercase tracking-wider">
-              <div className="w-2.5 shrink-0" />
-              <div className="w-8 shrink-0" />
-              <div className="flex-1">Agent</div>
-              <div className="hidden md:flex items-center gap-5 shrink-0">
-                <div className="w-8 text-center">Runs</div>
-                <div className="w-12 text-center">Success</div>
-                <div className="w-24 text-right">Last Run</div>
-              </div>
-              <div className="w-28 shrink-0" />
-            </div>
-            {filteredAgents.map((agent) => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                onRun={handleRunAgent}
-                onEdit={handleEditAgent}
-                onDelete={handleDeleteAgent}
-                onRegister={handleRegisterAgent}
-              />
-            ))}
+          <div className="flex flex-col gap-4">
+            {groupedAgents.map((group) => {
+              const GroupIcon = group.icon;
+              const isCollapsed = collapsedGroups[group.key];
+              const runningCount = group.agents.filter(a => a.status === 'running').length;
+              const totalRuns = group.agents.reduce((sum, a) => sum + (a.total_runs || 0), 0);
+
+              return (
+                <div key={group.key} className="rounded-xl border border-border overflow-hidden">
+                  {/* Group header — clickable to collapse */}
+                  <button
+                    onClick={() => toggleGroup(group.key)}
+                    className="w-full flex items-center gap-3 px-4 py-3 bg-bg-secondary hover:bg-bg-elevated transition-colors"
+                  >
+                    {isCollapsed ? <ChevronRight size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
+                    <div className={`w-8 h-8 rounded-lg ${group.bg} flex items-center justify-center shrink-0`}>
+                      <GroupIcon size={16} className={group.color} />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <span className="font-semibold text-sm text-text-primary">{group.label}</span>
+                      <span className="text-xs text-text-muted ml-2">
+                        {group.agents.length} agent{group.agents.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-text-muted">
+                      {runningCount > 0 && (
+                        <span className="flex items-center gap-1 text-blue-400">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                          {runningCount} running
+                        </span>
+                      )}
+                      <span>{totalRuns} runs</span>
+                    </div>
+                  </button>
+
+                  {/* Group body — collapsible agent list */}
+                  {!isCollapsed && (
+                    <div className="flex flex-col gap-1 p-2">
+                      {group.agents.map((agent) => (
+                        <AgentCard
+                          key={agent.id}
+                          agent={agent}
+                          onRun={handleRunAgent}
+                          onEdit={handleEditAgent}
+                          onDelete={handleDeleteAgent}
+                          onRegister={handleRegisterAgent}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

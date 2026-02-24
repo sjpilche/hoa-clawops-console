@@ -77,16 +77,24 @@ export default function MessageList({ messages = [], isLoading = false }) {
         )}
 
         {/* Messages */}
-        {messages.map((message) => (
-          <Message
-            key={message.id}
-            sender_type={message.sender_type}
-            content={message.content}
-            msg_type={message.msg_type}
-            metadata={message.metadata ? JSON.parse(message.metadata) : {}}
-            created_at={message.created_at}
-          />
-        ))}
+        {messages.map((message) => {
+          let meta = {};
+          try {
+            meta = typeof message.metadata === 'string'
+              ? JSON.parse(message.metadata)
+              : (message.metadata || {});
+          } catch {}
+          return (
+            <Message
+              key={message.id}
+              sender_type={message.sender_type}
+              content={message.content}
+              msg_type={message.msg_type}
+              metadata={meta}
+              created_at={message.created_at}
+            />
+          );
+        })}
 
         {/* Scroll anchor */}
         <div ref={messagesEndRef} />

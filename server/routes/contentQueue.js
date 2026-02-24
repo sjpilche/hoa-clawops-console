@@ -23,7 +23,7 @@ router.use(authenticate);
 router.use(optionalCampaignContext);
 router.use(optionalCampaignTableContext);
 
-// ─── Facebook Graph API helper ─────────────────────────────────────────────
+// ─── Facebook Posting Helper ──────────────────────────────────────────────────
 
 async function postToFacebook(content) {
   const pageId = process.env.FACEBOOK_PAGE_ID;
@@ -52,6 +52,19 @@ async function postToFacebook(content) {
   }
 
   return data; // { id: "page_id_post_id" }
+}
+
+// Publish post (Facebook only)
+async function publishPost(content, platform, metadata = {}) {
+  const supported = {
+    facebook: () => postToFacebook(content),
+  };
+
+  if (!supported[platform]) {
+    throw new Error(`Unsupported platform: ${platform}. Currently supported: facebook`);
+  }
+
+  return supported[platform]();
 }
 
 // ─── GET /api/content-queue ────────────────────────────────────────────────
@@ -147,27 +160,27 @@ router.post('/:id/publish', async (req, res) => {
     console.log(`[ContentQueue] Publishing post ${post.id} to Facebook...`);
 
     try {
-      const fbResult = await postToFacebook(post.content);
+      const result = await publishPost(post.content, post.platform);
 
       db.run(
         `UPDATE ${tableName}
-         SET status = 'posted', posted_at = datetime('now'), facebook_post_id = ?, updated_at = datetime('now')
+         SET status = 'posted', posted_at = datetime('now'), external_post_id = ?, metadata = ?, updated_at = datetime('now')
          WHERE id = ?`,
-        [fbResult.id, post.id]
+        [result.id, JSON.stringify(result), post.id]
       );
 
-      console.log(`[ContentQueue] ✅ Posted to Facebook: ${fbResult.id}`);
-      res.json({ success: true, facebook_post_id: fbResult.id, message: 'Published to Facebook successfully' });
-    } catch (fbError) {
+      console.log(`[ContentQueue] ✅ Posted to ${post.platform}: ${result.id}`);
+      res.json({ success: true, external_post_id: result.id, platform: post.platform, message: `Published to ${post.platform} successfully` });
+    } catch (publishError) {
       db.run(
         `UPDATE ${tableName}
          SET status = 'failed', error_message = ?, updated_at = datetime('now')
          WHERE id = ?`,
-        [fbError.message, post.id]
+        [publishError.message, post.id]
       );
 
-      console.error(`[ContentQueue] ❌ Facebook publish failed:`, fbError.message);
-      res.status(502).json({ success: false, error: fbError.message });
+      console.error(`[ContentQueue] ❌ ${post.platform} publish failed:`, publishError.message);
+      res.status(502).json({ success: false, error: publishError.message });
     }
   } catch (error) {
     console.error('[ContentQueue] Error publishing post:', error);
@@ -203,26 +216,26 @@ router.post('/publish-due', async (req, res) => {
 
     for (const post of duePosts) {
       try {
-        const fbResult = await postToFacebook(post.content);
+        const result = await publishPost(post.content, post.platform);
         db.run(
           `UPDATE ${tableName}
-           SET status = 'posted', posted_at = datetime('now'), facebook_post_id = ?, updated_at = datetime('now')
+           SET status = 'posted', posted_at = datetime('now'), external_post_id = ?, metadata = ?, updated_at = datetime('now')
            WHERE id = ?`,
-          [fbResult.id, post.id]
+          [result.id, JSON.stringify(result), post.id]
         );
         published++;
-        results.push({ id: post.id, status: 'posted', facebook_post_id: fbResult.id });
-        console.log(`[ContentQueue] ✅ Published post ${post.id}: ${fbResult.id}`);
-      } catch (fbError) {
+        results.push({ id: post.id, status: 'posted', platform: post.platform, external_post_id: result.id });
+        console.log(`[ContentQueue] ✅ Published post ${post.id} to ${post.platform}: ${result.id}`);
+      } catch (publishError) {
         db.run(
           `UPDATE ${tableName}
            SET status = 'failed', error_message = ?, updated_at = datetime('now')
            WHERE id = ?`,
-          [fbError.message, post.id]
+          [publishError.message, post.id]
         );
         failed++;
-        results.push({ id: post.id, status: 'failed', error: fbError.message });
-        console.error(`[ContentQueue] ❌ Failed post ${post.id}:`, fbError.message);
+        results.push({ id: post.id, status: 'failed', platform: post.platform, error: publishError.message });
+        console.error(`[ContentQueue] ❌ Failed to post ${post.id} to ${post.platform}:`, publishError.message);
       }
     }
 

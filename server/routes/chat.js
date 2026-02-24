@@ -16,6 +16,7 @@ const { authenticate } = require('../middleware/auth');
 const { AppError } = require('../middleware/errorHandler');
 const { isCommand, parseCommand, executeCommand } = require('../services/commandHandler');
 const { getIO } = require('../websocket/socketServer');
+const smartRouter = require('../services/smartRouter');
 const { validateBody, validateParams, validateMultiple } = require('../middleware/validator');
 const { createThreadSchema, threadIdParamSchema, createMessageSchema } = require('../schemas');
 
@@ -162,16 +163,94 @@ router.post(
         });
       }
 
-      // Update thread's updated_at timestamp
-      run('UPDATE chat_threads SET updated_at = datetime(\'now\') WHERE id = ?', [threadId]);
+      // ── SMART ROUTER: instant $0 responses for common requests ────
+      const smartResponse = await smartRouter.route(content);
+      if (smartResponse) {
+        const smartMsgId = uuidv4();
+        run(
+          `INSERT INTO chat_messages (id, thread_id, sender_type, content, msg_type, metadata)
+           VALUES (?, ?, 'agent', ?, 'text', ?)`,
+          [smartMsgId, threadId, smartResponse, JSON.stringify({ source: 'smart-router', costUsd: 0 })]
+        );
+        const smartMsg = get('SELECT * FROM chat_messages WHERE id = ?', [smartMsgId]);
+        run('UPDATE chat_threads SET updated_at = datetime(\'now\') WHERE id = ?', [threadId]);
 
-      // Emit user message via WebSocket
-      const io = getIO();
-      if (io) {
-        io.to(`thread:${threadId}`).emit('message:new', userMessage);
+        return res.status(201).json({
+          message: userMessage,
+          responses: [smartMsg],
+        });
       }
 
-      res.status(201).json({ message: userMessage });
+      // ── NATURAL LANGUAGE → OpenClaw agent ──────────────────────────
+      // Complex/creative requests go to OpenClaw "main" agent.
+      // Response is ASYNC — we return 201 immediately and push the
+      // agent reply via WebSocket when it's ready.
+      const openclawBridge = require('../services/openclawBridge');
+      const agentId = thread.agent_id || 'main';
+
+      const io = getIO();
+
+      // Return immediately — agent response comes via WebSocket
+      res.status(201).json({ message: userMessage, responses: [] });
+
+      // Fire agent call in background
+      ;(async () => {
+        try {
+          if (io) {
+            io.to(`thread:${threadId}`).emit('agent:status', {
+              status: 'thinking', agentId, timestamp: new Date().toISOString(),
+            });
+          }
+
+          const result = await openclawBridge.runAgent(agentId, {
+            openclawId: agentId,
+            message: content,
+            sessionId: threadId,
+          });
+
+          const parsed = openclawBridge.constructor.parseOutput(result.output);
+          const responseText = parsed.text || result.output || 'No response';
+
+          const responseMsgId = uuidv4();
+          run(
+            `INSERT INTO chat_messages (id, thread_id, sender_type, content, msg_type, metadata)
+             VALUES (?, ?, 'agent', ?, 'text', ?)`,
+            [responseMsgId, threadId, responseText, JSON.stringify({
+              sessionId: parsed.sessionId || threadId,
+              model: parsed.model,
+              tokensUsed: parsed.tokensUsed,
+              costUsd: parsed.costUsd,
+              durationMs: parsed.durationMs,
+            })]
+          );
+
+          const agentMessage = get('SELECT * FROM chat_messages WHERE id = ?', [responseMsgId]);
+
+          if (io) {
+            io.to(`thread:${threadId}`).emit('message:new', agentMessage);
+            io.to(`thread:${threadId}`).emit('agent:status', { status: 'idle', agentId });
+          }
+
+          run('UPDATE chat_threads SET updated_at = datetime(\'now\') WHERE id = ?', [threadId]);
+        } catch (agentError) {
+          console.error('[Chat] Agent error:', agentError.message);
+
+          const errMsgId = uuidv4();
+          run(
+            `INSERT INTO chat_messages (id, thread_id, sender_type, content, msg_type)
+             VALUES (?, ?, 'system', ?, 'error')`,
+            [errMsgId, threadId, `Agent error: ${agentError.message}`]
+          );
+          const errMsg = get('SELECT * FROM chat_messages WHERE id = ?', [errMsgId]);
+
+          if (io) {
+            io.to(`thread:${threadId}`).emit('message:new', errMsg);
+            io.to(`thread:${threadId}`).emit('agent:status', { status: 'idle', agentId });
+          }
+
+          run('UPDATE chat_threads SET updated_at = datetime(\'now\') WHERE id = ?', [threadId]);
+        }
+      })();
     } catch (error) {
       next(error);
     }

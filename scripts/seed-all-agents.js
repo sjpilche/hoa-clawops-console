@@ -50,6 +50,15 @@ const AGENT_FLEET = [
   { name: 'cfo-analytics-monitor', description: 'Tracks marketing analytics — open rates, click-through, conversions', group: 'cfo-marketing' },
   { name: 'cfo-offer-proof-builder', description: 'Builds case studies and proof points from pilot results', group: 'cfo-marketing' },
   { name: 'cfo-pilot-deliverer', description: 'Coordinates pilot delivery — Spend Leak, Close Accel, Get Paid Faster', group: 'cfo-marketing' },
+
+  // ── Jake Marketing (7) ──
+  { name: 'jake-content-engine', description: 'Jake-voice content — LinkedIn posts, blog articles, emails', group: 'jake-marketing' },
+  { name: 'jake-outreach-agent', description: 'Personalized cold emails to construction SMBs nationally', group: 'jake-marketing' },
+  { name: 'jake-lead-scout', description: 'LLM-powered construction SMB lead discovery and qualification', group: 'jake-marketing' },
+  { name: 'jake-social-scheduler', description: 'Formats and schedules Jake content for social platforms', group: 'jake-marketing' },
+  { name: 'jake-analytics-monitor', description: 'Daily pipeline health — leads, outreach, content performance', group: 'jake-marketing' },
+  { name: 'jake-offer-proof-builder', description: 'Case studies, demo scripts, ROI calculators, proof materials', group: 'jake-marketing' },
+  { name: 'jake-pilot-deliverer', description: 'Pilot delivery coordination — kickoff to results', group: 'jake-marketing' },
 ];
 
 async function main() {

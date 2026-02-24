@@ -1,0 +1,21 @@
+# OpenClaw Agent Global Rules (apply to every skill)
+
+human_gate: true                    # First 50 of any new pattern MUST be reviewed by Steve
+local_llm: true                     # Use your local Llama-3.1-70B or Groq (free tier)
+max_tokens_per_run: 4000
+memory: markdown                    # All outputs saved to ./memory/
+
+# Human approval workflow
+approval_required:
+  - new_lead_segment
+  - new_email_template
+  - new_pilot_offer
+  - any_outbound > 20/day
+
+# Shared tools (all agents get these)
+tools:
+  - browser_automation (OpenClaw native)
+  - sendgrid (warmed domain)
+  - google_sheets (lead list)
+  - loom_api (artifact delivery)
+  - canva_api (one-pagers)
