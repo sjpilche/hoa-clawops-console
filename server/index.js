@@ -47,6 +47,10 @@ const cfoMarketingRoutes = require('./routes/cfoMarketing');
 const costsRoutes = require('./routes/costs');
 const campaignRoutes = require('./routes/campaigns');
 const blitzRoutes = require('./routes/blitz');
+const pipelineRoutes = require('./routes/pipelines');
+const discordRoutes = require('./routes/discord');
+const brainRoutes   = require('./routes/brain');
+const mgmtOutreachRoutes = require('./routes/mgmtOutreach');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -184,6 +188,10 @@ async function startServer() {
     app.use('/api/cfo-marketing', cfoMarketingRoutes);
     app.use('/api/costs', costsRoutes);
     app.use('/api/blitz', blitzRoutes);
+    app.use('/api/pipelines', pipelineRoutes);
+    app.use('/api/discord', discordRoutes);
+    app.use('/api/brain',   brainRoutes);
+    app.use('/api/mgmt-outreach', mgmtOutreachRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {
@@ -267,6 +275,15 @@ async function startServer() {
       // --- Start Schedule Runner (fires DB-stored cron schedules) ---
       const { startScheduleRunner } = require('./services/scheduleRunner');
       startScheduleRunner();
+
+      // --- Initialize Collective Brain (Azure SQL tables) ---
+      require('./services/collectiveBrain').ensureTables().catch(err =>
+        console.warn('[CollectiveBrain] Table init warning (non-fatal):', err.message)
+      );
+
+      // --- Start Discord Bot (if token configured) ---
+      const { startDiscordBot } = require('./services/discordBot');
+      startDiscordBot();
     });
 
     // --- Graceful Shutdown ---

@@ -54,12 +54,8 @@ router.get('/queue', authenticate, (req, res) => {
 
     const items = all(sql, params);
 
-    // Parse JSON fields
-    const parsed = items.map(item => ({
-      ...item,
-      detected_signals: JSON.parse(item.detected_signals || '[]'),
-      engagement_received: item.engagement_received ? JSON.parse(item.engagement_received) : null
-    }));
+    // No JSON parsing needed — all columns are plain types
+    const parsed = items;
 
     // Get total count for pagination
     let countSql = 'SELECT COUNT(*) as total FROM lg_engagement_queue WHERE 1=1';
@@ -140,16 +136,9 @@ router.get('/queue/:id', authenticate, (req, res) => {
       });
     }
 
-    // Parse JSON fields
-    const parsed = {
-      ...item,
-      detected_signals: JSON.parse(item.detected_signals || '[]'),
-      engagement_received: item.engagement_received ? JSON.parse(item.engagement_received) : null
-    };
-
     res.json({
       success: true,
-      data: parsed
+      data: item
     });
 
   } catch (error) {
@@ -207,6 +196,47 @@ router.patch('/queue/:id', authenticate, (req, res) => {
 });
 
 /**
+ * PUT /api/lead-gen/queue/:id
+ * Update queue item — handles draft edits OR engagement data
+ */
+router.put('/queue/:id', authenticate, (req, res) => {
+  try {
+    const { id } = req.params;
+    const { draft_response, engagement_likes, engagement_replies, engagement_clicks } = req.body;
+
+    const item = get('SELECT id FROM lg_engagement_queue WHERE id = ?', [id]);
+    if (!item) {
+      return res.status(404).json({ success: false, error: 'Queue item not found' });
+    }
+
+    if (draft_response !== undefined) {
+      run('UPDATE lg_engagement_queue SET draft_response = ? WHERE id = ?', [draft_response, id]);
+    }
+
+    if (engagement_likes !== undefined || engagement_replies !== undefined || engagement_clicks !== undefined) {
+      run(
+        `UPDATE lg_engagement_queue
+         SET engagement_likes = COALESCE(?, engagement_likes),
+             engagement_replies = COALESCE(?, engagement_replies),
+             engagement_clicks = COALESCE(?, engagement_clicks)
+         WHERE id = ?`,
+        [
+          engagement_likes !== undefined ? parseInt(engagement_likes) || 0 : null,
+          engagement_replies !== undefined ? parseInt(engagement_replies) || 0 : null,
+          engagement_clicks !== undefined ? parseInt(engagement_clicks) || 0 : null,
+          id,
+        ]
+      );
+    }
+
+    res.json({ success: true, message: 'Updated' });
+  } catch (error) {
+    console.error('[Lead Gen Queue] Error in PUT:', error);
+    res.status(500).json({ success: false, error: 'Failed to update queue item' });
+  }
+});
+
+/**
  * POST /api/lead-gen/queue/:id/approve
  * Approve a queue item for posting
  */
@@ -234,9 +264,9 @@ router.post('/queue/:id/approve', authenticate, (req, res) => {
     // Update status to approved
     run(`
       UPDATE lg_engagement_queue
-      SET status = ?, reviewed_by = ?, reviewed_at = datetime('now')
+      SET status = ?, approved_at = datetime('now')
       WHERE id = ?
-    `, ['approved', userId, id]);
+    `, ['approved', id]);
 
     // TODO: Actually post to the platform (implement in platformScanner.js)
     // For now, just mark as approved - posting happens manually or via scheduler
@@ -277,9 +307,9 @@ router.post('/queue/:id/reject', authenticate, (req, res) => {
     // Update status to rejected
     run(`
       UPDATE lg_engagement_queue
-      SET status = ?, reviewed_by = ?, reviewed_at = datetime('now')
+      SET status = ?
       WHERE id = ?
-    `, ['rejected', userId, id]);
+    `, ['rejected', id]);
 
     res.json({
       success: true,
@@ -368,6 +398,19 @@ router.delete('/queue/:id', authenticate, (req, res) => {
       success: false,
       error: 'Failed to delete queue item'
     });
+  }
+});
+
+/**
+ * GET /api/lead-gen/communities
+ * Returns tracked communities from lg_community_accounts
+ */
+router.get('/communities', authenticate, (req, res) => {
+  try {
+    const items = all('SELECT * FROM lg_community_accounts WHERE is_active = 1 ORDER BY posts_made DESC, created_at DESC LIMIT 50');
+    res.json({ success: true, data: items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

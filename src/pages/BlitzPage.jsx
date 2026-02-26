@@ -1,6 +1,6 @@
 /**
  * @file BlitzPage.jsx
- * @description Blitz Mode — run all active agents sequentially in one click.
+ * @description Blitz Mode — run agents by domain in one click.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -21,8 +21,16 @@ const STATUS_ICONS = {
   failed: <XCircle size={16} className="text-accent-danger" />,
 };
 
+const DOMAINS = [
+  { key: 'jake', label: 'Jake', color: 'bg-rose-500' },
+  { key: 'hoa', label: 'HOA', color: 'bg-emerald-500' },
+  { key: 'mgmt', label: 'Mgmt', color: 'bg-purple-500' },
+  { key: 'all', label: 'All', color: 'bg-accent-primary' },
+];
+
 export default function BlitzPage() {
   const [isRunning, setIsRunning] = useState(false);
+  const [domain, setDomain] = useState('jake');
   const [currentRun, setCurrentRun] = useState(null);
   const [results, setResults] = useState([]);
   const [history, setHistory] = useState([]);
@@ -64,16 +72,14 @@ export default function BlitzPage() {
     setExpanded({});
 
     try {
-      const data = await api.post('/blitz/run');
+      const data = await api.post('/blitz/run', { domain });
 
       if (!data.success) {
         throw new Error(data.error || 'Failed to start blitz');
       }
 
       const runId = data.runId;
-      // Start polling every 3s
       pollRef.current = setInterval(() => pollStatus(runId), 3000);
-      // Poll immediately
       pollStatus(runId);
     } catch (err) {
       setError(err.message);
@@ -87,6 +93,8 @@ export default function BlitzPage() {
     ? Math.round(((currentRun.completed_agents || 0) / (currentRun.total_agents || 1)) * 100)
     : 0;
 
+  const activeDomain = DOMAINS.find(d => d.key === domain);
+
   return (
     <div className="h-full flex flex-col bg-bg-primary">
       {/* Header */}
@@ -97,19 +105,39 @@ export default function BlitzPage() {
             Blitz Mode
           </h1>
           <p className="text-sm text-text-muted mt-1">
-            One-click media blitz — runs all active agents in sequence
+            Run agents by domain — results appear in real-time
           </p>
         </div>
-        <button
-          onClick={startBlitz}
-          disabled={isRunning}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-accent-primary text-white font-semibold text-sm hover:bg-accent-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {isRunning
-            ? <><RefreshCw size={16} className="animate-spin" /> Running...</>
-            : <><Play size={16} /> Launch Blitz</>
-          }
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Domain selector */}
+          <div className="flex rounded-lg overflow-hidden border border-border">
+            {DOMAINS.map((d) => (
+              <button
+                key={d.key}
+                onClick={() => !isRunning && setDomain(d.key)}
+                disabled={isRunning}
+                className={`px-3 py-2 text-xs font-semibold transition-colors ${
+                  domain === d.key
+                    ? `${d.color} text-white`
+                    : 'bg-bg-secondary text-text-muted hover:text-text-primary'
+                } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={startBlitz}
+            disabled={isRunning}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-accent-primary text-white font-semibold text-sm hover:bg-accent-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isRunning
+              ? <><RefreshCw size={16} className="animate-spin" /> Running...</>
+              : <><Play size={16} /> Launch {activeDomain?.label}</>
+            }
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -123,8 +151,13 @@ export default function BlitzPage() {
         {currentRun && (
           <div className="bg-bg-elevated border border-border rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
-              <div className="font-semibold text-text-primary">
-                Active Run #{currentRun.id}
+              <div className="font-semibold text-text-primary flex items-center gap-2">
+                Run #{currentRun.id}
+                {currentRun.domain && currentRun.domain !== 'all' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-bg-secondary text-text-muted uppercase tracking-wider">
+                    {currentRun.domain}
+                  </span>
+                )}
               </div>
               <span className={`text-sm font-medium ${STATUS_COLORS[currentRun.status] || 'text-text-muted'}`}>
                 {currentRun.status}
@@ -196,6 +229,11 @@ export default function BlitzPage() {
                 >
                   {STATUS_ICONS[h.status] || STATUS_ICONS.pending}
                   <span className="text-text-muted text-xs">#{h.id}</span>
+                  {h.domain && h.domain !== 'all' && (
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-bg-secondary text-text-muted uppercase">
+                      {h.domain}
+                    </span>
+                  )}
                   <span className={`font-medium ${STATUS_COLORS[h.status] || 'text-text-muted'}`}>
                     {h.status}
                   </span>
@@ -224,7 +262,7 @@ export default function BlitzPage() {
             </div>
             <h2 className="text-xl font-bold text-text-primary mb-2">Ready to Blitz</h2>
             <p className="text-text-muted max-w-md">
-              Click <strong className="text-text-primary">Launch Blitz</strong> to run all active agents
+              Select a domain and click <strong className="text-text-primary">Launch</strong> to run agents
               sequentially. Results appear in real-time as each agent completes.
             </p>
           </div>

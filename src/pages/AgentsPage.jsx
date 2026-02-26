@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { Plus, Bot, Search, Play, X, CheckCircle, AlertCircle, Loader, Clock, DollarSign, Zap, RefreshCw, ChevronDown, ChevronRight, Building2, Briefcase, Building, Globe, Cpu } from 'lucide-react';
+import { Plus, Bot, Search, Play, X, CheckCircle, AlertCircle, Loader, Clock, DollarSign, Zap, RefreshCw, ChevronDown, ChevronRight, Building2, Building, Globe, Cpu } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useNavigate } from 'react-router-dom';
 import AgentCard from '@/components/agents/AgentCard';
@@ -22,10 +22,8 @@ const DOMAIN_GROUPS = [
     filter: (name) => ['hoa-minutes-monitor','google-reviews-monitor'].includes(name) },
   { key: 'mgmt-research', label: 'Mgmt Research', prefix: 'mgmt-', icon: Building, color: 'text-purple-400', bg: 'bg-purple-400/10',
     filter: (name) => name.startsWith('mgmt-') },
-  { key: 'cfo-marketing', label: 'CFO Marketing', prefix: 'cfo-', icon: Briefcase, color: 'text-amber-400', bg: 'bg-amber-400/10',
-    filter: (name) => name.startsWith('cfo-') },
-  { key: 'jake-marketing', label: 'Jake Marketing', prefix: 'jake-', icon: Zap, color: 'text-rose-400', bg: 'bg-rose-400/10',
-    filter: (name) => name.startsWith('jake-') },
+  { key: 'jake-marketing', label: 'Jake Marketing', prefix: '', icon: Zap, color: 'text-rose-400', bg: 'bg-rose-400/10',
+    filter: (name) => name.startsWith('jake-') || name.startsWith('cfo-') },
   { key: 'core', label: 'Core', prefix: '', icon: Cpu, color: 'text-slate-400', bg: 'bg-slate-400/10',
     filter: () => true }, // catch-all for unmatched agents
 ];

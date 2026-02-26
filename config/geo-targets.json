@@ -434,6 +434,337 @@
       ],
       "zip_codes": [],
       "notes": "High-growth suburban HOA market. Clovis/Fresno have hundreds of master-planned communities. Lower competition from lenders = good opportunity."
+    },
+
+    {
+      "id": "san-antonio",
+      "name": "San Antonio Metro",
+      "priority": 5,
+      "cities": [
+        { "city": "San Antonio", "state": "TX" },
+        { "city": "New Braunfels", "state": "TX" },
+        { "city": "Schertz", "state": "TX" },
+        { "city": "Cibolo", "state": "TX" },
+        { "city": "Boerne", "state": "TX" },
+        { "city": "Helotes", "state": "TX" },
+        { "city": "Live Oak", "state": "TX" },
+        { "city": "Converse", "state": "TX" },
+        { "city": "Universal City", "state": "TX" },
+        { "city": "Alamo Heights", "state": "TX" }
+      ],
+      "zip_codes": [],
+      "notes": "Fast-growing HOA market. New Braunfels is one of the fastest-growing cities in Texas. Master-planned communities exploding on the NE and NW sides."
+    },
+    {
+      "id": "austin",
+      "name": "Austin Metro",
+      "priority": 5,
+      "cities": [
+        { "city": "Austin", "state": "TX" },
+        { "city": "Round Rock", "state": "TX" },
+        { "city": "Cedar Park", "state": "TX" },
+        { "city": "Georgetown", "state": "TX" },
+        { "city": "Pflugerville", "state": "TX" },
+        { "city": "Leander", "state": "TX" },
+        { "city": "Kyle", "state": "TX" },
+        { "city": "Buda", "state": "TX" },
+        { "city": "Lakeway", "state": "TX" },
+        { "city": "Bee Cave", "state": "TX" },
+        { "city": "Dripping Springs", "state": "TX" }
+      ],
+      "zip_codes": [],
+      "notes": "Tech-fueled growth. Georgetown Sun City is one of the largest active-adult HOA communities in TX. High-value master plans in Lakeway/Bee Cave."
+    },
+
+    {
+      "id": "florida-treasure-coast",
+      "name": "Treasure Coast / Space Coast FL",
+      "priority": 3,
+      "cities": [
+        { "city": "Port St. Lucie", "state": "FL" },
+        { "city": "Stuart", "state": "FL" },
+        { "city": "Jensen Beach", "state": "FL" },
+        { "city": "Vero Beach", "state": "FL" },
+        { "city": "Sebastian", "state": "FL" },
+        { "city": "Melbourne", "state": "FL" },
+        { "city": "Palm Bay", "state": "FL" },
+        { "city": "Titusville", "state": "FL" },
+        { "city": "Cocoa Beach", "state": "FL" },
+        { "city": "Rockledge", "state": "FL" }
+      ],
+      "zip_codes": [],
+      "notes": "Port St. Lucie is one of the fastest-growing HOA markets in FL. Tradition and St. Lucie West are massive master-planned communities. Space Coast condos aging."
+    },
+    {
+      "id": "florida-panhandle",
+      "name": "Florida Panhandle",
+      "priority": 4,
+      "cities": [
+        { "city": "Pensacola", "state": "FL" },
+        { "city": "Destin", "state": "FL" },
+        { "city": "Fort Walton Beach", "state": "FL" },
+        { "city": "Panama City", "state": "FL" },
+        { "city": "Panama City Beach", "state": "FL" },
+        { "city": "Niceville", "state": "FL" },
+        { "city": "Crestview", "state": "FL" },
+        { "city": "Navarre", "state": "FL" },
+        { "city": "Tallahassee", "state": "FL" },
+        { "city": "Gulf Breeze", "state": "FL" }
+      ],
+      "zip_codes": [],
+      "notes": "Condo-heavy coastal market. Post-Hurricane Michael rebuild driving capital needs. Destin/30A corridor has high-value vacation HOAs."
+    },
+
+    {
+      "id": "denver",
+      "name": "Denver Metro",
+      "priority": 16,
+      "cities": [
+        { "city": "Denver", "state": "CO" },
+        { "city": "Aurora", "state": "CO" },
+        { "city": "Lakewood", "state": "CO" },
+        { "city": "Thornton", "state": "CO" },
+        { "city": "Arvada", "state": "CO" },
+        { "city": "Westminster", "state": "CO" },
+        { "city": "Centennial", "state": "CO" },
+        { "city": "Highlands Ranch", "state": "CO" },
+        { "city": "Parker", "state": "CO" },
+        { "city": "Castle Rock", "state": "CO" },
+        { "city": "Littleton", "state": "CO" },
+        { "city": "Broomfield", "state": "CO" },
+        { "city": "Lone Tree", "state": "CO" },
+        { "city": "Erie", "state": "CO" }
+      ],
+      "zip_codes": [],
+      "notes": "Colorado is #5 for HOA density nationally. Highlands Ranch alone has 100+ HOAs. CCIOA regulations make HOA governance complex = financing opportunity."
+    },
+    {
+      "id": "colorado-springs",
+      "name": "Colorado Springs",
+      "priority": 17,
+      "cities": [
+        { "city": "Colorado Springs", "state": "CO" },
+        { "city": "Fountain", "state": "CO" },
+        { "city": "Monument", "state": "CO" },
+        { "city": "Woodland Park", "state": "CO" },
+        { "city": "Pueblo", "state": "CO" },
+        { "city": "Falcon", "state": "CO" },
+        { "city": "Security-Widefield", "state": "CO" }
+      ],
+      "zip_codes": [],
+      "notes": "Fast-growing military-adjacent HOA market. Flying Horse, Cordera, Wolf Ranch are large master-planned communities."
+    },
+    {
+      "id": "fort-collins-noco",
+      "name": "Northern Colorado",
+      "priority": 18,
+      "cities": [
+        { "city": "Fort Collins", "state": "CO" },
+        { "city": "Loveland", "state": "CO" },
+        { "city": "Greeley", "state": "CO" },
+        { "city": "Windsor", "state": "CO" },
+        { "city": "Longmont", "state": "CO" },
+        { "city": "Boulder", "state": "CO" },
+        { "city": "Louisville", "state": "CO" },
+        { "city": "Lafayette", "state": "CO" },
+        { "city": "Johnstown", "state": "CO" },
+        { "city": "Timnath", "state": "CO" }
+      ],
+      "zip_codes": [],
+      "notes": "Timnath/Windsor/Johnstown exploding with new master-planned communities. Newer HOAs 5-15 years old approaching first major capital cycles."
+    },
+
+    {
+      "id": "chicago-suburbs",
+      "name": "Chicago Suburbs",
+      "priority": 19,
+      "cities": [
+        { "city": "Naperville", "state": "IL" },
+        { "city": "Schaumburg", "state": "IL" },
+        { "city": "Aurora", "state": "IL" },
+        { "city": "Bolingbrook", "state": "IL" },
+        { "city": "Plainfield", "state": "IL" },
+        { "city": "Orland Park", "state": "IL" },
+        { "city": "Joliet", "state": "IL" },
+        { "city": "Wheaton", "state": "IL" },
+        { "city": "Downers Grove", "state": "IL" },
+        { "city": "Hoffman Estates", "state": "IL" },
+        { "city": "Arlington Heights", "state": "IL" },
+        { "city": "Buffalo Grove", "state": "IL" },
+        { "city": "Lake Zurich", "state": "IL" },
+        { "city": "Libertyville", "state": "IL" },
+        { "city": "Vernon Hills", "state": "IL" }
+      ],
+      "zip_codes": [],
+      "notes": "Illinois CICAA regulations. Dense condo market in near suburbs, massive master-planned communities in outer suburbs. Aging 1990s-2000s communities hitting reserve gaps."
+    },
+    {
+      "id": "chicago-city",
+      "name": "Chicago City Condos",
+      "priority": 20,
+      "cities": [
+        { "city": "Chicago", "state": "IL" },
+        { "city": "Evanston", "state": "IL" },
+        { "city": "Oak Park", "state": "IL" },
+        { "city": "Skokie", "state": "IL" },
+        { "city": "Park Ridge", "state": "IL" },
+        { "city": "Berwyn", "state": "IL" },
+        { "city": "Cicero", "state": "IL" },
+        { "city": "Des Plaines", "state": "IL" }
+      ],
+      "zip_codes": [],
+      "notes": "Thousands of condo associations in city proper. Many 1960s-1980s high-rises with massive deferred maintenance. SB 2419 (reserve study mandates) driving urgency."
+    },
+
+    {
+      "id": "salt-lake-city",
+      "name": "Salt Lake City Metro",
+      "priority": 21,
+      "cities": [
+        { "city": "Salt Lake City", "state": "UT" },
+        { "city": "Sandy", "state": "UT" },
+        { "city": "West Jordan", "state": "UT" },
+        { "city": "Draper", "state": "UT" },
+        { "city": "South Jordan", "state": "UT" },
+        { "city": "Lehi", "state": "UT" },
+        { "city": "Riverton", "state": "UT" },
+        { "city": "Herriman", "state": "UT" },
+        { "city": "Saratoga Springs", "state": "UT" },
+        { "city": "Eagle Mountain", "state": "UT" },
+        { "city": "American Fork", "state": "UT" },
+        { "city": "Orem", "state": "UT" }
+      ],
+      "zip_codes": [],
+      "notes": "Fastest-growing HOA market in the Mountain West. Daybreak (South Jordan) is one of the largest master-planned communities in the West. Utah HOA Act creates financing opportunities."
+    },
+
+    {
+      "id": "charlotte",
+      "name": "Charlotte Metro",
+      "priority": 22,
+      "cities": [
+        { "city": "Charlotte", "state": "NC" },
+        { "city": "Huntersville", "state": "NC" },
+        { "city": "Cornelius", "state": "NC" },
+        { "city": "Davidson", "state": "NC" },
+        { "city": "Concord", "state": "NC" },
+        { "city": "Kannapolis", "state": "NC" },
+        { "city": "Indian Trail", "state": "NC" },
+        { "city": "Waxhaw", "state": "NC" },
+        { "city": "Matthews", "state": "NC" },
+        { "city": "Mint Hill", "state": "NC" },
+        { "city": "Fort Mill", "state": "SC" },
+        { "city": "Tega Cay", "state": "SC" },
+        { "city": "Rock Hill", "state": "SC" }
+      ],
+      "zip_codes": [],
+      "notes": "Exploding HOA market — Ballantyne, Lake Norman, SouthPark all have massive HOA density. Fort Mill (SC side) has huge master-planned communities."
+    },
+    {
+      "id": "raleigh-triangle",
+      "name": "Raleigh-Durham Triangle",
+      "priority": 22,
+      "cities": [
+        { "city": "Raleigh", "state": "NC" },
+        { "city": "Durham", "state": "NC" },
+        { "city": "Cary", "state": "NC" },
+        { "city": "Apex", "state": "NC" },
+        { "city": "Holly Springs", "state": "NC" },
+        { "city": "Morrisville", "state": "NC" },
+        { "city": "Wake Forest", "state": "NC" },
+        { "city": "Fuquay-Varina", "state": "NC" },
+        { "city": "Chapel Hill", "state": "NC" },
+        { "city": "Garner", "state": "NC" },
+        { "city": "Knightdale", "state": "NC" }
+      ],
+      "zip_codes": [],
+      "notes": "Tech-fueled growth similar to Austin. Cary/Apex are packed with HOAs. Many communities 15-20 years old hitting first major capital expenditure cycles."
+    },
+    {
+      "id": "charleston",
+      "name": "Charleston Metro",
+      "priority": 23,
+      "cities": [
+        { "city": "Charleston", "state": "SC" },
+        { "city": "Mount Pleasant", "state": "SC" },
+        { "city": "North Charleston", "state": "SC" },
+        { "city": "Summerville", "state": "SC" },
+        { "city": "Goose Creek", "state": "SC" },
+        { "city": "Hanahan", "state": "SC" },
+        { "city": "James Island", "state": "SC" },
+        { "city": "Daniel Island", "state": "SC" },
+        { "city": "Kiawah Island", "state": "SC" }
+      ],
+      "zip_codes": [],
+      "notes": "Coastal HOAs with hurricane insurance challenges driving capital needs. Daniel Island is one of the premier master-planned communities on the East Coast."
+    },
+
+    {
+      "id": "minneapolis",
+      "name": "Minneapolis-St. Paul",
+      "priority": 24,
+      "cities": [
+        { "city": "Minneapolis", "state": "MN" },
+        { "city": "St. Paul", "state": "MN" },
+        { "city": "Bloomington", "state": "MN" },
+        { "city": "Plymouth", "state": "MN" },
+        { "city": "Maple Grove", "state": "MN" },
+        { "city": "Woodbury", "state": "MN" },
+        { "city": "Eagan", "state": "MN" },
+        { "city": "Eden Prairie", "state": "MN" },
+        { "city": "Edina", "state": "MN" },
+        { "city": "Burnsville", "state": "MN" },
+        { "city": "Lakeville", "state": "MN" },
+        { "city": "Apple Valley", "state": "MN" }
+      ],
+      "zip_codes": [],
+      "notes": "Minnesota CIC Act provides strong HOA governance framework. Dense condo market in city, large townhome communities in suburbs. Harsh winters = capital-intensive maintenance."
+    },
+
+    {
+      "id": "nashville",
+      "name": "Nashville Metro",
+      "priority": 25,
+      "cities": [
+        { "city": "Nashville", "state": "TN" },
+        { "city": "Franklin", "state": "TN" },
+        { "city": "Murfreesboro", "state": "TN" },
+        { "city": "Brentwood", "state": "TN" },
+        { "city": "Hendersonville", "state": "TN" },
+        { "city": "Mt. Juliet", "state": "TN" },
+        { "city": "Spring Hill", "state": "TN" },
+        { "city": "Nolensville", "state": "TN" },
+        { "city": "Gallatin", "state": "TN" },
+        { "city": "Smyrna", "state": "TN" }
+      ],
+      "zip_codes": [],
+      "notes": "One of the fastest-growing metros in the US. Williamson County (Franklin/Brentwood) is packed with high-end master-planned communities."
+    },
+
+    {
+      "id": "dc-metro",
+      "name": "DC Metro (NoVA / MD Suburbs)",
+      "priority": 26,
+      "cities": [
+        { "city": "Arlington", "state": "VA" },
+        { "city": "Alexandria", "state": "VA" },
+        { "city": "Fairfax", "state": "VA" },
+        { "city": "Reston", "state": "VA" },
+        { "city": "Herndon", "state": "VA" },
+        { "city": "Ashburn", "state": "VA" },
+        { "city": "Leesburg", "state": "VA" },
+        { "city": "Sterling", "state": "VA" },
+        { "city": "Centreville", "state": "VA" },
+        { "city": "Manassas", "state": "VA" },
+        { "city": "Woodbridge", "state": "VA" },
+        { "city": "Bethesda", "state": "MD" },
+        { "city": "Silver Spring", "state": "MD" },
+        { "city": "Rockville", "state": "MD" },
+        { "city": "Columbia", "state": "MD" },
+        { "city": "Bowie", "state": "MD" }
+      ],
+      "zip_codes": [],
+      "notes": "Virginia Condominium Act + MD HOA Act. Reston is one of the original planned communities in the US. Ashburn/Loudoun County has explosive HOA growth. High property values = large capital reserve needs."
     }
   ]
 }

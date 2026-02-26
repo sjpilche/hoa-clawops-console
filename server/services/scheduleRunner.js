@@ -69,8 +69,42 @@ function getHandlers() {
   return _handlers;
 }
 
+// ── Lazy-load pipeline runner (avoids circular dep at init) ──
+let _pipelineRunner = null;
+function getPipelineRunner() {
+  if (!_pipelineRunner) {
+    _pipelineRunner = require('./pipelineRunner');
+  }
+  return _pipelineRunner;
+}
+
+// ── Daily spend cap check — reads max_cost_per_run * max_runs_per_hour from settings ──
+function checkDailyBudget() {
+  try {
+    const maxPerRun = parseFloat(get("SELECT value FROM settings WHERE key='max_cost_per_run'")?.value || '5.00');
+    const maxRuns   = parseInt(get("SELECT value FROM settings WHERE key='max_runs_per_hour'")?.value || '20', 10);
+    const dailyCap  = maxPerRun * maxRuns; // e.g. $5 × 20 = $100/day ceiling
+
+    const today = new Date().toISOString().slice(0, 10);
+    const spent = get(
+      "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM runs WHERE DATE(created_at)=? AND status='completed'",
+      [today]
+    )?.total || 0;
+
+    if (spent >= dailyCap) {
+      console.warn(`[ScheduleRunner] 💸 Daily budget cap reached ($${spent.toFixed(4)} / $${dailyCap.toFixed(2)}) — skipping run`);
+      return false;
+    }
+    return true;
+  } catch {
+    return true; // if check fails, allow run (don't block the pipeline)
+  }
+}
+
 // ── Execute one schedule ──────────────────────────────────────────────────────
 async function executeSchedule(schedule) {
+  if (!checkDailyBudget()) return;
+
   console.log(`[ScheduleRunner] 🚀 Firing: "${schedule.name}" (agent: ${schedule.agent_id})`);
 
   // Mark as last_run_at immediately to prevent double-fire within the same minute
@@ -116,14 +150,47 @@ async function executeSchedule(schedule) {
       );
       console.log(`[ScheduleRunner] ✅ "${schedule.name}" — ${outputText.substring(0, 100)}`);
 
+      // Notify pipeline runner in case this run is part of a chain
+      try { getPipelineRunner().onRunCompleted(runId, outputText); } catch {}
+
     } else {
       // ── LLM agent — use the bridge ──
       const bridge = require('./openclawBridge');
+      const brain  = require('./collectiveBrain');
+      // Use daily session ID for continuity — agents remember context across runs on the same day
+      const today = new Date().toISOString().slice(0, 10);
+      const agentSessionId = `scheduled-${agent.name}-${today}`;
+
+      // ── Collective Brain: inject context from all 4 layers before the agent runs ──
+      // Determine content type and market context from agent name + message params
+      const contentTypeMap = {
+        'jake-outreach-agent': 'outreach_email',  'cfo-outreach-agent': 'outreach_email',
+        'jake-content-engine': 'blog_post',        'cfo-content-engine': 'blog_post',
+        'jake-social-scheduler': 'social_post',    'cfo-social-scheduler': 'social_post',
+      };
+      const contentType = contentTypeMap[agent.name] || null;
+      let marketCtx = null, erpCtx = null;
+      try {
+        const mp = JSON.parse(message || '{}');
+        marketCtx = mp.region || mp.market || null;
+        erpCtx    = mp.erp_system || mp.erp || null;
+      } catch {}
+
+      const brainContext = await brain.buildAgentContext(agent.name, agentSessionId, {
+        obsTypes:    ['lead_signal', 'market_insight', 'content_gap'],
+        market:      marketCtx,
+        erpContext:  erpCtx,
+        contentType,
+      });
+
+      // Prepend brain context to the agent's message
+      const enrichedMessage = brainContext ? brainContext + message : message;
+
       // Pass agent.name as agentId (matches OpenClaw registration slug), NOT the UUID
       const bridgeResult = await bridge.runAgent(agent.name, {
         openclawId: agentConfig.openclaw_id || agent.name,
-        message,
-        sessionId: runId,
+        message: enrichedMessage,
+        sessionId: agentSessionId,
       });
       const parsed = bridge.constructor.parseOutput(bridgeResult.output);
       const durationMs = Date.now() - startTime;
@@ -141,6 +208,13 @@ async function executeSchedule(schedule) {
         [agent.id]
       );
       console.log(`[ScheduleRunner] ✅ "${schedule.name}" — cost: $${costUsd.toFixed(4)}`);
+
+      // Post-process LLM output into unified marketing pipeline
+      const { postProcessLLMOutput } = require('./postProcessor');
+      postProcessLLMOutput(agent, outputText, message);
+
+      // Notify pipeline runner in case this run is part of a chain
+      try { getPipelineRunner().onRunCompleted(runId, outputText); } catch {}
     }
 
   } catch (err) {
@@ -158,6 +232,26 @@ async function executeSchedule(schedule) {
   }
 }
 
+// ── Nightly brain distillation — runs at 02:00 AM every day ──────────────────
+let _lastDistillDate = null;
+
+async function maybeRunDistillation() {
+  const now = new Date();
+  if (now.getHours() !== 2 || now.getMinutes() !== 0) return;
+  const today = now.toISOString().slice(0, 10);
+  if (_lastDistillDate === today) return; // already ran today
+  _lastDistillDate = today;
+
+  try {
+    const brain = require('./collectiveBrain');
+    console.log('[ScheduleRunner] 🧠 Running nightly brain distillation...');
+    const result = await brain.runDistillation();
+    console.log(`[ScheduleRunner] 🧠 Distillation complete — inserted: ${result.inserted}, skipped: ${result.skipped}`);
+  } catch (err) {
+    console.error('[ScheduleRunner] 🧠 Distillation failed (non-fatal):', err.message);
+  }
+}
+
 // ── Main tick ─────────────────────────────────────────────────────────────────
 async function tick() {
   if (_checkRunning) return;
@@ -171,6 +265,12 @@ async function tick() {
         );
       }
     }
+
+    // Check for delayed pipeline steps that are now due
+    try { getPipelineRunner().tickDelayedSteps(); } catch {}
+
+    // Nightly brain distillation at 02:00 AM
+    maybeRunDistillation().catch(() => {});
   } catch (err) {
     console.error('[ScheduleRunner] Tick error:', err.message);
   } finally {
@@ -188,6 +288,19 @@ function startScheduleRunner() {
     _timer = setInterval(tick, 60 * 1000);
     console.log('[ScheduleRunner] ✅ Running — checks every minute');
   }, secsUntilNextMinute * 1000);
+
+  // Log brain stats on startup (non-blocking)
+  setTimeout(async () => {
+    try {
+      const brain = require('./collectiveBrain');
+      const stats = await brain.getStats();
+      console.log(
+        `[ScheduleRunner] 🧠 Brain status — observations: ${stats.observations_total}, ` +
+        `feedback: ${stats.feedback_total} (${stats.feedback_approved} approved), ` +
+        `episodes: ${stats.episodes_total}, KB: ${stats.kb_total} entries`
+      );
+    } catch { /* non-fatal */ }
+  }, 5000); // 5s after start — let DB settle first
 }
 
 function stopScheduleRunner() {

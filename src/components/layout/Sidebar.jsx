@@ -35,6 +35,7 @@ import {
   Send,
   Building2,
   MapPin,
+  GitMerge,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -62,6 +63,7 @@ const iconMap = {
   Send,
   Building2,
   MapPin,
+  GitMerge,
 };
 
 export default function Sidebar() {

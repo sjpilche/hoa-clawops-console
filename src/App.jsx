@@ -48,6 +48,7 @@ import HelpPage from '@/pages/HelpPage';
 import LeadGenPage from '@/pages/LeadGenPage';
 import FacebookLeadsPage from '@/pages/FacebookLeadsPage';
 import BlitzPage from '@/pages/BlitzPage';
+import PipelinesPage from '@/pages/PipelinesPage';
 import EngagementQueue from '@/pages/EngagementQueue';
 import TradingPage from '@/pages/TradingPage';
 import ContentQueuePage from '@/pages/ContentQueuePage';
@@ -105,11 +106,13 @@ export default function App() {
         <Route path="/facebook-leads" element={<FacebookLeadsPage />} />
         <Route path="/engagement-queue" element={<EngagementQueue />} />
         <Route path="/blitz" element={<BlitzPage />} />
+        <Route path="/pipelines" element={<PipelinesPage />} />
         <Route path="/trading" element={<TradingPage />} />
         <Route path="/content-queue" element={<ContentQueuePage />} />
         <Route path="/hoa-leads" element={<HOALeadsPage />} />
         <Route path="/discovery" element={<DiscoveryDashboard />} />
         <Route path="/mgmt-research" element={<MgmtResearchPage />} />
+        <Route path="/jake-marketing" element={<CfoMarketingPage />} />
         <Route path="/cfo-marketing" element={<CfoMarketingPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />

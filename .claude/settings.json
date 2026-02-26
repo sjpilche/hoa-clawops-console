@@ -4,7 +4,14 @@
       "Read(//c/Users/SPilcher/AppData/Local/Temp/claude/c--Users-SPilcher-OpenClaw2-0-for-linux---Copy/**)",
       "Bash(npm view:*)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:docs.openclaw.ai)"
+      "WebFetch(domain:docs.openclaw.ai)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZjNTBhY2U2LTQxZDEtNDg1OC04ZDQ2LTY1MzU5NTRkOTQyYiIsImVtYWlsIjoiYWRtaW5AY2xhd29wcy5sb2NhbCIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3MjA2NDA2OCwiZXhwIjoxNzcyMTUwNDY4fQ.MoHlVQwkbySib7kmrksman1zvCiq3bTlMiXolHVgbbs\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImFkbWluIiwiZW1haWwiOiJhZG1pbkBjbGF3b3BzLmxvY2FsIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzcyMDY0OTU3LCJleHAiOjE3NzIxNTEzNTd9.LpmfBc-NXS41xXDTEdPBQnTpK8yU9dmHe0wJe6lXOrk\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImFkbWluIiwiZW1haWwiOiJhZG1pbkBjbGF3b3BzLmxvY2FsIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzcyMDY0OTkyLCJleHAiOjE3NzIxNTEzOTJ9.DwiRe-Buf0SshICCHU6T37OXXFSPpKvcGUgtotArjMg\")",
+      "Bash(Pilcher-Rules \")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\SPilcher\\.claude\\projects\\c--Users-SPilcher-OpenClaw2-0-for-linux---Copy\\memory"
     ]
   }
 }

@@ -42,23 +42,49 @@ const AGENT_FLEET = [
   { name: 'mgmt-review-scanner', description: 'Scans review sites for management company sentiment', group: 'mgmt-research', special_handler: 'mgmt_review_scanner' },
   { name: 'mgmt-cai-scraper', description: 'Scrapes CAI (Community Associations Institute) directories', group: 'mgmt-research', special_handler: 'mgmt_cai_scraper' },
 
-  // ── CFO Marketing (7) ──
-  { name: 'cfo-content-engine', description: 'Steve Pilcher voice content — LinkedIn posts, blogs, emails', group: 'cfo-marketing' },
-  { name: 'cfo-outreach-agent', description: 'Personalized cold emails to FL contractors (Vista/Sage/QBE)', group: 'cfo-marketing' },
-  { name: 'cfo-lead-scout', description: 'DBPR license scraper — discovers FL contractor leads', group: 'cfo-marketing', special_handler: 'cfo_lead_scout' },
-  { name: 'cfo-social-scheduler', description: 'Schedules and posts CFO marketing content to social platforms', group: 'cfo-marketing' },
-  { name: 'cfo-analytics-monitor', description: 'Tracks marketing analytics — open rates, click-through, conversions', group: 'cfo-marketing' },
-  { name: 'cfo-offer-proof-builder', description: 'Builds case studies and proof points from pilot results', group: 'cfo-marketing' },
-  { name: 'cfo-pilot-deliverer', description: 'Coordinates pilot delivery — Spend Leak, Close Accel, Get Paid Faster', group: 'cfo-marketing' },
-
-  // ── Jake Marketing (7) ──
+  // ── Jake Marketing (14) — includes Steve-voice (cfo-*) agents ──
+  { name: 'cfo-content-engine', description: 'Steve Pilcher voice content — LinkedIn posts, blogs, emails', group: 'jake-marketing' },
+  { name: 'cfo-outreach-agent', description: 'Personalized cold emails to FL contractors (Vista/Sage/QBE)', group: 'jake-marketing' },
+  { name: 'cfo-lead-scout', description: 'DBPR license scraper — discovers FL contractor leads', group: 'jake-marketing', special_handler: 'cfo_lead_scout' },
+  { name: 'cfo-social-scheduler', description: 'Schedules and posts CFO marketing content to social platforms', group: 'jake-marketing' },
+  { name: 'cfo-analytics-monitor', description: 'Tracks marketing analytics — open rates, click-through, conversions', group: 'jake-marketing' },
+  { name: 'cfo-offer-proof-builder', description: 'Builds case studies and proof points from pilot results', group: 'jake-marketing' },
+  { name: 'cfo-pilot-deliverer', description: 'Coordinates pilot delivery — Spend Leak, Close Accel, Get Paid Faster', group: 'jake-marketing' },
   { name: 'jake-content-engine', description: 'Jake-voice content — LinkedIn posts, blog articles, emails', group: 'jake-marketing' },
   { name: 'jake-outreach-agent', description: 'Personalized cold emails to construction SMBs nationally', group: 'jake-marketing' },
-  { name: 'jake-lead-scout', description: 'LLM-powered construction SMB lead discovery and qualification', group: 'jake-marketing' },
+  { name: 'jake-lead-scout', description: 'National lead scout — finds named finance contacts at construction SMBs via LinkedIn/Facebook/web (rotates through 60 US markets)', group: 'jake-marketing', special_handler: 'jake_lead_scout' },
+  { name: 'jake-contact-enricher', description: 'Playwright web scraper — finds emails for leads ($0/run)', group: 'jake-marketing', special_handler: 'jake_contact_enricher' },
+  { name: 'jake-construction-discovery', description: 'Google Maps GC scraper — bulk construction company discovery across 60 national markets ($0/run, 50-150 companies per run)', group: 'jake-marketing', special_handler: 'jake_construction_discovery' },
   { name: 'jake-social-scheduler', description: 'Formats and schedules Jake content for social platforms', group: 'jake-marketing' },
   { name: 'jake-analytics-monitor', description: 'Daily pipeline health — leads, outreach, content performance', group: 'jake-marketing' },
   { name: 'jake-offer-proof-builder', description: 'Case studies, demo scripts, ROI calculators, proof materials', group: 'jake-marketing' },
   { name: 'jake-pilot-deliverer', description: 'Pilot delivery coordination — kickoff to results', group: 'jake-marketing' },
+  { name: 'jake-follow-up-agent', description: 'Generates follow-up emails for leads contacted 5+ days ago with no reply', group: 'jake-marketing' },
+  { name: 'jake-reply-classifier', description: 'Classifies inbound email replies (INTERESTED/NOT_NOW/WRONG_PERSON/UNSUBSCRIBE/BOUNCED) and updates lead status ($0/run)', group: 'jake-marketing', special_handler: 'jake_reply_classifier' },
+  { name: 'jake-meeting-booker', description: 'Drafts personalized meeting confirmation + agenda email for interested leads', group: 'jake-marketing' },
+
+  // ── Core Ops ──
+  { name: 'pipeline-digest', description: 'Morning Discord digest — posts yesterday pipeline stats at 7 AM ($0/run)', group: 'core', special_handler: 'morning_digest' },
+
+  // ── Tier 1: Social Publishing ──
+  { name: 'jake-twitter-poster', description: 'Posts Jake-voice tweet threads from approved content pieces via openclaw-twitter extension', group: 'jake-marketing' },
+  { name: 'linkedin-direct-poster', description: 'Posts Jake-voice LinkedIn long-form posts and short takes from approved content pieces', group: 'jake-marketing' },
+  { name: 'sms-follow-up', description: 'Sends 1-2 sentence SMS via Twilio to enriched leads with phone after 10+ days no reply ($0.0075/sms)', group: 'jake-marketing' },
+
+  // ── Tier 2: New Signal Sources ──
+  { name: 'jake-permit-scanner', description: 'Scrapes county building permit portals for recently issued $250K+ commercial permits — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_permit_scanner' },
+  { name: 'jake-hiring-signal-agent', description: 'Monitors Indeed/LinkedIn Jobs for construction companies posting CFO/Controller/AP roles — high-intent leads', group: 'jake-marketing' },
+  { name: 'hoa-special-assessment-monitor', description: 'Monitors FL Division of Condominiums and county records for newly filed special assessments and milestone failures', group: 'hoa-pipeline' },
+
+  // ── Tier 3: Close Loops ──
+  { name: 'jake-crm-sync', description: 'Pushes replied/meeting_booked/pilot leads to Google Sheets or CSV ($0/run)', group: 'jake-marketing', special_handler: 'jake_crm_sync' },
+  { name: 'content-repurposer', description: 'Takes one approved blog/LinkedIn post and generates 5 derivative pieces (tweet thread, short LinkedIn, email snippet, FB, YouTube outline)', group: 'jake-marketing' },
+  { name: 'jake-case-study-builder', description: 'Writes sanitized case studies from pilot leads — populates pilot_proof content pillar', group: 'jake-marketing' },
+
+  // ── Tier 4: Creative Intel ──
+  { name: 'competitor-intel', description: 'Monitors Procore/Sage/Vista/QB forums and review sites for construction finance complaints — surfaces high-intent leads', group: 'jake-marketing' },
+  { name: 'jake-pain-signal-monitor', description: 'Scans public records for construction company financial stress signals (liens, judgments, BBB complaints)', group: 'jake-marketing' },
+  { name: 'bid-result-scraper', description: 'Scrapes FL/TX procurement portals for recently awarded $500K+ construction contracts — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_bid_scraper' },
 ];
 
 async function main() {

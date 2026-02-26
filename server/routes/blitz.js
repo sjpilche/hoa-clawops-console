@@ -1,6 +1,6 @@
 /**
  * @file blitz.js
- * @description Blitz Mode API - Run all agents sequentially and capture outputs
+ * @description Blitz Mode API - Run agents by domain and capture outputs
  */
 
 const express = require('express');
@@ -11,98 +11,137 @@ const { authenticate } = require('../middleware/auth');
 
 router.use(authenticate);
 
-// Test prompts for each agent
+// Domain filters — maps domain key to SQL LIKE pattern(s)
+const DOMAIN_FILTERS = {
+  jake: ['jake-%', 'cfo-%'],  // Unified Jake Marketing — includes Steve-voice (cfo-*) agents
+  hoa: 'hoa-%',
+  mgmt: 'mgmt-%',
+};
+
+// Jake Lead Scout region rotation — cycles through key construction markets each Blitz run
+const JAKE_REGIONS = [
+  { region: 'Tampa Bay, FL', trade: 'GC' },
+  { region: 'Denver, CO', trade: 'GC' },
+  { region: 'Charlotte, NC', trade: 'GC' },
+  { region: 'Austin, TX', trade: 'GC' },
+  { region: 'Phoenix, AZ', trade: 'GC' },
+  { region: 'Nashville, TN', trade: 'GC' },
+  { region: 'Chicago, IL', trade: 'GC' },
+  { region: 'Raleigh, NC', trade: 'GC' },
+  { region: 'Salt Lake City, UT', trade: 'GC' },
+  { region: 'Jacksonville, FL', trade: 'GC' },
+  { region: 'San Antonio, TX', trade: 'GC' },
+  { region: 'Atlanta, GA', trade: 'GC' },
+];
+let _jakeRegionIdx = 0;
+
+function getJakeLeadScoutPrompt() {
+  const r = JAKE_REGIONS[_jakeRegionIdx % JAKE_REGIONS.length];
+  _jakeRegionIdx++;
+  return JSON.stringify({ search_region: r.region, target_trade: r.trade, target_revenue: '$5M-$25M', limit: 15 });
+}
+
+// Test prompts for each agent (keyed by slug name)
 const AGENT_PROMPTS = {
-  'HOA Content Writer': `Write a 300-word blog post about why HOAs should build reserve funds gradually rather than using special assessments. Include:
-- Benefits of steady contributions
-- Risks of delaying maintenance
-- Impact on property values
-- Real example scenario
-Target audience: HOA board members. Tone: Educational, professional.`,
+  // ── HOA Marketing ──
+  'hoa-content-writer': `Write a 300-word blog post about why HOAs should build reserve funds gradually rather than using special assessments. Include benefits of steady contributions, risks of delaying maintenance, impact on property values, and a real example scenario. Tone: Educational, professional.`,
+  'hoa-social-media': `Create 3 LinkedIn posts (each 150 words max) about HOA reserve funding best practices: 1) Why reserve studies matter, 2) How to increase reserves without shocking owners, 3) Common reserve fund mistakes to avoid. Each post: hook, body, CTA, 3 hashtags.`,
+  'hoa-social-engagement': `You found this Reddit post in r/HOA:\n\nTitle: "Board wants to drain our reserves to avoid raising fees"\nContent: "Our 80-unit condo has $150K in reserves. The board proposed using $100K for pool renovation to avoid a $1,200/unit assessment. Is this legal?"\n\nDraft a helpful, informative response (200 words max). Be empathetic, provide factual guidance.`,
+  'hoa-email-campaigns': `Create a 3-email drip campaign for HOA boards considering financing options. Email 1 (Day 1): Intro to HOA financing vs assessments. Email 2 (Day 3): How HOA loans work. Email 3 (Day 7): Case study + CTA. Each 200-250 words, professional tone, soft CTAs.`,
+  'hoa-cms-publisher': `Generate metadata and SEO tags for a blog post titled "HOA Reserve Study Guide 2026". Include: meta description (155 chars), focus keyword, 5 secondary keywords, URL slug, 3 internal link suggestions, alt text, category and 5 tags. Format as JSON.`,
+  'hoa-networker': `Review the current Lead Gen queue and provide: 1) Total opportunities, 2) Top 3 by relevance score, 3) Recommendation on which to prioritize today, 4) Patterns noticed. Keep under 250 words.`,
+  'hoa-facebook-poster': `Write a Facebook post about HOA reserve funding best practices. Casual, community-oriented tone. 250-400 words. Ask a question to drive engagement. Include a CTA to learn more about HOA Project Funding.`,
+  'hoa-website-publisher': `Generate a website update for the HOA Project Funding site. Include a new testimonial section, updated stats, and a refreshed hero section CTA. Format as structured content blocks.`,
 
-  'HOA Social Media': `Create 3 LinkedIn posts (each 150 words max) about HOA reserve funding best practices:
+  // ── HOA Pipeline ──
+  'hoa-discovery': `{}`,
+  'hoa-contact-finder': `Find contact information for recently discovered HOA management companies in South Florida. Focus on board members, property managers, and treasurers.`,
+  'hoa-contact-enricher': `Enrich the most recent batch of HOA contacts with LinkedIn profiles, email verification, and company size estimates.`,
+  'hoa-outreach-drafter': `Draft personalized outreach emails for the top 5 highest-scored HOA leads. Use the HOA Project Funding value proposition.`,
 
-Post 1: Why reserve studies matter
-Post 2: How to increase reserves without shocking owners
-Post 3: Common reserve fund mistakes to avoid
+  // ── HOA Intel ──
+  'hoa-minutes-monitor': `Scan recent HOA board meeting minutes for mentions of: reserve fund shortfalls, special assessments, deferred maintenance, or financing discussions. Report findings.`,
+  'google-reviews-monitor': `Check recent Google reviews for HOA management companies in our target markets. Flag negative reviews mentioning financial mismanagement, assessment increases, or maintenance delays.`,
 
-Format: Each post should have a hook, body, and CTA. Tone: Professional but conversational. Include 3 relevant hashtags per post.`,
+  // ── Mgmt Research ──
+  'mgmt-portfolio-scraper': `Scrape portfolio data for HOA management companies in Florida. Focus on company size, number of communities managed, and service areas.`,
+  'mgmt-contact-puller': `Pull contact information for decision-makers at the top 10 HOA management companies by portfolio size.`,
+  'mgmt-portfolio-mapper': `Map the HOA management company landscape in South Florida. Identify market leaders, emerging players, and gaps.`,
+  'mgmt-review-scanner': `Scan online reviews for HOA management companies. Identify companies with poor financial management reviews — potential leads for our services.`,
+  'mgmt-cai-scraper': `Search CAI (Community Associations Institute) chapter events and member directories for HOA industry contacts in Florida.`,
 
-  'HOA Social Engagement': `You found this Reddit post in r/HOA:
+  // ── Jake Marketing — Steve-voice agents ──
+  'cfo-content-engine': `{"pillar":"spend_leak","channel":"linkedin","tone":"Trust Envelope"}`,
+  'cfo-outreach-agent': `{"company_name":"Test Construction Inc","contact_name":"Mike Johnson","contact_title":"Controller","trade":"GC","location":"Sarasota, FL","pain_signals":["legacy QB data","manual reconciliation","slow close"]}`,
+  'cfo-lead-scout': `{"county":"Sarasota","lic_type":"0605","limit":10}`,
+  'cfo-social-scheduler': `{"content":"We just helped a $15M GC cut their close time from 38 to 11 days. No new hires. Just clean data and smart automation.","platform":"linkedin"}`,
+  'cfo-analytics-monitor': `{"report_type":"daily"}`,
+  'cfo-offer-proof-builder': `{"document_type":"case_study","target_trade":"GC","target_company_size":"$10M-$25M"}`,
+  'cfo-pilot-deliverer': `{"phase":"kickoff","company_name":"Test Construction","contact_name":"Mike","pilot_type":"data_cleanup_only"}`,
 
-Title: "Board wants to drain our reserves to avoid raising fees"
-Content: "Our 80-unit condo has $150K in reserves. The board proposed using $100K for pool renovation to avoid a $1,200/unit assessment. Is this legal? Feels wrong."
+  // ── Jake Marketing ──
+  'jake-content-engine': `{"pillar":"cash_flow","channel":"linkedin"}`,
+  'jake-outreach-agent': `{"company_name":"Sunshine Builders","contact_name":"Mike","contact_title":"Owner","trade":"GC","location":"Tampa, FL","company_size":"35 employees / $12M revenue","pain_signals":["legacy data","AR chaos","2am spreadsheet nights"]}`,
+  'jake-lead-scout': getJakeLeadScoutPrompt(),
+  'jake-social-scheduler': `{"content":"Jake just saved a GC $40K in unbilled retainage sitting on completed jobs. Took 10 minutes. Their controller had been manually tracking it in Excel for 3 years.","platform":"linkedin"}`,
+  'jake-analytics-monitor': `{"report_type":"daily"}`,
+  'jake-offer-proof-builder': `{"document_type":"case_study","target_trade":"GC","target_company_size":"$10M-$25M"}`,
+  'jake-pilot-deliverer': `{"phase":"kickoff","company_name":"Gulf Coast Contractors","contact_name":"Mike","pilot_type":"data_cleanup_only"}`,
 
-Task: Draft a helpful, informative response (200 words max). Be empathetic, provide factual guidance about reserve fund best practices, and mention HOA Project Funding only if highly relevant. Focus on helping first.`,
-
-  'HOA Email Campaigns': `Create a 3-email drip campaign for HOA boards considering financing options:
-
-Email 1 (Day 1): Subject + Body - Introduction to HOA financing vs assessments
-Email 2 (Day 3): Subject + Body - How HOA loans work (rates, terms, qualification)
-Email 3 (Day 7): Subject + Body - Case study + CTA to schedule consultation
-
-Requirements:
-- Each email 200-250 words
-- Professional tone
-- Clear value proposition
-- Soft CTAs (not pushy)`,
-
-  'HOA CMS Publisher': `Generate metadata and SEO tags for a blog post titled "HOA Reserve Study Guide 2026"
-
-Required fields:
-- Meta description (155 characters max)
-- Focus keyword
-- 5 secondary keywords
-- URL slug
-- 3 internal link suggestions (to other HOA topics)
-- Featured image description for alt text
-- Category and 5 tags
-
-Format as JSON for easy parsing.`,
-
-  'HOA Networker': `Review the current Lead Gen queue and provide:
-
-1. Total opportunities in queue
-2. Summary of top 3 by relevance score (platform, topic, score)
-3. Recommendation on which to prioritize today
-4. Any patterns noticed (common pain points, platforms with most activity)
-
-Keep response under 250 words.`
+  // ── Core ──
+  'daily-debrief': `Generate the daily war room debrief. Summarize all agent activity, key metrics, wins, and items needing attention.`,
 };
 
 /**
  * POST /api/blitz/run
- * Start a new blitz run - executes all agents sequentially
+ * Start a new blitz run - optionally filtered by domain
+ * Body: { domain?: 'jake'|'cfo'|'hoa'|'mgmt'|'all' }
  */
 router.post('/run', async (req, res) => {
   try {
-    console.log('[Blitz] Starting new blitz run...');
+    const domain = req.body.domain || 'all';
+    console.log(`[Blitz] Starting new blitz run (domain: ${domain})...`);
 
-    // 1. Get all active agents
-    const agents = all(
-      `SELECT id, name, config FROM agents WHERE status = 'active' ORDER BY name`
-    );
+    // Build query — agents are 'idle' when not running
+    let query = `SELECT id, name, config FROM agents WHERE status IN ('idle', 'active')`;
+    const params = [];
+
+    if (domain !== 'all' && DOMAIN_FILTERS[domain]) {
+      const filters = DOMAIN_FILTERS[domain];
+      if (Array.isArray(filters)) {
+        query += ` AND (${filters.map(() => 'name LIKE ?').join(' OR ')})`;
+        params.push(...filters);
+      } else {
+        query += ` AND name LIKE ?`;
+        params.push(filters);
+      }
+    }
+
+    // Exclude the 'main' chat router agent from batch runs
+    query += ` AND name != 'main' ORDER BY name`;
+
+    const agents = all(query, params);
 
     if (agents.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No active agents found'
+        error: `No agents found for domain "${domain}"`
       });
     }
 
-    // 2. Create blitz run record
+    // Create blitz run record
     run(
-      `INSERT INTO blitz_runs (status, total_agents) VALUES ('running', ?)`,
-      [agents.length]
+      `INSERT INTO blitz_runs (status, total_agents, domain) VALUES ('running', ?, ?)`,
+      [agents.length, domain]
     );
 
     const blitzRun = get(`SELECT id FROM blitz_runs ORDER BY rowid DESC LIMIT 1`);
     const runId = blitzRun.id;
-    console.log(`[Blitz] Created run ${runId} with ${agents.length} agents`);
+    console.log(`[Blitz] Created run ${runId} with ${agents.length} agents (domain: ${domain})`);
 
-    // 3. Create pending result records for each agent
+    // Create pending result records for each agent
     for (const agent of agents) {
-      const prompt = AGENT_PROMPTS[agent.name] || `Provide a brief introduction of your capabilities and role in the HOA Project Funding marketing system.`;
+      const prompt = AGENT_PROMPTS[agent.name] || `Introduce yourself and demonstrate your capabilities. What would you do if given a typical task?`;
 
       run(
         `INSERT INTO blitz_results (blitz_run_id, agent_id, agent_name, prompt, status)
@@ -111,16 +150,17 @@ router.post('/run', async (req, res) => {
       );
     }
 
-    // 4. Start async execution (don't await - let it run in background)
+    // Start async execution (don't await - let it run in background)
     executeBlitzRun(runId, agents).catch(err => {
       console.error('[Blitz] Run failed:', err);
     });
 
-    // 5. Return run ID immediately
+    // Return run ID immediately
     res.json({
       success: true,
       runId,
-      message: `Blitz run started with ${agents.length} agents`,
+      domain,
+      message: `Blitz run started with ${agents.length} agents (${domain})`,
       totalAgents: agents.length
     });
 
@@ -137,13 +177,23 @@ router.post('/run', async (req, res) => {
  * Execute blitz run (background process)
  * @private
  */
+// Delay between agents to avoid OpenAI RPM rate limits
+const INTER_AGENT_DELAY_MS = 15000;
+
 async function executeBlitzRun(runId, agents) {
   const runStartTime = Date.now();
 
-  console.log(`[Blitz] Executing run ${runId}...`);
+  console.log(`[Blitz] Executing run ${runId} (${agents.length} agents, ${INTER_AGENT_DELAY_MS / 1000}s stagger)...`);
 
-  for (const agent of agents) {
-    const prompt = AGENT_PROMPTS[agent.name] || `Provide a brief introduction of your capabilities and role in the HOA Project Funding marketing system.`;
+  for (let i = 0; i < agents.length; i++) {
+    const agent = agents[i];
+    // Stagger all agents after the first to avoid rate limits
+    if (i > 0) {
+      console.log(`[Blitz] Waiting ${INTER_AGENT_DELAY_MS / 1000}s before next agent...`);
+      await new Promise(r => setTimeout(r, INTER_AGENT_DELAY_MS));
+    }
+
+    const prompt = AGENT_PROMPTS[agent.name] || `Introduce yourself and demonstrate your capabilities. What would you do if given a typical task?`;
 
     console.log(`[Blitz] Running agent: ${agent.name}`);
 
@@ -162,26 +212,28 @@ async function executeBlitzRun(runId, agents) {
       const agentConfig = agent.config ? JSON.parse(agent.config) : {};
       const openclawId = agentConfig.openclaw_id || agent.name.toLowerCase().replace(/\s+/g, '-');
 
+      // Use daily session ID for continuity — agents remember context across Blitz runs on same day
+      const today = new Date().toISOString().slice(0, 10);
+      const sessionId = `blitz-${agent.name}-${today}`;
+
       const result = await openclawBridge.runAgent(agent.id, {
         openclawId,
         message: prompt,
+        sessionId,
         json: false // Get full text output
       });
 
       const duration = Date.now() - startTime;
 
-      // Extract clean text output (OpenClaw native format)
-      let outputText = result.output || 'No output';
-      try {
-        const parsed = JSON.parse(outputText);
-        if (parsed.payloads?.[0]?.text) {
-          outputText = parsed.payloads[0].text;
-        } else if (parsed.type === 'result' && parsed.result) {
-          outputText = parsed.result;
-        }
-      } catch { /* use raw */ }
+      // Extract clean text output via shared parseOutput (handles empty payloads gracefully)
+      const parsed = openclawBridge.constructor.parseOutput(result.output || '');
+      const outputText = parsed.text || result.output || 'No output';
 
-      console.log(`[Blitz] ✅ ${agent.name} completed in ${duration}ms`);
+      console.log(`[Blitz] ${agent.name} completed in ${duration}ms`);
+
+      // Post-process LLM output into unified marketing pipeline
+      const { postProcessLLMOutput } = require('../services/postProcessor');
+      postProcessLLMOutput(agent, outputText, prompt);
 
       // Update result with output
       run(
@@ -198,7 +250,7 @@ async function executeBlitzRun(runId, agents) {
       );
 
     } catch (error) {
-      console.error(`[Blitz] ❌ ${agent.name} failed:`, error.message);
+      console.error(`[Blitz] ${agent.name} failed:`, error.message);
 
       // Update result with error
       run(
@@ -325,7 +377,7 @@ router.get('/results/:runId', async (req, res) => {
 router.get('/history', async (req, res) => {
   try {
     const runs = all(
-      `SELECT id, status, started_at, completed_at, total_agents, completed_agents, failed_agents, total_duration_ms
+      `SELECT id, status, started_at, completed_at, total_agents, completed_agents, failed_agents, total_duration_ms, domain
        FROM blitz_runs
        ORDER BY started_at DESC
        LIMIT 20`

@@ -447,7 +447,8 @@ router.post(
   async (req, res, next) => {
     try {
       const agentId = req.validated.params.id;
-      const agent = get('SELECT * FROM agents WHERE id = ?', [agentId]);
+      // Accept either UUID or slug name
+      const agent = get('SELECT * FROM agents WHERE id = ? OR name = ?', [agentId, agentId]);
       if (!agent) {
         throw new AppError(`Agent "${agentId}" not found.`, 'AGENT_NOT_FOUND', 404);
       }

@@ -95,6 +95,12 @@ async function initDatabase() {
     { sql: "ALTER TABLE agents ADD COLUMN extension_ids TEXT DEFAULT '[]'", desc: 'extension_ids column' },
     { sql: 'ALTER TABLE agents ADD COLUMN layer INTEGER DEFAULT 0', desc: 'layer column' },
     { sql: "ALTER TABLE agents ADD COLUMN orchestration_role TEXT DEFAULT 'worker'", desc: 'orchestration_role column' },
+    // Blitz domain filtering
+    { sql: "ALTER TABLE blitz_runs ADD COLUMN domain TEXT DEFAULT 'all'", desc: 'blitz_runs domain column' },
+    // Unified marketing pipeline (Jake + CFO share tables)
+    { sql: "ALTER TABLE cfo_leads ADD COLUMN source_agent TEXT DEFAULT 'cfo'", desc: 'cfo_leads source_agent' },
+    { sql: "ALTER TABLE cfo_content_pieces ADD COLUMN source_agent TEXT DEFAULT 'cfo'", desc: 'cfo_content_pieces source_agent' },
+    { sql: "ALTER TABLE cfo_outreach_sequences ADD COLUMN source_agent TEXT DEFAULT 'cfo'", desc: 'cfo_outreach_sequences source_agent' },
   ];
 
   for (const migration of migrations) {

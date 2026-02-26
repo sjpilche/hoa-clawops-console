@@ -25,24 +25,37 @@ router.use(optionalCampaignTableContext);
 
 // ─── Facebook Posting Helper ──────────────────────────────────────────────────
 
-async function postToFacebook(content) {
-  const pageId = process.env.FACEBOOK_PAGE_ID;
-  const token = process.env.FACEBOOK_ACCESS_TOKEN;
+// Resolves the right page credentials based on source_agent ('jake' vs 'hoa'/default)
+function getFacebookCreds(sourceAgent) {
   const version = process.env.FACEBOOK_GRAPH_API_VERSION || 'v22.0';
+  const isJake = sourceAgent && (sourceAgent.startsWith('jake') || sourceAgent.startsWith('cfo'));
+
+  const pageId = isJake
+    ? process.env.JAKE_FACEBOOK_PAGE_ID
+    : process.env.FACEBOOK_PAGE_ID;
+  const token = isJake
+    ? process.env.JAKE_FACEBOOK_ACCESS_TOKEN
+    : process.env.FACEBOOK_ACCESS_TOKEN;
+  const pageName = isJake
+    ? (process.env.JAKE_FACEBOOK_PAGE_NAME || 'Jake - Construction AI CFO')
+    : (process.env.FACEBOOK_PAGE_NAME || 'HOA Project Funding');
 
   if (!pageId || !token) {
-    throw new Error('FACEBOOK_PAGE_ID or FACEBOOK_ACCESS_TOKEN not set in .env.local');
+    const which = isJake ? 'JAKE_FACEBOOK_PAGE_ID / JAKE_FACEBOOK_ACCESS_TOKEN' : 'FACEBOOK_PAGE_ID / FACEBOOK_ACCESS_TOKEN';
+    throw new Error(`${which} not set in .env.local`);
   }
 
+  return { pageId, token, version, pageName };
+}
+
+async function postToFacebook(content, sourceAgent) {
+  const { pageId, token, version } = getFacebookCreds(sourceAgent);
   const url = `https://graph.facebook.com/${version}/${pageId}/feed`;
 
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: content,
-      access_token: token,
-    }),
+    body: JSON.stringify({ message: content, access_token: token }),
   });
 
   const data = await response.json();
@@ -55,9 +68,9 @@ async function postToFacebook(content) {
 }
 
 // Publish post (Facebook only)
-async function publishPost(content, platform, metadata = {}) {
+async function publishPost(content, platform, sourceAgent) {
   const supported = {
-    facebook: () => postToFacebook(content),
+    facebook: () => postToFacebook(content, sourceAgent),
   };
 
   if (!supported[platform]) {
@@ -160,7 +173,7 @@ router.post('/:id/publish', async (req, res) => {
     console.log(`[ContentQueue] Publishing post ${post.id} to Facebook...`);
 
     try {
-      const result = await publishPost(post.content, post.platform);
+      const result = await publishPost(post.content, post.platform, post.source_agent);
 
       db.run(
         `UPDATE ${tableName}
@@ -216,7 +229,7 @@ router.post('/publish-due', async (req, res) => {
 
     for (const post of duePosts) {
       try {
-        const result = await publishPost(post.content, post.platform);
+        const result = await publishPost(post.content, post.platform, post.source_agent);
         db.run(
           `UPDATE ${tableName}
            SET status = 'posted', posted_at = datetime('now'), external_post_id = ?, metadata = ?, updated_at = datetime('now')
@@ -296,6 +309,59 @@ router.post('/generate', async (req, res) => {
     res.status(201).json({ success: true, post });
   } catch (error) {
     console.error('[ContentQueue] Error generating content:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── POST /api/content-queue/generate-jake ────────────────────────────────
+// Ask jake-social-scheduler to generate a post for the Jake Facebook page
+
+router.post('/generate-jake', async (req, res) => {
+  try {
+    const { topic, scheduled_for } = req.body;
+    const tableName = req.campaignTables?.content_queue || 'content_queue';
+
+    if (!topic) {
+      return res.status(400).json({ success: false, error: 'topic is required' });
+    }
+
+    const openclawBridge = require('../services/openclawBridge');
+
+    const prompt = `Generate a Facebook page post for Jake - Construction AI CFO about: "${topic}".
+Audience: small GC owners and construction CFOs.
+Tone: direct, peer-to-peer, no fluff — like Jake is talking to a fellow CFO.
+Include a clear CTA. Keep it under 300 words. Return ONLY the post text, nothing else.`;
+
+    console.log(`[ContentQueue] Generating Jake Facebook post for topic: "${topic}"`);
+
+    const result = await openclawBridge.runAgent('jake-social-scheduler', {
+      openclawId: 'jake-social-scheduler',
+      message: prompt,
+    });
+
+    let content = result?.output || result?.result || result?.content || '';
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed?.result) content = parsed.result;
+      else if (parsed?.payloads?.[0]?.text) content = parsed.payloads[0].text;
+    } catch (_) { /* not JSON, use as-is */ }
+
+    if (!content || content.trim().length === 0) {
+      return res.status(500).json({ success: false, error: 'Agent returned empty content' });
+    }
+
+    const id = uuidv4();
+    db.run(
+      `INSERT INTO ${tableName} (id, platform, post_type, content, topic, source_agent, status, scheduled_for)
+       VALUES (?, 'facebook', 'page', ?, ?, 'jake-social-scheduler', 'pending', ?)`,
+      [id, content.trim(), topic, scheduled_for || null]
+    );
+
+    const post = db.get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
+    console.log(`[ContentQueue] ✅ Generated Jake post and queued: ${id}`);
+    res.status(201).json({ success: true, post });
+  } catch (error) {
+    console.error('[ContentQueue] Error generating Jake content:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -103,19 +103,41 @@ class OpenClawBridge extends EventEmitter {
   static parseOutput(jsonString) {
     try {
       const parsed = JSON.parse(jsonString);
-      if (parsed.payloads?.[0]?.text) {
-        const meta = parsed.meta || {};
-        const am = meta.agentMeta || {};
-        const usage = am.usage || {};
-        return {
-          text: parsed.payloads[0].text,
-          durationMs: meta.durationMs || null,
-          tokensUsed: usage.total || ((usage.input || 0) + (usage.output || 0)),
-          costUsd: (usage.input || 0) * 0.0000025 + (usage.output || 0) * 0.00001,
-          sessionId: am.sessionId || null,
-          model: am.model || null,
-        };
+      const meta = parsed.meta || {};
+      const am = meta.agentMeta || {};
+      const usage = am.usage || {};
+      const base = {
+        durationMs: meta.durationMs || null,
+        tokensUsed: usage.total || ((usage.input || 0) + (usage.output || 0)),
+        costUsd: (usage.input || 0) * 0.0000025 + (usage.output || 0) * 0.00001,
+        sessionId: am.sessionId || null,
+        model: am.model || null,
+      };
+
+      // Find the first payload with text across all payloads (not just index 0)
+      const payloads = Array.isArray(parsed.payloads) ? parsed.payloads : [];
+      const textPayload = payloads.find(p => p?.text);
+      if (textPayload) {
+        return { ...base, text: textPayload.text };
       }
+
+      // No text payload — agent may have produced tool calls only.
+      // Scan all payload content (including tool_result content) for JSON with "leads" array.
+      const allContent = payloads.map(p => {
+        if (typeof p?.content === 'string') return p.content;
+        if (Array.isArray(p?.content)) return p.content.map(c => c?.text || '').join('\n');
+        return '';
+      }).join('\n');
+
+      if (allContent.includes('"leads"')) {
+        return { ...base, text: allContent };
+      }
+
+      // payloads empty or all tool calls with no leads data
+      if (base.tokensUsed > 0) {
+        return { ...base, text: `[Agent completed — ${base.tokensUsed} tokens, no text output]` };
+      }
+
       return { text: jsonString, durationMs: null, tokensUsed: 0, costUsd: 0, sessionId: null, model: null };
     } catch {
       return { text: jsonString, durationMs: null, tokensUsed: 0, costUsd: 0, sessionId: null, model: null };

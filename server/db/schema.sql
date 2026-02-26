@@ -710,7 +710,8 @@ CREATE TABLE IF NOT EXISTS blitz_runs (
   total_agents INTEGER DEFAULT 6,
   completed_agents INTEGER DEFAULT 0,
   failed_agents INTEGER DEFAULT 0,
-  total_duration_ms INTEGER                   -- Total time for entire run
+  total_duration_ms INTEGER,                  -- Total time for entire run
+  domain TEXT DEFAULT 'all'                   -- 'all', 'jake', 'cfo', 'hoa', 'mgmt'
 );
 
 CREATE TABLE IF NOT EXISTS blitz_results (

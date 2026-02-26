@@ -91,6 +91,116 @@ setTimeout(() => {
       cron: '0 9 * * 5',
       message: 'Review the contact list for: (1) incomplete application submissions needing abandonment sequence emails, (2) post-consultation contacts needing nurture sequence emails, (3) contacts due for the monthly newsletter. Draft the appropriate email for each contact. Helpful, low-pressure tone. Primary CTA: complete the loan application. Secondary CTA: free 15-minute consult.',
     },
+
+    // ── Jake Marketing Pipeline ──
+    {
+      name: 'Jake Lead Scout — Daily National Rotation',
+      description: 'Scouts one US metro per day for named finance contacts at construction companies. Rotates through 60 national markets over ~2 months.',
+      openclaw_id: 'jake-lead-scout',
+      cron: '0 7 * * 1-5',  // Mon-Fri 7 AM (weekdays only — avoids wasted runs on slow weekends)
+      message: '{}',         // Empty = auto-rotation picks the next market
+    },
+    {
+      name: 'Jake Contact Enricher — Daily',
+      description: 'Enriches leads that have a name but no email via Playwright web scraping. Runs after lead scout.',
+      openclaw_id: 'jake-contact-enricher',  // openclaw_id matches agent name in seed-all-agents.js
+      cron: '30 8 * * 1-5', // Mon-Fri 8:30 AM — 90 min after scout finishes
+      message: '{"limit":25,"min_score":45,"status_filter":"pending"}',
+    },
+    {
+      name: 'Jake Follow-Up Agent — Wed & Fri',
+      description: 'Generates follow-up emails for leads contacted 5+ days ago with no reply.',
+      openclaw_id: 'jake-follow-up-agent',
+      cron: '0 9 * * 3,5', // Wed + Fri 9 AM
+      message: '{}',
+    },
+
+    // ── Tier 1: Social Publishing ──
+    {
+      name: 'Jake Twitter — Daily Post',
+      description: 'Posts one Jake-voice tweet thread from approved content pieces Mon-Fri 8AM',
+      openclaw_id: 'jake-twitter-poster',
+      cron: '0 8 * * 1-5',
+      message: '{}',
+    },
+    {
+      name: 'LinkedIn Direct Post — Mon/Wed/Fri',
+      description: 'Posts Jake-voice LinkedIn content (long-form Mon, short take Wed, case study Fri)',
+      openclaw_id: 'linkedin-direct-poster',
+      cron: '0 9 * * 1,3,5',
+      message: '{}',
+    },
+    {
+      name: 'SMS Follow-Up — Tue/Thu',
+      description: "Sends SMS to enriched leads with phone who haven't replied in 10+ days",
+      openclaw_id: 'sms-follow-up',
+      cron: '0 10 * * 2,4',
+      message: '{}',
+    },
+
+    // ── Tier 2: Signal Sources ──
+    {
+      name: 'Jake Hiring Signal — Mon/Thu',
+      description: 'Scans Indeed/LinkedIn for construction companies posting CFO/Controller/AP roles',
+      openclaw_id: 'jake-hiring-signal-agent',
+      cron: '0 6 * * 1,4',
+      message: '{}',
+    },
+    {
+      name: 'HOA Special Assessment Monitor — Daily',
+      description: 'Monitors FL Dept of Condominiums and county records for new special assessments',
+      openclaw_id: 'hoa-special-assessment-monitor',
+      cron: '0 6 * * 1-5',
+      message: '{}',
+    },
+
+    // ── Tier 3: Close Loops ──
+    {
+      name: 'Jake CRM Sync — Daily',
+      description: 'Pushes replied/meeting_booked/pilot leads to Google Sheets or CSV export',
+      openclaw_id: 'jake-crm-sync',
+      cron: '0 17 * * 1-5',
+      message: '{}',
+    },
+    {
+      name: 'Content Repurposer — Tue/Thu',
+      description: 'Takes one approved post and generates 5 derivatives across platforms',
+      openclaw_id: 'content-repurposer',
+      cron: '0 10 * * 2,4',
+      message: '{}',
+    },
+
+    // ── Tier 4: Intel ──
+    {
+      name: 'Competitor Intel — Mon/Wed',
+      description: 'Monitors Procore/Sage/Vista/QB forums for construction finance complaints',
+      openclaw_id: 'competitor-intel',
+      cron: '0 7 * * 1,3',
+      message: '{}',
+    },
+    {
+      name: 'Jake Pain Signal Monitor — Mon/Thu',
+      description: 'Scans public records for construction company financial stress signals',
+      openclaw_id: 'jake-pain-signal-monitor',
+      cron: '0 6 * * 1,4',
+      message: '{}',
+    },
+
+    // ── Core Ops ──
+    {
+      name: 'Daily War Room Debrief',
+      description: 'End-of-day summary — reviews all agent activity, leads, costs, and pipeline health.',
+      openclaw_id: 'daily-debrief',
+      cron: '0 18 * * 1-5', // Mon-Fri 6 PM
+      message: '{}',
+    },
+    {
+      name: 'Morning Pipeline Digest',
+      description: 'Posts yesterday\'s pipeline stats to Discord at 7 AM: leads found, emails drafted/sent, reply rate, brain obs, cost.',
+      openclaw_id: 'pipeline-digest',
+      cron: '0 7 * * 1-5', // Mon-Fri 7 AM
+      message: '{}',
+    },
   ];
 
   let created = 0;

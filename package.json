@@ -5,6 +5,7 @@
   "description": "Enterprise-grade frontend for OpenClaw browser automation agents",
   "scripts": {
     "dev": "concurrently --names SERVER,CLIENT,TRADER --prefix-colors cyan,magenta,yellow \"node server/index.js\" \"npx vite\" \"npm run dev:trader\"",
+    "dev:all": "concurrently --names SERVER,CLIENT,TRADER,GATEWAY --prefix-colors cyan,magenta,yellow,green \"node server/index.js\" \"npx vite\" \"npm run dev:trader\" \"openclaw gateway start\"",
     "dev:server": "node server/index.js",
     "dev:client": "npx vite",
     "dev:trader": "cd C:\\Users\\SPilcher\\openclaw-trader && npx tsx watch apps/trader-service/src/server.ts",
@@ -18,12 +19,14 @@
   "dependencies": {
     "@alpacahq/alpaca-trade-api": "^3.0.4",
     "@hookform/resolvers": "^5.2.2",
+    "@sendgrid/mail": "^8.1.6",
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "compression": "^1.7.4",
     "cors": "^2.8.6",
+    "discord.js": "^14.25.1",
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
