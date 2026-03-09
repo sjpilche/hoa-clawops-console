@@ -17,6 +17,7 @@
 'use strict';
 
 const { run, get, all } = require('../db/connection');
+const pool = require('./playwrightPool');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EMAIL & PHONE EXTRACTION
@@ -143,47 +144,28 @@ function extractTitles(text) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PLAYWRIGHT SCRAPING HELPERS
+// PLAYWRIGHT SCRAPING HELPERS — backed by PlaywrightPool singleton
 // ═══════════════════════════════════════════════════════════════════════════
 
-let browser = null;
-
-async function getBrowser() {
-  if (browser) return browser;
-  const { chromium } = require('playwright');
-  browser = await chromium.launch({
-    headless: true,
-    args: ['--disable-blink-features=AutomationControlled'],
-  });
-  return browser;
-}
-
-async function closeBrowser() {
-  if (browser) {
-    await browser.close();
-    browser = null;
-  }
-}
-
 /**
- * Scrape a URL and return text content + extracted data.
- * Tighter 6s nav timeout — sites that respond to partial content are fast.
+ * Scrape a URL and return text content.
+ * Uses the shared pool — no local browser management needed.
+ * Tighter 6s nav timeout — fast sites respond to partial content quickly.
  */
 async function scrapePage(url, timeoutMs = 6000) {
-  const b = await getBrowser();
-  const page = await b.newPage();
-  // Hard deadline — kills the page promise after timeoutMs + 2s grace period
-  const hardDeadline = new Promise(resolve => setTimeout(() => resolve(''), timeoutMs + 2000));
+  let page = null;
+  // Hard deadline — ensures this function ALWAYS returns within timeoutMs + 3s
+  const hardDeadline = new Promise(resolve => setTimeout(() => resolve(''), timeoutMs + 3000));
   const scrape = (async () => {
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      page = await pool.getPage();
+      await pool.fetch(page, url, { timeoutMs, humanDelay: false, waitUntil: 'domcontentloaded' });
       return await page.evaluate(() => document.body?.innerText || '');
     } catch (err) {
       console.log(`[ContactEnricher] Scrape failed for ${url}: ${err.message.split('\n')[0]}`);
       return '';
     } finally {
-      // Force close with a 2s timeout — don't let page.close() block forever
-      await Promise.race([page.close(), new Promise(r => setTimeout(r, 2000))]);
+      if (page) { await pool.safeClose(page); page = null; }
     }
   })();
   return Promise.race([scrape, hardDeadline]);
@@ -294,50 +276,52 @@ async function findWebsiteDirect(companyName) {
 /**
  * Bing search via Playwright — separate rate limit from Google/DDG.
  * Falls back gracefully if also blocked.
+ * Uses the shared PlaywrightPool.
  */
 async function googleSearch(query, timeoutMs = 10000) {
-  const b = await getBrowser();
-  const page = await b.newPage();
-
   // Hard deadline — ensures this function ALWAYS returns within timeoutMs + 5s
   const hardDeadline = new Promise(resolve =>
     setTimeout(() => resolve({ text: '', links: [] }), timeoutMs + 5000)
   );
 
   const search = (async () => {
+    let page = null;
     try {
+      page = await pool.getPage();
       const encoded = encodeURIComponent(query);
-      // Try Bing first
-      await page.goto(`https://www.bing.com/search?q=${encoded}&count=10`, {
-        waitUntil: 'domcontentloaded',
-        timeout: timeoutMs,
-      });
-      await page.waitForTimeout(800);
 
-      const title = await page.title().catch(() => '');
-      const isBingBlocked = /blocked|captcha|access denied/i.test(title);
+      // Try Bing first (circuit-aware via pool.fetch)
+      try {
+        await pool.fetch(page, `https://www.bing.com/search?q=${encoded}&count=10`, {
+          timeoutMs, humanDelay: false, waitUntil: 'domcontentloaded',
+        });
+        await page.waitForTimeout(800);
 
-      if (!isBingBlocked) {
-        const text = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
-        const links = await page.evaluate(() => {
-          const found = [];
-          document.querySelectorAll('li.b_algo a, .b_title a').forEach(a => {
-            if (a.href && a.href.startsWith('http') && !a.href.includes('bing.com') && !a.href.includes('microsoft.com'))
-              found.push(a.href);
-          });
-          if (found.length === 0) {
-            document.querySelectorAll('a[href]').forEach(a => {
-              if (a.href && a.href.startsWith('http') && !a.href.includes('bing.com')) found.push(a.href);
+        const title = await page.title().catch(() => '');
+        const isBingBlocked = /blocked|captcha|access denied/i.test(title);
+
+        if (!isBingBlocked) {
+          const text = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+          const links = await page.evaluate(() => {
+            const found = [];
+            document.querySelectorAll('li.b_algo a, .b_title a').forEach(a => {
+              if (a.href && a.href.startsWith('http') && !a.href.includes('bing.com') && !a.href.includes('microsoft.com'))
+                found.push(a.href);
             });
-          }
-          return found.slice(0, 12);
-        }).catch(() => []);
-        if (text && text.length > 200) return { text, links };
-      }
+            if (found.length === 0) {
+              document.querySelectorAll('a[href]').forEach(a => {
+                if (a.href && a.href.startsWith('http') && !a.href.includes('bing.com')) found.push(a.href);
+              });
+            }
+            return found.slice(0, 12);
+          }).catch(() => []);
+          if (text && text.length > 200) return { text, links };
+        }
+      } catch { /* Bing circuit open or failed — fall through to DDG */ }
 
       // Fallback: DuckDuckGo HTML
-      await page.goto(`https://html.duckduckgo.com/html/?q=${encoded}`, {
-        waitUntil: 'domcontentloaded', timeout: timeoutMs,
+      await pool.fetch(page, `https://html.duckduckgo.com/html/?q=${encoded}`, {
+        timeoutMs, humanDelay: false, waitUntil: 'domcontentloaded',
       });
       await page.waitForTimeout(600);
       const text = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
@@ -355,8 +339,7 @@ async function googleSearch(query, timeoutMs = 10000) {
       console.log(`[ContactEnricher] Search failed: ${err.message.split('\n')[0]}`);
       return { text: '', links: [] };
     } finally {
-      // Force close — don't let page.close() block indefinitely
-      await Promise.race([page.close(), new Promise(r => setTimeout(r, 2000))]);
+      if (page) { await pool.safeClose(page); page = null; }
     }
   })();
 
@@ -606,12 +589,7 @@ async function enrichMultipleLeads({ limit = 20, min_score = 45, status_filter =
   for (let i = 0; i < leads.length; i++) {
     const lead = leads[i];
 
-    // Restart browser every 8 leads to flush bad Playwright state
-    if (i > 0 && i % 8 === 0) {
-      console.log(`[ContactEnricher] Restarting browser after ${i} leads...`);
-      await closeBrowser();
-      await new Promise(r => setTimeout(r, 1500));
-    }
+    // Pool auto-restarts browser every 20 pages — no manual restart needed here
 
     try {
       const result = await enrichLead(lead.id);
@@ -628,9 +606,6 @@ async function enrichMultipleLeads({ limit = 20, min_score = 45, status_filter =
       await new Promise(r => setTimeout(r, 3000));
     }
   }
-
-  // Close browser when done
-  await closeBrowser();
 
   const summary = `Enriched ${enriched}/${leads.length} leads (${failed} failed)`;
   console.log(`[ContactEnricher] ${summary}`);

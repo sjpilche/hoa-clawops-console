@@ -15,6 +15,34 @@ const SCHEDULES = [
     cron: '30 8 * * 1-5',
     message: '{"limit":25,"min_score":45,"status_filter":"pending"}',
   },
+  {
+    name: 'Urgency Scorer — Monday 6 AM',
+    description: 'Scores all leads 0-100 by Fit/Pain/Timeliness/Enrichment. Dual-product (Jake + HOA). $0/run.',
+    agent_name: 'urgency-scorer',
+    cron: '0 6 * * 1',
+    message: '{"limit":300,"product":"both"}',
+  },
+  {
+    name: 'Pipeline State Tracker — Daily 1 AM',
+    description: 'Recomputes pipeline_stage for every active lead. Flags stalled leads. Posts Discord alert. $0/run.',
+    agent_name: 'pipeline-state-tracker',
+    cron: '0 1 * * *',
+    message: '{"product":"both"}',
+  },
+  {
+    name: 'Pipeline Director — Weekdays 6:30 AM',
+    description: 'Dispatches next actions (enrich, dossier, outreach, follow-up) for all ready leads. $0 base + LLM for outreach.',
+    agent_name: 'pipeline-director',
+    cron: '30 6 * * 1-5',
+    message: '{}',
+  },
+  {
+    name: 'Tenacity Cadence Engine — Mon/Wed/Fri 9 AM',
+    description: 'Adaptive multi-touch cadence: finds leads with cadence_active=1 and next_touch_due <= now, queues outreach/follow-up runs. Dual-product (Jake + HOA). $0/run base.',
+    agent_name: 'tenacity-cadence-engine',
+    cron: '0 9 * * 1,3,5',
+    message: '{"product":"both"}',
+  },
 ];
 
 async function main() {

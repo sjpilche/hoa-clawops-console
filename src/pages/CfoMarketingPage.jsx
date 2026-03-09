@@ -347,13 +347,13 @@ function ContentSection({ pieces, onRefresh }) {
 
 // ── Main Page ─────────────────────────────────────────────────────
 
-export default function CfoMarketingPage() {
+export default function CfoMarketingPage({ defaultSource = '' }) {
   const [leads, setLeads] = useState([]);
   const [funnel, setFunnel] = useState(null);
   const [content, setContent] = useState([]);
   const [outreach, setOutreach] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [sourceFilter, setSourceFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState(defaultSource);
   const [tone, setTone] = useState('ai-curious-cfo');
   const [funnelStage, setFunnelStage] = useState(null);
   const [bulkRunning, setBulkRunning] = useState(false);
@@ -479,18 +479,25 @@ export default function CfoMarketingPage() {
       <div style={{ borderBottom: '1px solid #1a1a1a', padding: '16px 32px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: '#fff', margin: 0 }}>Jake Marketing</h1>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: '#fff', margin: 0 }}>
+              {defaultSource === 'owen' ? 'Owen CFO — Property Management' : defaultSource === 'data-rehab' ? 'Data Rehab — AI Readiness' : 'Jake CFO — Construction Finance'}
+            </h1>
             <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>Discover → Enrich → Draft → Send → Track</div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {['', 'jake', 'cfo'].map(src => (
+            {(defaultSource === 'owen'
+              ? ['owen']
+              : defaultSource === 'data-rehab'
+              ? ['data-rehab']
+              : ['', 'jake', 'cfo']
+            ).map(src => (
               <button key={src || 'all'} onClick={() => setSourceFilter(src)} style={{
                 padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'monospace',
                 border: `1px solid ${sourceFilter === src ? '#f97316' : '#333'}`,
                 background: sourceFilter === src ? '#f9731622' : '#111',
                 color: sourceFilter === src ? '#f97316' : '#666',
               }}>
-                {src === '' ? 'All' : src === 'jake' ? 'Jake' : 'Steve'}
+                {src === '' ? 'All' : src === 'jake' ? 'Jake' : src === 'cfo' ? 'Steve' : src === 'owen' ? 'Owen' : 'Data Rehab'}
               </button>
             ))}
             <button onClick={loadAll} style={{ padding: '5px 12px', background: '#111', border: '1px solid #333', borderRadius: 6, color: '#666', fontSize: 12, cursor: 'pointer', fontFamily: 'monospace' }}>

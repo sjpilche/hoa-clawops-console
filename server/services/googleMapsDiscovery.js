@@ -9,7 +9,7 @@
  *   Each new community gets pipeline flags set to trigger Agents 2–5
  */
 
-const { chromium } = require('playwright');
+const pool = require('./playwrightPool');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 const fs = require('fs');
@@ -339,83 +339,98 @@ const CONFIG = {
  */
 async function scrapeGoogleMaps(query, options = {}) {
   const limit = options.limit || CONFIG.maxResults;
-  let browser = null;
 
-  try {
-    browser = await chromium.launch({ headless: CONFIG.headless });
-    const context = await browser.newContext({
-      userAgent: CONFIG.userAgent,
-      viewport: { width: 1920, height: 1080 },
-    });
-    const page = await context.newPage();
+  // Check circuit before requesting a page
+  if (pool.circuitBreaker('www.google.com')) {
+    return { results: [], error: 'Circuit open for google.com — too many recent failures' };
+  }
 
-    // Navigate directly to search URL (avoids typing in search box)
-    const encodedQuery = encodeURIComponent(query);
-    const searchUrl = `https://www.google.com/maps/search/${encodedQuery}`;
+  let page = null;
+  let attempt = 0;
+  const maxAttempts = 2;
 
-    console.log(`  [Scraper] Navigating: "${query}"`);
-    await page.goto(searchUrl, { timeout: CONFIG.timeout });
-    await page.waitForTimeout(CONFIG.pageWait);
+  while (attempt < maxAttempts) {
+    attempt++;
+    try {
+      page = await pool.getPage();
 
-    // Check for CAPTCHA
-    const title = await page.title();
-    if (title.toLowerCase().includes('captcha') || title.toLowerCase().includes('unusual traffic')) {
-      console.log('  [Scraper] ⚠️  CAPTCHA detected — aborting this query');
-      await browser.close();
-      return { results: [], captcha: true };
-    }
+      // Navigate directly to search URL (avoids typing in search box)
+      const encodedQuery = encodeURIComponent(query);
+      const searchUrl = `https://www.google.com/maps/search/${encodedQuery}`;
 
-    const allResults = [];
-    let pageNum = 0;
-    let prevCount = 0;
+      console.log(`  [Scraper] Navigating: "${query}"`);
+      await pool.fetch(page, searchUrl, { timeoutMs: CONFIG.timeout, humanDelay: true, waitUntil: 'domcontentloaded' });
 
-    // Paginate up to maxPages
-    while (pageNum < CONFIG.maxPages && allResults.length < limit) {
-      pageNum++;
+      // Check for CAPTCHA
+      const title = await page.title();
+      if (title.toLowerCase().includes('captcha') || title.toLowerCase().includes('unusual traffic')) {
+        console.log('  [Scraper] ⚠️  CAPTCHA detected — aborting this query');
+        await pool.safeClose(page);
+        page = null;
+        return { results: [], captcha: true };
+      }
 
-      // Extract all listing cards from sidebar
-      const pageResults = await extractListings(page);
-      console.log(`  [Scraper] Page ${pageNum}: found ${pageResults.length} listings`);
+      const allResults = [];
+      let pageNum = 0;
+      let prevCount = 0;
 
-      // Check for significant duplicates (>50% overlap = stop)
-      if (pageNum > 1 && pageResults.length > 0) {
-        const existingNames = new Set(allResults.map(r => r.name));
-        const dupes = pageResults.filter(r => existingNames.has(r.name)).length;
-        if (dupes / pageResults.length > 0.5) {
-          console.log(`  [Scraper] >50% duplicates on page ${pageNum}, stopping pagination`);
+      // Paginate up to maxPages
+      while (pageNum < CONFIG.maxPages && allResults.length < limit) {
+        pageNum++;
+
+        // Extract all listing cards from sidebar
+        const pageResults = await extractListings(page);
+        console.log(`  [Scraper] Page ${pageNum}: found ${pageResults.length} listings`);
+
+        // Check for significant duplicates (>50% overlap = stop)
+        if (pageNum > 1 && pageResults.length > 0) {
+          const existingNames = new Set(allResults.map(r => r.name));
+          const dupes = pageResults.filter(r => existingNames.has(r.name)).length;
+          if (dupes / pageResults.length > 0.5) {
+            console.log(`  [Scraper] >50% duplicates on page ${pageNum}, stopping pagination`);
+            break;
+          }
+        }
+
+        allResults.push(...pageResults);
+
+        if (allResults.length >= limit) break;
+
+        // Try to click "Next" button
+        const advanced = await advanceToNextPage(page);
+        if (!advanced) {
+          console.log(`  [Scraper] No more pages after page ${pageNum}`);
           break;
         }
+
+        await page.waitForTimeout(CONFIG.pageWait);
+
+        // Detect if results didn't change
+        if (allResults.length === prevCount) {
+          console.log(`  [Scraper] No new results, stopping`);
+          break;
+        }
+        prevCount = allResults.length;
       }
 
-      allResults.push(...pageResults);
+      await pool.safeClose(page);
+      page = null;
+      return { results: allResults.slice(0, limit), captcha: false };
 
-      if (allResults.length >= limit) break;
-
-      // Try to click "Next" button
-      const advanced = await advanceToNextPage(page);
-      if (!advanced) {
-        console.log(`  [Scraper] No more pages after page ${pageNum}`);
-        break;
+    } catch (error) {
+      if (page) { await pool.safeClose(page); page = null; }
+      if (attempt < maxAttempts) {
+        const backoff = attempt * 3000;
+        console.warn(`  [Scraper] Attempt ${attempt} failed (${error.message.split('\n')[0]}) — retrying in ${backoff}ms`);
+        await new Promise(r => setTimeout(r, backoff));
+      } else {
+        console.error(`  [Scraper] Error scraping "${query}": ${error.message}`);
+        return { results: [], error: error.message, captcha: false };
       }
-
-      await page.waitForTimeout(CONFIG.pageWait);
-
-      // Detect if results didn't change
-      if (allResults.length === prevCount) {
-        console.log(`  [Scraper] No new results, stopping`);
-        break;
-      }
-      prevCount = allResults.length;
     }
-
-    await browser.close();
-    return { results: allResults.slice(0, limit), captcha: false };
-
-  } catch (error) {
-    console.error(`  [Scraper] Error scraping "${query}": ${error.message}`);
-    if (browser) await browser.close();
-    return { results: [], error: error.message, captcha: false };
   }
+
+  return { results: [], error: 'Max attempts reached', captcha: false };
 }
 
 /**

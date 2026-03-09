@@ -19,7 +19,7 @@
 
 'use strict';
 
-const { chromium } = require('playwright');
+const pool = require('./playwrightPool');
 const { run, get } = require('../db/connection');
 const { getNextMarket, markMarketScouted } = require('./jakeLeadRotation');
 
@@ -96,55 +96,68 @@ function scoreCompany(result) {
 // ── Google Maps scraper ───────────────────────────────────────────────────────
 
 async function scrapeGoogleMaps(query, limit = 60) {
-  let browser = null;
-  try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      viewport: { width: 1920, height: 1080 },
-    });
-    const page = await context.newPage();
+  // Check circuit before requesting a page
+  const mapsDomain = 'www.google.com';
+  if (pool.circuitBreaker(mapsDomain)) {
+    return { results: [], error: 'Circuit open for google.com — too many recent failures' };
+  }
 
-    const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
-    await page.goto(searchUrl, { timeout: 30000 });
-    await page.waitForTimeout(3000);
+  let page = null;
+  let attempt = 0;
+  const maxAttempts = 2;
 
-    // Check for CAPTCHA
-    const title = await page.title();
-    if (title.toLowerCase().includes('captcha') || title.toLowerCase().includes('unusual traffic')) {
-      await browser.close();
-      return { results: [], captcha: true };
-    }
+  while (attempt < maxAttempts) {
+    attempt++;
+    try {
+      page = await pool.getPage();
 
-    const allResults = [];
-    for (let pageNum = 0; pageNum < 3 && allResults.length < limit; pageNum++) {
-      const pageResults = await extractListings(page);
+      const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+      await pool.fetch(page, searchUrl, { timeoutMs: 30000, humanDelay: true, waitUntil: 'domcontentloaded' });
 
-      // Stop if >50% overlap with already-gathered results (we're re-seeing the same page)
-      if (pageNum > 0 && pageResults.length > 0) {
-        const existingNames = new Set(allResults.map(r => r.name));
-        const dupes = pageResults.filter(r => existingNames.has(r.name)).length;
-        if (dupes / pageResults.length > 0.5) break;
+      // Check for CAPTCHA
+      const title = await page.title();
+      if (title.toLowerCase().includes('captcha') || title.toLowerCase().includes('unusual traffic')) {
+        await pool.safeClose(page);
+        page = null;
+        return { results: [], captcha: true };
       }
 
-      allResults.push(...pageResults);
-      if (allResults.length >= limit) break;
+      const allResults = [];
+      for (let pageNum = 0; pageNum < 3 && allResults.length < limit; pageNum++) {
+        const pageResults = await extractListings(page);
 
-      const advanced = await advancePage(page);
-      if (!advanced) break;
-      await page.waitForTimeout(2500);
+        // Stop if >50% overlap with already-gathered results (we're re-seeing the same page)
+        if (pageNum > 0 && pageResults.length > 0) {
+          const existingNames = new Set(allResults.map(r => r.name));
+          const dupes = pageResults.filter(r => existingNames.has(r.name)).length;
+          if (dupes / pageResults.length > 0.5) break;
+        }
+
+        allResults.push(...pageResults);
+        if (allResults.length >= limit) break;
+
+        const advanced = await advancePage(page);
+        if (!advanced) break;
+        await page.waitForTimeout(2500);
+      }
+
+      await pool.safeClose(page);
+      page = null;
+      return { results: allResults.slice(0, limit), captcha: false };
+
+    } catch (err) {
+      if (page) { await pool.safeClose(page); page = null; }
+      if (attempt < maxAttempts) {
+        const backoff = attempt * 3000;
+        console.warn(`[ConstructionDiscovery] Scrape attempt ${attempt} failed (${err.message.split('\n')[0]}) — retrying in ${backoff}ms`);
+        await new Promise(r => setTimeout(r, backoff));
+      } else {
+        return { results: [], error: err.message };
+      }
     }
-
-    await browser.close();
-    return { results: allResults.slice(0, limit), captcha: false };
-
-  } catch (err) {
-    if (browser) await browser.close().catch(() => {});
-    return { results: [], error: err.message };
   }
+
+  return { results: [], error: 'Max attempts reached' };
 }
 
 /**

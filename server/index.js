@@ -51,6 +51,9 @@ const pipelineRoutes = require('./routes/pipelines');
 const discordRoutes = require('./routes/discord');
 const brainRoutes   = require('./routes/brain');
 const mgmtOutreachRoutes = require('./routes/mgmtOutreach');
+const healthRoutes    = require('./routes/health');
+const pipelineHealthRoutes = require('./routes/pipeline');
+const livempaintRoutes     = require('./routes/livempaint');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -192,6 +195,9 @@ async function startServer() {
     app.use('/api/discord', discordRoutes);
     app.use('/api/brain',   brainRoutes);
     app.use('/api/mgmt-outreach', mgmtOutreachRoutes);
+    app.use('/api/health', healthRoutes);
+    app.use('/api/pipeline', pipelineHealthRoutes);
+    app.use('/api/livempaint', livempaintRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {
@@ -201,18 +207,6 @@ async function startServer() {
     } else {
       console.log('[Security] ✅ Test routes disabled (production mode)');
     }
-
-    // --- Health Check ---
-    // No auth required, minimal information disclosure
-    app.get('/api/health', (_req, res) => {
-      res.json({
-        status: 'ok',
-        service: 'ClawOps Console BFF',
-        timestamp: new Date().toISOString(),
-        uptime: Math.floor(process.uptime()),
-        environment: NODE_ENV,
-      });
-    });
 
     // --- Security Headers Test Endpoint (dev only) ---
     if (!IS_PRODUCTION) {
@@ -279,6 +273,11 @@ async function startServer() {
       // --- Initialize Collective Brain (Azure SQL tables) ---
       require('./services/collectiveBrain').ensureTables().catch(err =>
         console.warn('[CollectiveBrain] Table init warning (non-fatal):', err.message)
+      );
+
+      // --- Initialize Chroma Brain (local vector store for RAG) ---
+      require('./services/chromaBrain').initCollections().catch(err =>
+        console.warn('[ChromaBrain] Init warning (non-fatal):', err.message)
       );
 
       // --- Start Discord Bot (if token configured) ---

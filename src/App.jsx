@@ -61,6 +61,8 @@ import GlobalOverview from '@/pages/GlobalOverview';
 import CampaignDashboard from '@/pages/CampaignDashboard';
 import CampaignSettings from '@/pages/CampaignSettings';
 import { CampaignLayout } from '@/layouts/CampaignLayout';
+import PipelineHealthPage from '@/pages/PipelineHealthPage';
+import LivempaintPage from '@/pages/LivempaintPage';
 
 /**
  * Protected Route wrapper.
@@ -114,6 +116,10 @@ export default function App() {
         <Route path="/mgmt-research" element={<MgmtResearchPage />} />
         <Route path="/jake-marketing" element={<CfoMarketingPage />} />
         <Route path="/cfo-marketing" element={<CfoMarketingPage />} />
+        <Route path="/owen-marketing" element={<CfoMarketingPage defaultSource="owen" />} />
+        <Route path="/data-rehab" element={<CfoMarketingPage defaultSource="data-rehab" />} />
+        <Route path="/pipeline-health" element={<PipelineHealthPage />} />
+        <Route path="/livempaint" element={<LivempaintPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />

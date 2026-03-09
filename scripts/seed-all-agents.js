@@ -85,6 +85,25 @@ const AGENT_FLEET = [
   { name: 'competitor-intel', description: 'Monitors Procore/Sage/Vista/QB forums and review sites for construction finance complaints — surfaces high-intent leads', group: 'jake-marketing' },
   { name: 'jake-pain-signal-monitor', description: 'Scans public records for construction company financial stress signals (liens, judgments, BBB complaints)', group: 'jake-marketing' },
   { name: 'bid-result-scraper', description: 'Scrapes FL/TX procurement portals for recently awarded $500K+ construction contracts — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_bid_scraper' },
+
+  // ── Owen CFO Marketing (5) — Property Management sister product to Jake ──
+  { name: 'owen-content-engine', description: 'Owen-voice content — LinkedIn posts, blog articles for property management CFO audience', group: 'owen-marketing' },
+  { name: 'owen-outreach-agent', description: 'Personalized cold emails to property management companies — trust accounting, CAM recon, owner distribution pain', group: 'owen-marketing' },
+  { name: 'owen-lead-scout', description: 'Discovers property management companies (500–5,000 units) across target markets via web search', group: 'owen-marketing', special_handler: 'jake_lead_scout' },
+  { name: 'owen-social-scheduler', description: 'Formats Owen content for LinkedIn, Twitter, Facebook', group: 'owen-marketing' },
+  { name: 'owen-analytics-monitor', description: 'Owen pipeline health — leads, outreach, content, costs', group: 'owen-marketing' },
+
+  // ── Data Rehab (3) — Foot-in-door data cleaning service ──
+  { name: 'data-rehab-outreach', description: 'Cold outreach for Data Rehab — low-risk data audit offer, bridges to Jake/Owen upsell', group: 'data-rehab' },
+  { name: 'data-rehab-content', description: 'Content for Data Rehab — GIGO messaging, hidden cost of messy data, AI-readiness education', group: 'data-rehab' },
+  { name: 'data-rehab-scout', description: 'Finds SMBs with data chaos signals — QB+Excel mix, hiring accountants, ERP migration issues', group: 'data-rehab' },
+
+  // ── ClawOps 2.0 Upgrades ──
+  { name: 'urgency-scorer', description: 'Scores all leads 0-100 across Fit/Pain/Timeliness/Enrichment. Dual-product (Jake + HOA). $0/run — no LLM.', group: 'jake-marketing', special_handler: 'urgency_scorer' },
+  { name: 'lead-dossier-generator', description: 'Assembles a personalized Markdown dossier per lead: pain narrative, brain episode proof, KB winning angles, CTA. Dual-product (Jake + HOA). $0/run.', group: 'jake-marketing', special_handler: 'lead_dossier_generator' },
+  { name: 'pipeline-state-tracker', description: 'Computes pipeline_stage for all active leads (New→Enriched→Dossiered→Outreached→Replied→…). Flags stalled. $0/run.', group: 'jake-marketing', special_handler: 'pipeline_state_tracker' },
+  { name: 'pipeline-director', description: 'Claw Director — reads next_action queue and dispatches enrich/dossier/outreach/follow-up actions for ready leads. Runs 6:30 AM M-F.', group: 'jake-marketing', special_handler: 'pipeline_director' },
+  { name: 'tenacity-cadence-engine', description: 'Adaptive multi-touch persistence (12 touches, 3 channels). Queues cadence touches for Jake + HOA leads. Brain v2 adjusts timing/tone from winning episodes. $0/run.', group: 'jake-marketing', special_handler: 'tenacity_cadence' },
 ];
 
 async function main() {

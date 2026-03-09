@@ -252,6 +252,30 @@ async function maybeRunDistillation() {
   }
 }
 
+// ── Brain Council summary — runs at 02:30 AM (30 min after distillation) ──────
+let _lastCouncilDate = null;
+
+async function maybeRunBrainCouncil() {
+  const now = new Date();
+  if (now.getHours() !== 2 || now.getMinutes() !== 30) return;
+  const today = now.toISOString().slice(0, 10);
+  if (_lastCouncilDate === today) return; // already ran today
+  _lastCouncilDate = today;
+
+  try {
+    const brain = require('./collectiveBrain');
+    console.log('[ScheduleRunner] 🧠 Running Brain Council summary...');
+    const result = await brain.brainCouncilSummary();
+    if (result.posted) {
+      console.log(`[ScheduleRunner] 🧠 Brain Council: posted ${result.count} new patterns to Discord`);
+    } else {
+      console.log('[ScheduleRunner] 🧠 Brain Council: no new patterns to post');
+    }
+  } catch (err) {
+    console.error('[ScheduleRunner] 🧠 Brain Council failed (non-fatal):', err.message);
+  }
+}
+
 // ── Main tick ─────────────────────────────────────────────────────────────────
 async function tick() {
   if (_checkRunning) return;
@@ -271,6 +295,9 @@ async function tick() {
 
     // Nightly brain distillation at 02:00 AM
     maybeRunDistillation().catch(() => {});
+
+    // Brain Council Discord summary at 02:30 AM (after distillation)
+    maybeRunBrainCouncil().catch(() => {});
   } catch (err) {
     console.error('[ScheduleRunner] Tick error:', err.message);
   } finally {

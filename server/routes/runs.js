@@ -739,18 +739,51 @@ const SPECIAL_HANDLERS = {
       metadata: { classification, company: lead.company_name, erp: lead.erp_type },
     });
 
-    // Brain Layer 3: episode if interested
-    if (classification === 'INTERESTED') {
-      const sentSeq = get("SELECT sent_at FROM cfo_outreach_sequences WHERE lead_id=? AND sequence_position=1 ORDER BY created_at LIMIT 1", [lead_id]);
-      const daysToOutcome = sentSeq?.sent_at
-        ? Math.floor((Date.now() - new Date(sentSeq.sent_at).getTime()) / 86400000) : null;
-      brain.recordEpisode(agentName, {
-        market, erpContext: lead.erp_type, contactTitle: lead.contact_title,
-        actionTaken: `Cold email outreach to ${lead.company_name}`,
-        outcome: 'Lead replied \u2014 interested in meeting',
-        outcomeType: 'replied', outcomeScore: 0.8,
-        daysToOutcome, leadId: String(lead_id),
-      });
+    // Brain Layer 3: episode for all reply outcomes with proper outcome scores
+    // High scores flow into Layer 4 KB via nightly distillation
+    const outcomeScoreMap = {
+      INTERESTED:   0.9,
+      NOT_NOW:      0.3,
+      WRONG_PERSON: 0.2,
+      UNSUBSCRIBE:  0.1,
+      BOUNCED:      0.0,
+      NEUTRAL:      0.5,
+    };
+    const outcomeTypeMap = {
+      INTERESTED:   'replied',
+      NOT_NOW:      'lost',
+      WRONG_PERSON: 'lost',
+      UNSUBSCRIBE:  'lost',
+      BOUNCED:      'lost',
+      NEUTRAL:      'replied',
+    };
+    const outcomeTextMap = {
+      INTERESTED:   'Lead replied \u2014 interested in meeting',
+      NOT_NOW:      'Lead replied \u2014 not right now, nurture sequence',
+      WRONG_PERSON: 'Lead replied \u2014 wrong contact, need new decision maker',
+      UNSUBSCRIBE:  'Lead replied \u2014 unsubscribed, do not contact',
+      BOUNCED:      'Email bounced \u2014 invalid address',
+      NEUTRAL:      'Lead replied \u2014 neutral or unclear',
+    };
+    const sentSeq = get("SELECT sent_at FROM cfo_outreach_sequences WHERE lead_id=? AND sequence_position=1 ORDER BY created_at LIMIT 1", [lead_id]);
+    const daysToOutcome = sentSeq?.sent_at
+      ? Math.floor((Date.now() - new Date(sentSeq.sent_at).getTime()) / 86400000) : null;
+    brain.recordEpisode(agentName, {
+      market, erpContext: lead.erp_type, contactTitle: lead.contact_title,
+      actionTaken: `Cold email outreach to ${lead.company_name} (${lead.erp_type || 'unknown ERP'})`,
+      outcome:     outcomeTextMap[classification] || 'Unknown reply',
+      outcomeType: outcomeTypeMap[classification] || 'replied',
+      outcomeScore: outcomeScoreMap[classification] ?? 0.5,
+      daysToOutcome,
+      leadId: String(lead_id),
+    });
+
+    // Cadence Brain v2: deactivate cadence on terminal reply outcomes
+    if (['INTERESTED', 'UNSUBSCRIBE', 'BOUNCED'].includes(classification)) {
+      try {
+        const cadence = require('../services/tenacityCadenceEngine');
+        cadence.deactivateCadence(lead_id, 'jake');
+      } catch { /* service may not be seeded yet */ }
     }
 
     const outputText = `Reply Classifier: ${lead.company_name} \u2192 ${classification} | New status: ${newLeadStatus || 'unchanged'} | Next: ${nextAction}`;
@@ -807,8 +840,65 @@ const SPECIAL_HANDLERS = {
         metadata: { lead_id, company: lead.company_name, city: lead.city } }
     );
 
+    // Brain v2 Layer 3: record 'booked' episode — scores 1.0, flows to Layer 4 KB via distillation
+    const agentName = lead.source_agent === 'cfo' ? 'cfo-outreach-agent' : 'jake-outreach-agent';
+    const market = [lead.city, lead.state].filter(Boolean).join(', ');
+    const sentSeq = get("SELECT sent_at FROM cfo_outreach_sequences WHERE lead_id=? AND sequence_position=1 ORDER BY created_at LIMIT 1", [lead_id]);
+    const daysToOutcome = sentSeq?.sent_at
+      ? Math.floor((Date.now() - new Date(sentSeq.sent_at).getTime()) / 86400000) : null;
+    brain.recordEpisode(agentName, {
+      market, erpContext: lead.erp_type, contactTitle: lead.contact_title,
+      actionTaken: `Cold email outreach to ${lead.company_name} (${lead.erp_type || 'unknown ERP'})`,
+      outcome: `Meeting booked \u2014 ${lead.company_name}, ${lead.contact_name || 'contact'}`,
+      outcomeType: 'booked',
+      outcomeScore: 1.0,
+      daysToOutcome,
+      leadId: String(lead_id),
+    });
+
     const outputText = `Meeting Booker: Draft created for ${lead.contact_name} at ${lead.company_name} | Subject: "${data.subject || 'Meeting draft'}"`;
     return { outputText, durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0 };
+  },
+
+  // ── Tenacity Cadence Engine — Upgrade E ──────────────────────────────────
+  // Runs a full cadence cycle: finds leads with cadence_active=1 and
+  // next_touch_due <= now, queues outreach/follow-up runs for each.
+  // Also supports single-lead compute for inspection.
+  // $0/run — no LLM in this handler; dispatches pending runs for LLM agents.
+  tenacity_cadence: async ({ message, runId, agent }) => {
+    const { runCadenceCycle, computeCadenceForLead } = require('../services/tenacityCadenceEngine');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    // Single-lead inspect mode
+    if (params.lead_id) {
+      const product = params.product || 'jake';
+      const cadence = await computeCadenceForLead(parseInt(params.lead_id), product);
+      const durationMs = Date.now() - startTime;
+      const outputText = [
+        `Cadence for ${product} lead #${params.lead_id}:`,
+        `  Next touch: #${cadence.next_touch_number} | Channel: ${cadence.channel} | Tone: ${cadence.tone}`,
+        `  Wait days: ${cadence.wait_days_next} | Due: ${cadence.next_touch_due?.slice(0,10)}`,
+        `  Rationale: ${cadence.rationale}`,
+      ].join('\n');
+      return { outputText, durationMs, costUsd: 0, extra: cadence };
+    }
+
+    // Full cycle mode
+    const product = params.product || 'both';
+    const result = await runCadenceCycle(product);
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: result.summary,
+      durationMs,
+      costUsd: 0,
+      extra: {
+        queued:  result.queued,
+        skipped: result.skipped,
+        errors:  result.errors,
+        opened:  result.opened,
+      },
+    };
   },
 
   brain_distillation: async ({ message, runId, agent }) => {
@@ -975,6 +1065,135 @@ const SPECIAL_HANDLERS = {
         costUsd: 0,
       };
     }
+  },
+
+  // ── Urgency / Intent Scorer — ClawOps 2.0 Upgrade A ──────────────────────
+  // Scores every lead 0-100 across Fit/Pain/Timeliness/Enrichment dimensions.
+  // Dual-product: scores cfo_leads (Jake pipeline) + lg_engagement_queue (HOA).
+  // $0/run — pure SQLite reads + writes, no LLM, no external calls.
+  urgency_scorer: async ({ message, runId, agent }) => {
+    const { runUrgencyScorer } = require('../services/urgencyScorer');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const result = await runUrgencyScorer({
+      limit:   parseInt(params.limit)   || 300,
+      product: params.product           || 'both',
+    });
+    return {
+      outputText: result.summary,
+      durationMs: Date.now() - startTime,
+      costUsd: 0,
+      extra: {
+        leads_scored:        result.leads.scored,
+        leads_avg_score:     result.leads.avg_score,
+        engagements_scored:  result.engagements.scored,
+        top_leads:           result.leads.top_leads,
+      },
+    };
+  },
+
+  // ── Lead Dossier Generator — ClawOps 2.0 Upgrade B ───────────────────────
+  // Assembles a personalized Markdown dossier for each lead:
+  //   situation snapshot · pain narrative · brain episodes · KB angles · CTA.
+  // Dual-product (Jake + HOA). $0/run — pure string assembly + DB reads.
+  // Message params:
+  //   { lead_id, product }            → single lead
+  //   { batch: true, product, limit } → batch mode (top urgency leads)
+  lead_dossier_generator: async ({ message, runId, agent }) => {
+    const { generateDossier, generateEngagementDossier, generateDossierForBatch } = require('../services/leadDossierGenerator');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    // Single-lead mode
+    if (params.lead_id) {
+      const product = params.product || 'jake';
+      const entityType = params.entity_type || 'cfo_lead';
+
+      if (entityType === 'hoa_engagement') {
+        const result = await generateEngagementDossier(parseInt(params.lead_id));
+        const durationMs = Date.now() - startTime;
+        return {
+          outputText: `Dossier generated for HOA engagement #${params.lead_id} — ${result.length} chars | sources: ${JSON.stringify(result.sourcesUsed)}`,
+          durationMs,
+          costUsd: 0,
+          extra: { lead_id: params.lead_id, length: result.length, sourcesUsed: result.sourcesUsed },
+        };
+      }
+
+      const result = await generateDossier(parseInt(params.lead_id), product);
+      const durationMs = Date.now() - startTime;
+      return {
+        outputText: `Dossier generated for lead #${params.lead_id} (${product}) — ${result.length} chars | sources: ${JSON.stringify(result.sourcesUsed)}`,
+        durationMs,
+        costUsd: 0,
+        extra: { lead_id: params.lead_id, product, length: result.length, sourcesUsed: result.sourcesUsed },
+      };
+    }
+
+    // Batch mode
+    const batchResult = await generateDossierForBatch(
+      params.product || 'both',
+      parseInt(params.limit) || 50
+    );
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: batchResult.summary,
+      durationMs,
+      costUsd: 0,
+      extra: {
+        generated:   batchResult.generated,
+        errors:      batchResult.errors,
+        rate_limited: batchResult.rateLimited,
+      },
+    };
+  },
+
+  // ── Pipeline State Tracker — ClawOps 2.0 Upgrade C ──────────────────────
+  // Recomputes pipeline_stage for every active lead. Flags stalled leads.
+  // Posts Discord alert if stalled leads found. $0/run.
+  pipeline_state_tracker: async ({ message, runId, agent }) => {
+    const { computeAllStates } = require('../services/pipelineStateTracker');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const result = await computeAllStates(params.product || 'both');
+    const durationMs = Date.now() - startTime;
+
+    const jakeStats = result.jake;
+    const hoaStats  = result.hoa;
+
+    const outputText = [
+      `Pipeline State Tracker: computed in ${(durationMs / 1000).toFixed(1)}s`,
+      jakeStats ? `  Jake: ${jakeStats.total} leads — ${jakeStats.changed} stage changes, ${jakeStats.stalled} stalled` : null,
+      jakeStats ? `    Stages: ${Object.entries(jakeStats.byStage).map(([s,n])=>`${s}:${n}`).join(' | ')}` : null,
+      hoaStats  ? `  HOA:  ${hoaStats.total} engagements — ${hoaStats.changed} stage changes, ${hoaStats.stalled} stalled` : null,
+      result.total_stalled > 0 ? `  ⚠️  ${result.total_stalled} stalled leads — Discord alert sent` : `  ✅ No stalled leads`,
+    ].filter(Boolean).join('\n');
+
+    return {
+      outputText,
+      durationMs,
+      costUsd: 0,
+      extra: { jakeStats, hoaStats, total_stalled: result.total_stalled },
+    };
+  },
+
+  // ── Pipeline Director — ClawOps 2.0 Upgrade C ───────────────────────────
+  // Dispatches next actions for all ready leads (enrich, dossier, outreach,
+  // follow-up, book-call). Posts Discord summary. Respects daily budget cap.
+  pipeline_director: async ({ message, runId, agent }) => {
+    const { runDirectorCycle } = require('../services/pipelineDirector');
+    const startTime = Date.now();
+    const result = await runDirectorCycle();
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: result.outputText,
+      durationMs,
+      costUsd: 0,
+      extra: {
+        plan: result.plan,
+        total_stalled: result.stateResult?.total_stalled || 0,
+      },
+    };
   },
 };
 

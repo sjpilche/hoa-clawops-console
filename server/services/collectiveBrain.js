@@ -34,7 +34,8 @@
 
 'use strict';
 
-const sql = require('mssql');
+const sql        = require('mssql');
+const chromaBrain = require('./chromaBrain');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONNECTION
@@ -495,7 +496,7 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
   fireAndForget(
     async () => {
       const pool = await getPool();
-      await pool.request()
+      const result = await pool.request()
         .input('agent_name',      sql.NVarChar, agentName)
         .input('market',          sql.NVarChar, market          || null)
         .input('company_type',    sql.NVarChar, companyType     || null)
@@ -510,14 +511,61 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
         .input('run_id',          sql.NVarChar, runId           || null)
         .query(`INSERT INTO agent_episodes
                   (agent_name,market,company_type,erp_context,contact_title,action_taken,outcome,outcome_type,outcome_score,days_to_outcome,lead_id,run_id)
+                OUTPUT INSERTED.id
                 VALUES
                   (@agent_name,@market,@company_type,@erp_context,@contact_title,@action_taken,@outcome,@outcome_type,@outcome_score,@days_to_outcome,@lead_id,@run_id)`);
+
+      // ── Mirror to Chroma (Layer 3 vector store) ──
+      const insertedId = result.recordset?.[0]?.id || leadId || Date.now();
+      const chromaContent = [
+        `Market: ${market || 'n/a'} | ERP: ${erpContext || 'n/a'} | Title: ${contactTitle || 'n/a'}`,
+        `Agent: ${agentName}`,
+        `Approach: ${actionTaken}`,
+        `Result: ${outcome} (${outcomeType}, score=${outcomeScore}, days=${daysToOutcome || '?'})`,
+      ].join('\n');
+      chromaBrain.addEpisode({
+        id:       `azure_${insertedId}`,
+        content:  chromaContent,
+        metadata: {
+          market:          market          || '',
+          erp:             erpContext      || '',
+          contact_title:   contactTitle    || '',
+          outcome_type:    outcomeType,
+          outcome_score:   outcomeScore,
+          days_to_outcome: daysToOutcome   || 0,
+          agent_name:      agentName,
+          lead_id:         String(leadId   || ''),
+          product:         agentName.startsWith('hoa') ? 'hoa' : 'jake',
+        },
+      }).catch(() => {});
     },
-    () => writeFallbackEpisode({
-      agent_name: agentName, market, erp_context: erpContext, contact_title: contactTitle,
-      action_taken: actionTaken, outcome, outcome_type: outcomeType,
-      outcome_score: outcomeScore, days_to_outcome: daysToOutcome, lead_id: leadId, run_id: runId,
-    })
+    () => {
+      writeFallbackEpisode({
+        agent_name: agentName, market, erp_context: erpContext, contact_title: contactTitle,
+        action_taken: actionTaken, outcome, outcome_type: outcomeType,
+        outcome_score: outcomeScore, days_to_outcome: daysToOutcome, lead_id: leadId, run_id: runId,
+      });
+      // Mirror to Chroma from fallback path too
+      const chromaContent = [
+        `Market: ${market || 'n/a'} | ERP: ${erpContext || 'n/a'} | Title: ${contactTitle || 'n/a'}`,
+        `Agent: ${agentName}`,
+        `Approach: ${actionTaken}`,
+        `Result: ${outcome} (${outcomeType}, score=${outcomeScore}, days=${daysToOutcome || '?'})`,
+      ].join('\n');
+      chromaBrain.addEpisode({
+        id:       `fallback_${leadId || Date.now()}`,
+        content:  chromaContent,
+        metadata: {
+          market:          market          || '',
+          erp:             erpContext      || '',
+          outcome_type:    outcomeType,
+          outcome_score:   outcomeScore,
+          days_to_outcome: daysToOutcome   || 0,
+          agent_name:      agentName,
+          product:         agentName.startsWith('hoa') ? 'hoa' : 'jake',
+        },
+      }).catch(() => {});
+    }
   );
 }
 
@@ -710,16 +758,30 @@ async function runDistillation() {
 
   for (const o of outreach) {
     const agentName = o.source_agent === 'jake' ? 'jake-outreach-agent' : 'cfo-outreach-agent';
+    const kbContent = `Subject: ${o.email_subject || ''}\n\n${o.email_body}`;
     const result = await addToKnowledgeBase({
       sourceAgent:  agentName,
       contentType:  'outreach_email',
       title:        o.email_subject,
-      content:      `Subject: ${o.email_subject || ''}\n\n${o.email_body}`,
+      content:      kbContent,
       qualityScore: 1.0,
       sourceId:     `outreach_${o.id}`,
     });
-    if (result.inserted) inserted++;
-    else skipped++;
+    if (result.inserted) {
+      inserted++;
+      // Mirror to Chroma knowledge collection
+      chromaBrain.addKnowledge({
+        id:       `outreach_${o.id}`,
+        content:  kbContent,
+        metadata: {
+          source_agent:  agentName,
+          content_type:  'outreach_email',
+          title:         o.email_subject || '',
+          quality_score: 1.0,
+          product:       o.source_agent === 'jake' ? 'jake' : 'cfo',
+        },
+      }).catch(() => {});
+    } else skipped++;
   }
 
   // ── Distill approved content pieces ──
@@ -743,8 +805,98 @@ async function runDistillation() {
       qualityScore: 1.0,
       sourceId:     `content_${c.id}`,
     });
-    if (result.inserted) inserted++;
-    else skipped++;
+    if (result.inserted) {
+      inserted++;
+      chromaBrain.addKnowledge({
+        id:       `content_${c.id}`,
+        content:  `Title: ${c.title || ''}\n\n${c.content_markdown}`,
+        metadata: {
+          source_agent:  agentName,
+          content_type:  contentType,
+          title:         c.title || '',
+          quality_score: 1.0,
+          product:       c.source_agent === 'jake' ? 'jake' : 'cfo',
+        },
+      }).catch(() => {});
+    } else skipped++;
+  }
+
+  // ── Distill high-score episodes (Brain v2 feedback loop) ──────────────────
+  // Episodes with outcome_score >= 0.8 and positive outcome_type are promoted
+  // to Layer 4 KB with market/erp/tone/wait_days tags so future agents can
+  // retrieve winning patterns directly from the knowledge base.
+  const episodes = all(`
+    SELECT id, agent_name, market, erp_context, contact_title,
+           action_taken, outcome, outcome_type, outcome_score, days_to_outcome
+    FROM brain_fallback_episodes
+    WHERE outcome_score >= 0.8
+      AND outcome_type IN ('replied','booked','converted')
+      AND synced = 0
+    ORDER BY outcome_score DESC
+    LIMIT 20
+  `);
+
+  for (const ep of episodes) {
+    // Build tags object capturing what made this episode win
+    const tags = {
+      outcome_type:    ep.outcome_type,
+      outcome_score:   ep.outcome_score,
+      market:          ep.market          || 'unknown',
+      erp:             ep.erp_context      || 'unknown',
+      contact_title:   ep.contact_title    || 'unknown',
+      wait_days:       ep.days_to_outcome  || null,
+    };
+
+    const content = [
+      `Market: ${ep.market || 'n/a'} | ERP: ${ep.erp_context || 'n/a'} | Title: ${ep.contact_title || 'n/a'}`,
+      `Approach: ${ep.action_taken}`,
+      `Result: ${ep.outcome} (${ep.outcome_type}, score=${ep.outcome_score}, days=${ep.days_to_outcome || '?'})`,
+    ].join('\n');
+
+    const result = await addToKnowledgeBase({
+      sourceAgent:  ep.agent_name,
+      contentType:  'winning_episode',
+      title:        `${ep.outcome_type} in ${ep.market || 'unknown market'} (score=${ep.outcome_score})`,
+      content,
+      qualityScore: ep.outcome_score,
+      market:       ep.market       || null,
+      erpContext:   ep.erp_context  || null,
+      tags:         Object.keys(tags).map(k => `${k}:${tags[k]}`),
+      sourceId:     `episode_${ep.id}`,
+    });
+    if (result.inserted) {
+      inserted++;
+      // Mirror winning episode to both collections
+      chromaBrain.addEpisode({
+        id:       `distilled_${ep.id}`,
+        content,
+        metadata: {
+          market:          ep.market         || '',
+          erp:             ep.erp_context    || '',
+          contact_title:   ep.contact_title  || '',
+          outcome_type:    ep.outcome_type,
+          outcome_score:   ep.outcome_score,
+          days_to_outcome: ep.days_to_outcome || 0,
+          agent_name:      ep.agent_name,
+          product:         ep.agent_name?.startsWith('hoa') ? 'hoa' : 'jake',
+        },
+      }).catch(() => {});
+      chromaBrain.addKnowledge({
+        id:       `episode_${ep.id}`,
+        content,
+        metadata: {
+          source_agent:  ep.agent_name,
+          content_type:  'winning_episode',
+          title:         `${ep.outcome_type} in ${ep.market || 'unknown'} (score=${ep.outcome_score})`,
+          quality_score: ep.outcome_score,
+          market:        ep.market      || '',
+          erp:           ep.erp_context || '',
+          outcome_type:  ep.outcome_type,
+          outcome_score: ep.outcome_score,
+          product:       ep.agent_name?.startsWith('hoa') ? 'hoa' : 'jake',
+        },
+      }).catch(() => {});
+    } else skipped++;
   }
 
   console.log(`[CollectiveBrain] Distillation: ${inserted} new, ${skipped} already in KB`);
@@ -803,6 +955,98 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
   return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + blocks.join('') + '━━━ END CONTEXT ━━━\n\n';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BRAIN COUNCIL SUMMARY — posts nightly Chroma insights to Discord
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Summarize new Chroma additions from the past 24 hours and post to Discord.
+ * Called at 2:30 AM by scheduleRunner, right after distillation.
+ *
+ * @returns {Promise<{posted: boolean, count: number}>}
+ */
+async function brainCouncilSummary() {
+  const discord = require('./discordNotifier');
+
+  if (!chromaBrain.isReady()) {
+    console.log('[BrainCouncil] Chroma not ready — skipping council summary');
+    return { posted: false, count: 0 };
+  }
+
+  try {
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const recent = await chromaBrain.getRecentAdditions(since, 10);
+
+    if (recent.length === 0) {
+      console.log('[BrainCouncil] No new Chroma entries in past 24h — skipping council post');
+      return { posted: false, count: 0 };
+    }
+
+    // Separate episodes from knowledge entries
+    const newEpisodes = recent.filter(r => r.collection === 'episodes');
+    const newKb       = recent.filter(r => r.collection === 'knowledge');
+
+    // Format top patterns
+    const patternLines = recent.slice(0, 5).map((r, i) => {
+      const meta = r.metadata;
+      if (r.collection === 'episodes') {
+        const market  = meta.market        || 'unknown market';
+        const erp     = meta.erp           || 'unknown ERP';
+        const score   = meta.outcome_score != null ? `${Math.round(meta.outcome_score * 100)}%` : '?';
+        const days    = meta.days_to_outcome ? ` in ${meta.days_to_outcome}d` : '';
+        const type    = meta.outcome_type  || 'outcome';
+        return `${i + 1}. ${market} · ${erp} → **${type}** ${score}${days}`;
+      } else {
+        const title   = meta.title         || 'KB entry';
+        const agent   = meta.source_agent  || 'unknown';
+        const quality = meta.quality_score != null ? ` (${Math.round(meta.quality_score * 100)}%)` : '';
+        return `${i + 1}. **${title.slice(0, 60)}**${quality} — ${agent}`;
+      }
+    });
+
+    const chromaStats = await chromaBrain.getStats();
+
+    await discord.postWebhook({
+      embeds: [{
+        title: '🧠 Brain Council — New Insights',
+        description: [
+          `**${recent.length}** new entries indexed in Chroma tonight`,
+          `(${newEpisodes.length} episodes · ${newKb.length} KB entries)`,
+          '',
+          '**New Winning Patterns:**',
+          ...patternLines,
+        ].join('\n'),
+        color: 0x9b59b6,
+        fields: [
+          {
+            name: 'Chroma Collections',
+            value: `Episodes: ${chromaStats.episodes} · Knowledge: ${chromaStats.knowledge}`,
+            inline: true,
+          },
+          {
+            name: 'Top Product',
+            value: newEpisodes.filter(e => e.metadata.product === 'jake').length >= newEpisodes.filter(e => e.metadata.product === 'hoa').length ? 'Jake' : 'HOA',
+            inline: true,
+          },
+          {
+            name: 'Indexed Since',
+            value: new Date(since).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            inline: true,
+          },
+        ],
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Brain Council · ClawOps · Chroma v1' },
+      }],
+    });
+
+    console.log(`[BrainCouncil] ✅ Posted ${recent.length} new patterns to Discord`);
+    return { posted: true, count: recent.length };
+  } catch (err) {
+    console.warn('[BrainCouncil] Summary failed (non-fatal):', err.message);
+    return { posted: false, count: 0 };
+  }
+}
+
 module.exports = {
   ensureTables,
   // Layer 1
@@ -821,6 +1065,8 @@ module.exports = {
   getKnowledgeExamples,
   getKnowledgePromptBlock,
   runDistillation,
+  // Brain Council (Chroma)
+  brainCouncilSummary,
   // Composite
   buildAgentContext,
   getStats,

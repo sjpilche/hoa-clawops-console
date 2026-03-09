@@ -324,4 +324,57 @@ router.get('/live', (req, res) => {
   });
 });
 
+/**
+ * GET /api/health/playwright
+ *
+ * Playwright pool status — browser health, page counters, circuit breakers.
+ */
+router.get('/playwright', (req, res) => {
+  try {
+    const pool = require('../services/playwrightPool');
+    const snapshot = pool.healthSnapshot();
+
+    // Augment with today's DB metrics (fire-and-forget read — no throw)
+    let dbMetrics = null;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      dbMetrics = get('SELECT * FROM playwright_page_metrics WHERE metric_date = ?', [today]);
+    } catch {}
+
+    // Recent circuit events (last 10)
+    let recentCircuits = [];
+    try {
+      recentCircuits = all(
+        'SELECT domain, event, fail_count, occurred_at FROM playwright_circuit_events ORDER BY occurred_at DESC LIMIT 10'
+      );
+    } catch {}
+
+    // Browser restart count today
+    let restartsToday = 0;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      restartsToday = (get(
+        "SELECT COUNT(*) c FROM playwright_browser_restarts WHERE DATE(restarted_at) = ?",
+        [today]
+      ) || {}).c || 0;
+    } catch {}
+
+    res.json({
+      status: snapshot.browserActive ? 'healthy' : 'idle',
+      browser: {
+        active: snapshot.browserActive,
+        pages_served_since_restart: snapshot.pagesServed,
+        pages_in_use: snapshot.pagesInUse,
+        max_pages_before_restart: snapshot.maxPagesBeforeRestart,
+        restarts_today: restartsToday,
+      },
+      circuits: snapshot.circuits,
+      today_metrics: dbMetrics || { pages_opened: 0, pages_ok: 0, pages_failed: 0, timeouts: 0, circuit_trips: 0 },
+      recent_circuit_events: recentCircuits,
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
 module.exports = router;
