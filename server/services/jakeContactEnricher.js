@@ -18,6 +18,7 @@
 
 const { run, get, all } = require('../db/connection');
 const pool = require('./playwrightPool');
+const { extractWithLLM } = require('./domExtractor');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EMAIL & PHONE EXTRACTION
@@ -477,6 +478,31 @@ async function enrichLead(leadId) {
         email = `${first}.${last}@${domain}`;
         method = 'pattern_guess';
         console.log(`[ContactEnricher]   Guessed email: ${email} (unverified)`);
+      }
+    }
+
+    // ── Step 5: LLM-assisted extraction (last resort — $0 via Ollama) ──
+    // Only fires when ALL regex/CSS steps found nothing and we have a website to scrape
+    if (!email && !phone && !contactName && website) {
+      console.log(`[ContactEnricher]   Step 5: LLM-assisted extraction...`);
+      let page = null;
+      try {
+        page = await pool.getPage();
+        await pool.fetch(page, website, { timeoutMs: 8000, humanDelay: false, waitUntil: 'domcontentloaded' });
+        const llmResult = await extractWithLLM(page, lead.company_name, { allowGPT: false });
+
+        if (llmResult.emails.length > 0) {
+          email = llmResult.emails[0];
+          method = llmResult.method;
+          console.log(`[ContactEnricher]   Found email via LLM: ${email}`);
+        }
+        if (llmResult.phones.length > 0 && !phone) phone = llmResult.phones[0];
+        if (llmResult.names.length > 0 && !contactName) contactName = llmResult.names[0];
+        if (llmResult.title && !contactTitle) contactTitle = llmResult.title;
+      } catch (err) {
+        console.log(`[ContactEnricher]   LLM extraction failed: ${err.message}`);
+      } finally {
+        if (page) { await pool.safeClose(page); page = null; }
       }
     }
 

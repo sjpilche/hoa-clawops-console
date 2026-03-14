@@ -1,228 +1,213 @@
-# 🎯 ClawOps Console — Current Status
+# ClawOps Console — System Status
 
-**Last Updated:** February 17, 2026
-**Version:** 1.0 (Production Ready)
-**Overall Status:** ✅ **OPERATIONAL**
+**Last Updated:** March 14, 2026
+**Version:** 2.2
+**Overall Status:** ✅ OPERATIONAL
 
 ---
 
-## 📊 System Health
+## System Health
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Backend API** | ✅ Operational | Express server on port 3001 |
-| **Frontend UI** | ✅ Operational | Vite dev server on port 5174 |
-| **Database** | ✅ Operational | SQLite with campaign isolation |
-| **Authentication** | ✅ Secured | JWT + rate limiting |
-| **OpenClaw Bridge** | ✅ Connected | OpenAI GPT-4o mode active |
-| **Agent Fleet** | ✅ Active | 7 core agents + 5 discovery agents |
+| Backend API | ✅ Operational | Express on port 3001 |
+| Frontend UI | ✅ Operational | Vite on port 5174 |
+| Database | ✅ Operational | SQLite (`data/clawops.db`) |
+| Authentication | ✅ Secured | JWT + bcrypt + rate limiting |
+| OpenClaw Bridge | ✅ Connected | GPT-4o mode active |
+| Schedule Runner | ✅ Active | Fires every 60s |
+| Collective Brain | ✅ Active | All 4 layers live, nightly distillation at 2 AM |
+| Discord Notifications | ✅ Live | Every run + morning digest |
+| Playwright Reliability Layer | ✅ Active | Circuit breaker, browser pool, auto-restart |
+| Unified LLM Client | ✅ Active | llmClient.js — retry, error classification, 9 services |
+| DOM Extractor | ✅ Active | LLM-assisted contact extraction (Step 5 fallback, $0) |
 
 ---
 
-## 🚀 What This System Does
+## Agent Fleet (50+ Agents)
 
-**ClawOps Console** is an enterprise-grade multi-tenant campaign management platform for **HOA lead generation and marketing automation**. It orchestrates autonomous AI agents that:
+### Jake Marketing — Core Brand (7 LLM agents)
+| Agent | Schedule | Status |
+|-------|----------|--------|
+| jake-content-engine | Mon 9 AM | ✅ Active |
+| jake-outreach-agent | On-demand | ✅ Active |
+| jake-lead-scout | Mon 7 AM | ✅ Active |
+| jake-social-scheduler | On-demand | ✅ Active |
+| jake-analytics-monitor | Daily 10 AM | ✅ Active |
+| jake-offer-proof-builder | On-demand | ✅ Active |
+| jake-pilot-deliverer | On-demand | ✅ Active |
 
-1. **Discover** HOA communities via Google Maps, public records, and web scraping
-2. **Score** leads using meeting minutes analysis and Google reviews sentiment
-3. **Enrich** contact data with web scraping and public records
-4. **Draft** personalized outreach emails and LinkedIn messages
-5. **Publish** blog content to GitHub → Netlify with automated SEO optimization
-6. **Post** to Facebook, schedule social media engagement, and manage content queues
+### Jake Marketing — CFO Brand (7 LLM agents)
+Same capabilities as Jake core, `source_agent='cfo'` in DB. All active.
 
-**Key Innovation:** Table-level campaign isolation — each campaign gets its own database tables (`{slug}_leads`, `{slug}_runs`, etc.), enabling "completely different products in full different ecosystems" under one platform.
+### Jake Pipeline — Discovery & Enrichment (2 special handlers, $0/run)
+| Agent | Schedule | Status |
+|-------|----------|--------|
+| jake-construction-discovery | Mon 6 AM | ✅ Active — 50–150 companies/market |
+| jake-contact-enricher | Mon 8 AM | ✅ Active — 24% email hit rate baseline; Step 5 LLM fallback active |
 
----
+### Jake Pipeline — Follow-up Loop (3 agents)
+| Agent | Schedule | Status |
+|-------|----------|--------|
+| jake-follow-up-agent | Wed/Fri 9 AM | ✅ Active |
+| jake-reply-classifier | On-demand | ✅ Active — $0, instant classification |
+| jake-meeting-booker | On-demand | ✅ Active |
 
-## 🏗️ Technical Architecture
+### Jake Pipeline — Signal Sources (3 agents)
+| Agent | Schedule | Status |
+|-------|----------|--------|
+| jake-permit-scanner | On-demand | ✅ Scaffolded (service file pending) |
+| jake-hiring-signal-agent | On-demand | ✅ Active |
+| bid-result-scraper | On-demand | ✅ Scaffolded (service file pending) |
 
-### Core Technologies
-- **Frontend:** React 19 + Vite + Tailwind CSS + TanStack Query
-- **Backend:** Express 5 + Node.js
-- **Database:** SQLite (local-first, zero config)
-- **Auth:** JWT + bcrypt + express-rate-limit
-- **AI Bridge:** OpenAI GPT-4o (via OpenClaw bridge)
-- **Automation:** Cron-based scheduling + Socket.io real-time updates
+### Jake Pipeline — Close Loops (3 agents)
+| Agent | Schedule | Status |
+|-------|----------|--------|
+| jake-crm-sync | Daily | ✅ Active — Google Sheets or CSV fallback |
+| content-repurposer | On-demand | ✅ Active |
+| jake-case-study-builder | On-demand | ✅ Active |
 
-### Database Schema
-- **Multi-tenant tables:** `campaigns`, `{slug}_leads`, `{slug}_runs`, `{slug}_content_queue`, `{slug}_hoa_contacts`
-- **Global tables:** `agents`, `schedules`, `users`, `audit_logs`
-- **Security:** Slug validation regex prevents SQL injection
+### Jake Intel (3 agents)
+All active on-demand: `competitor-intel`, `jake-pain-signal-monitor`, `linkedin-direct-poster`
 
-### Agent Architecture
-- **Agent Types:** LLM agents (GPT-4o) + special handlers (GitHub publisher, web scrapers)
-- **Cost:** ~$0.025/run for LLM agents, $0 for deterministic handlers
-- **Skills Location:** `openclaw-skills/{agent-id}/SOUL.md`
+### Jake Social (2 agents)
+`jake-twitter-poster`, `sms-follow-up` — active on-demand
 
----
+### HOA Marketing (8 agents)
+| Agent | Schedule | Status |
+|-------|----------|--------|
+| hoa-content-writer | Mon 8 AM | ✅ Active |
+| hoa-cms-publisher | Mon 8:30 AM | ✅ Active — GitHub → Netlify |
+| hoa-social-media | On-demand | ✅ Active |
+| hoa-social-engagement | On-demand | ✅ Active |
+| hoa-networker | On-demand | ✅ Active |
+| hoa-email-campaigns | On-demand | ✅ Active |
+| hoa-website-publisher | On-demand | ✅ Active |
+| hoa-facebook-poster | Daily 10 AM | ✅ Active |
 
-## 🎯 Active Agents (12 Total)
+### HOA Pipeline (5 agents)
+All active: `hoa-discovery`, `hoa-contact-finder`, `hoa-contact-enricher`, `hoa-outreach-drafter`, `hoa-special-assessment-monitor`
 
-### Marketing Team (7 agents)
-1. ✅ **hoa-content-writer** — SEO blog posts (Mon 8:00 AM)
-2. ✅ **hoa-cms-publisher** — GitHub → Netlify publishing (Mon 8:30 AM)
-3. ✅ **hoa-social-media** — Social post generation
-4. ✅ **hoa-social-engagement** — Comment/reply automation
-5. ✅ **hoa-networker** — LinkedIn outreach
-6. ✅ **hoa-email-campaigns** — Email sequence generation
-7. ✅ **hoa-facebook-poster** — Facebook content queue publishing (daily 10 AM)
+### HOA Intel (2 special handlers, $0/run)
+`hoa-minutes-monitor`, `google-reviews-monitor` — both active
 
-### Lead Generation Pipeline (5 agents)
-1. ✅ **hoa-discovery** — Google Maps scraper (finds HOA communities)
-2. ✅ **hoa-minutes-monitor** — Meeting minutes analyzer ($15/mo Apify)
-3. ✅ **google-reviews-monitor** — Sentiment scoring (free SerpAPI quota)
-4. ✅ **hoa-contact-enricher** — Web scraping for emails/phones (free)
-5. ✅ **hoa-outreach-drafter** — Personalized email templates (free)
+### Management Research (5 special handlers, $0/run)
+`mgmt-portfolio-scraper`, `mgmt-contact-puller`, `mgmt-portfolio-mapper`, `mgmt-review-scanner`, `mgmt-cai-scraper` — all active
 
----
-
-## 📈 Recent Milestones
-
-### Phase 9-10: Multi-Tenant Campaign Isolation ✅ (Feb 17)
-- **What:** Table-level campaign isolation with auto-migration on server startup
-- **Test Results:** 21/22 tests passing (95% success rate)
-- **Migration:** `server/services/campaignTableManager.js` + startup hook
-- **Middleware:** `campaignContext.js` + `campaignTableContext.js`
-
-### Phase 8: Discovery & Scoring System ✅ (Feb 17)
-- **What:** Built 5-agent lead gen pipeline (discovery → scoring → enrichment → outreach)
-- **Results:** 49 HOAs discovered, 11 leads scored (7 HOT leads)
-- **Integrations:** Apify (minutes), SerpAPI (reviews), Brave Search (discovery)
-
-### Phase 0: Security Hardening ✅ (Feb 11-12)
-- **What:** Fixed CVSS 9.8 command injection, weak JWT secret, added Zod validation
-- **Security Score:** 85/100 (95/100 with HTTPS)
-- **Test Suite:** 17/17 security tests passing
+### Core (3 agents)
+`main` (chat router), `daily-debrief` (6 PM M-F), `morning-digest` (7 AM M-F)
 
 ---
 
-## 🗂️ Project Structure
+## ClawOps 2.0 Upgrades — All Complete
 
-```
-OpenClaw2.0 for linux - Copy/
-├── server/                     # Express backend
-│   ├── routes/                 # API endpoints
-│   ├── services/               # Business logic
-│   ├── middleware/             # Auth, campaign context
-│   ├── db/migrations/          # SQLite migrations
-│   └── index.js                # Server entry point
-├── src/                        # React frontend
-│   ├── components/             # UI components
-│   ├── pages/                  # Route pages
-│   ├── lib/                    # API client, utils
-│   └── main.jsx                # App entry point
-├── openclaw-skills/            # Agent SOUL.md files
-│   ├── hoa-content-writer/
-│   ├── hoa-discovery/
-│   └── [12 agent directories]
-├── scripts/                    # Utility scripts
-│   ├── tests/                  # Test scripts (14 files)
-│   ├── archive/migrations/     # One-time migrations (3 files)
-│   └── seed-*.js               # Database seed scripts
-├── docs/                       # Documentation
-│   ├── archive/                # Historical docs (60+ files)
-│   ├── ARCHITECTURE.md
-│   ├── API-REFERENCE.md
-│   └── TROUBLESHOOTING.md
-├── hoa-lead-agent/             # Standalone Azure SQL sync tool
-├── data/                       # SQLite database (gitignored)
-├── outputs/                    # Agent output files
-└── package.json                # Node.js dependencies
-```
+### Upgrade A — Urgency Scorer ✅
+- File: `server/services/urgencyScorer.js`
+- Migration: `028_urgency_scorer.sql`
+- Handler: `urgency_scorer` in runs.js
+- Schedule: Monday 6 AM
+- Scores every lead 0–100 across Fit / Pain / Timeliness / Enrichment dimensions
+- Dual-product: scores `cfo_leads` (Jake) + `lg_engagement_queue` (HOA)
+- $0/run — pure SQLite reads + writes
+
+### Upgrade B — Lead Dossier Generator ✅
+- File: `server/services/leadDossierGenerator.js`
+- Migration: `029_lead_dossier.sql`
+- Handler: `lead_dossier_generator` in runs.js
+- Assembles personalized Markdown dossier per lead: situation · pain narrative · brain episodes · KB angles · CTA
+- Dual-product (Jake + HOA). $0/run — DB reads + string assembly
+
+### Upgrade C — Pipeline State Tracker + Director ✅
+- Files: `server/services/pipelineStateTracker.js`, `server/services/pipelineDirector.js`
+- Migration: `030_pipeline_state.sql`
+- Handlers: `pipeline_state_tracker`, `pipeline_director`
+- Schedules: daily 1 AM (tracker) + 6:30 AM M-F (director)
+- State tracker: recomputes `pipeline_stage` for all active leads, flags stalled, Discord alert
+- Director: dispatches next actions (enrich/dossier/outreach/follow-up/book), 70/30 Jake/HOA split, max 20 actions/5 LLM per cycle
+
+### Upgrade D — Playwright Reliability Layer ✅
+- File: `server/services/playwrightPool.js`
+- Migration: `031_playwright_metrics.sql` (3 tables)
+- Singleton browser pool: `getInstance()`, `getPage()`, `safeClose()`, `circuitBreaker()`
+- Circuit breaker: 3 fails/5 min → 10 min pause → Discord alert on open/close
+- Auto-restart: browser restarts every 20 pages
+- Health endpoint: `GET /api/health/playwright`
+- Used by: `jakeConstructionDiscovery.js`, `jakeContactEnricher.js`, `googleMapsDiscovery.js`
+
+### Upgrade E — Tenacity Cadence Engine ✅
+- File: `server/services/tenacityCadenceEngine.js`
+- Migration: `032_cadence.sql` (`cadence_touches` table + cadence columns on `cfo_leads` + `lg_engagement_queue`)
+- Handler: `tenacity_cadence` in runs.js
+- Schedule: Mon/Wed/Fri 9 AM
+- 12-touch adaptive cadence across 3 channels (email / LinkedIn / SMS)
+- Brain v2 adjusts timing and tone based on past episode outcomes
+- `deactivateCadence()` auto-called on INTERESTED / UNSUBSCRIBE / BOUNCED reply
 
 ---
 
-## 🔧 How to Run
+## Collective Brain — All 4 Layers Live
 
-### Prerequisites
-- Node.js 18+
-- OpenClaw CLI v2026.2.6-3 (optional, not used in openai mode)
-- OpenAI API key in `.env.local`
+| Layer | Table | Status |
+|-------|-------|--------|
+| 1 — Observations | `brain_observations` | ✅ Written by discovery + enricher runs |
+| 2 — Feedback | `brain_feedback` | ✅ Manual approve/reject in UI |
+| 3 — Episodes | `brain_episodes` | ✅ Reply classifier + meeting booker record outcomes |
+| 4 — Knowledge Base | `brain_knowledge_base` | ✅ Nightly distillation at 2 AM |
 
-### Start the Console
+Brain context prepended to every scheduled LLM run automatically.
+
+Episode outcome scores:
+- `INTERESTED` reply → 0.9
+- `NOT_NOW` reply → 0.3
+- `UNSUBSCRIBE` → 0.1
+- `BOUNCED` → 0.0
+- Meeting booked → 1.0
+
+---
+
+## Recent Activity
+
+- **Mar 13, 2026** — 2,030 bounced emails removed from cfo_leads (SendGrid suppression list)
+- **Feb 27, 2026** — All 5 ClawOps 2.0 Upgrades complete (A–E)
+- **Feb 26, 2026** — Collective Brain all 4 layers live
+- **Feb 25, 2026** — Jake construction pipeline live (discovery + enrichment)
+- **Feb 25, 2026** — Discord integration live
+- **Feb 24, 2026** — Agent autonomy upgrade — 14 SOUL.md files rewritten with web_search directives
+- **Feb 20, 2026** — OpenClaw bridge rewritten; security hardening complete
+
+---
+
+## Known Issues / Workarounds
+
+| Issue | Fix |
+|-------|-----|
+| `openclaw doctor` shows "stopped" | False negative — verify with `netstat -ano | findstr ':18789'` |
+| Playwright `page.close()` hangs after timeout | Fixed: `Promise.race([page.close(), setTimeout(3s)])` |
+| Browser state degradation during enrichment | Auto-restart every 20 pages via Playwright pool |
+| Email false match (wrong company domain) | Page text verified against company name before accepting |
+| Auth rate limiter resets on restart | In-memory by design — 50 attempts, 30s lockout |
+| `openclaw agent` fails with "Unknown agent id" | Run: `openclaw agents add "{name}" --workspace "openclaw-skills/{name}" --non-interactive` |
+
+---
+
+## Cost Breakdown
+
+| Service | Monthly Cost | Notes |
+|---------|-------------|-------|
+| OpenAI GPT-4o | ~$10–20 | LLM agents (~$0.025/run avg) |
+| SendGrid | ~$0–15 | Email sends (volume dependent) |
+| Discord | $0 | Webhooks only |
+| GitHub + Netlify | $0 | Blog publishing (free tier) |
+| Azure SQL | Pay-as-you-go | Collective Brain storage |
+| Playwright / Google Maps | $0 | Discovery + enrichment |
+| **Total** | **~$20–35/mo** | Full system operational |
+
+---
+
+## How to Run
+
 ```bash
-npm run dev
+npm run dev                         # Start server (3001) + Vite (5174) + Trader (3002)
+node scripts/seed-all-agents.js     # Sync all agents to DB (idempotent)
+openclaw agents list                # Verify OpenClaw registration
 ```
-This starts:
-- **Server:** http://localhost:3001/api
-- **Frontend:** http://localhost:5174
-- **Trader Service:** http://localhost:3002 (if configured)
-
-### Login
-- **URL:** http://localhost:5174
-- **Email:** admin@clawops.local
-- **Password:** changeme123
-
-### Run an Agent Manually
-```bash
-node scripts/run-hoa-discovery.js
-```
-
-### Seed Test Data
-```bash
-node scripts/seed-demo.js
-```
-
----
-
-## 🐛 Known Issues
-
-### Minor
-1. **Campaign Routes Test:** 1/6 tests intermittently fails (transient error, non-blocking)
-2. **Auth Rate Limiter:** In-memory (resets on server restart)
-3. **WSL Mode:** Broken on this machine — use OpenAI mode instead
-
-### TODOs in Code
-- 9 server-side TODOs (feature placeholders)
-- 3 client-side TODOs (UI placeholders)
-- See `server/routes/lead-gen.js`, `server/services/hoaDiscovery.js` for details
-
----
-
-## 📚 Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [README.md](README.md) | Quick start guide |
-| [ROADMAP.md](ROADMAP.md) | Future development plans |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical deep dive |
-| [docs/API-REFERENCE.md](docs/API-REFERENCE.md) | API endpoints |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues |
-| [docs/archive/](docs/archive/) | Historical documentation |
-
----
-
-## 💰 Cost Breakdown
-
-| Service | Monthly Cost | Usage |
-|---------|--------------|-------|
-| **OpenAI GPT-4o** | ~$5-10 | LLM agents (~200 runs/mo @ $0.025/run) |
-| **Apify** | $15 | Meeting minutes scraping (premium tier) |
-| **SerpAPI** | $0 | Google reviews (free tier, 100 searches/mo) |
-| **Brave Search** | $0 | Discovery agent (free tier) |
-| **GitHub + Netlify** | $0 | Blog publishing (free tier) |
-| **Total** | **$20-25/mo** | Full system operational |
-
-**Savings:** ~$768/year vs. manual lead gen labor
-
----
-
-## 🎯 Next Steps
-
-1. **Production Deployment:** Deploy to VPS with PM2 process manager
-2. **HTTPS Setup:** Use mkcert for local dev, Let's Encrypt for prod
-3. **Monitoring:** Add Prometheus metrics + Grafana dashboards
-4. **Testing:** Write unit/integration tests (Vitest + Supertest)
-5. **Multi-State Expansion:** Add Texas, California, Arizona geo-targets
-
----
-
-## 📞 Support
-
-- **Issues:** GitHub Issues
-- **Logs:** `data/clawops.db` (audit logs), `hoa-lead-agent/logs/agent.log`
-- **Kill Stale Server:** `powershell -Command "Get-Process node | Stop-Process -Force"`
-
----
-
-**Built with ❤️ using Claude Code + OpenClaw + React**

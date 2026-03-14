@@ -7,7 +7,9 @@
  * Use OpenClaw agents for tasks that need browser interaction.
  */
 
-const https = require('https');
+const { chatMessages } = require('./llmClient');
+
+const SYSTEM_PROMPT = 'You are a helpful assistant for ClawOps Console, a browser automation platform. Answer questions concisely and helpfully.';
 
 /**
  * Call OpenAI ChatGPT API directly for fast responses.
@@ -16,69 +18,21 @@ const https = require('https');
  * @returns {Promise<string>} - AI response
  */
 async function getChatResponse(message, conversationHistory = []) {
-  return new Promise((resolve, reject) => {
-    const apiKey = process.env.OPENAI_API_KEY;
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
 
-    if (!apiKey) {
-      return reject(new Error('OPENAI_API_KEY not configured'));
-    }
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...conversationHistory.slice(-10),
+    { role: 'user', content: message },
+  ];
 
-    const messages = [
-      {
-        role: 'system',
-        content: 'You are a helpful assistant for ClawOps Console, a browser automation platform. Answer questions concisely and helpfully.',
-      },
-      ...conversationHistory.slice(-10), // Last 10 messages for context
-      { role: 'user', content: message },
-    ];
-
-    const requestBody = JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages,
-      temperature: 0.7,
-      max_tokens: 500,
-    });
-
-    const options = {
-      hostname: 'api.openai.com',
-      path: '/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Length': Buffer.byteLength(requestBody),
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-
-      res.on('end', () => {
-        try {
-          const response = JSON.parse(data);
-
-          if (response.error) {
-            return reject(new Error(response.error.message));
-          }
-
-          const reply = response.choices[0]?.message?.content || 'No response';
-          resolve(reply);
-        } catch (error) {
-          reject(new Error(`Failed to parse OpenAI response: ${error.message}`));
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      reject(new Error(`OpenAI API request failed: ${error.message}`));
-    });
-
-    req.write(requestBody);
-    req.end();
+  return chatMessages(messages, {
+    model: 'gpt-4o-mini',
+    provider: 'openai',
+    temperature: 0.7,
+    maxTokens: 500,
   });
 }
 
