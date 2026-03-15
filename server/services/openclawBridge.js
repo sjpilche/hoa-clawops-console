@@ -7,8 +7,25 @@
 
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
+const path = require('path');
+const fs = require('fs');
 
 const TIMEOUT_MS = parseInt(process.env.MAX_DURATION_PER_RUN || '600', 10) * 1000;
+
+// ── Load founder mandate once — appended to every agent message ───────────────
+let _cachedMandate = null;
+function loadFounderMandate() {
+  if (_cachedMandate !== null) return _cachedMandate;
+  const mandatePath = path.join(process.cwd(), 'founder', 'agent_mandate.md');
+  try {
+    if (fs.existsSync(mandatePath)) {
+      _cachedMandate = '\n\n---\n[FOUNDER MANDATE]\n' + fs.readFileSync(mandatePath, 'utf-8').trim();
+      return _cachedMandate;
+    }
+  } catch {}
+  _cachedMandate = '';
+  return _cachedMandate;
+}
 
 /** Shell-escape a value by wrapping in double quotes and escaping inner quotes. */
 function esc(val) {
@@ -27,7 +44,8 @@ class OpenClawBridge extends EventEmitter {
     const message = config.message || 'Start agent task';
     const sessionId = config.sessionId || `session-${Date.now()}-${id}`;
 
-    let cmd = `openclaw agent --local --json --agent ${esc(id)} --message ${esc(message)}`;
+    const fullMessage = message + loadFounderMandate();
+    let cmd = `openclaw agent --local --json --agent ${esc(id)} --message ${esc(fullMessage)}`;
     if (config.sessionId) cmd += ` --session-id ${esc(config.sessionId)}`;
 
     console.log(`[OpenClawBridge] Running "${id}" — ${message.substring(0, 60)}`);
@@ -55,6 +73,80 @@ class OpenClawBridge extends EventEmitter {
       console.warn('[OpenClawBridge] listAgents failed:', err.message);
       return [];
     }
+  }
+
+  /**
+   * Register a new agent workspace.
+   * The skill directory (openclaw-skills/<name>/) should already exist with SOUL.md.
+   * This returns the expected shape so the API route can store openclaw_id + workspace.
+   */
+  async createAgent(name, { soulDocument } = {}) {
+    const workspace = `openclaw-skills/${name}`;
+    const workspacePath = path.join(process.cwd(), workspace);
+
+    // Write SOUL.md if provided and workspace exists (with audit trail)
+    if (soulDocument && fs.existsSync(workspacePath)) {
+      const soulPath = path.join(workspacePath, 'SOUL.md');
+      const existedBefore = fs.existsSync(soulPath);
+      const oldSize = existedBefore ? fs.statSync(soulPath).size : 0;
+
+      fs.writeFileSync(soulPath, soulDocument, 'utf-8');
+      console.log(`[OpenClawBridge] Wrote SOUL.md to ${workspacePath}`);
+
+      // Audit log — SOUL.md modification is a governance-sensitive action
+      try {
+        const { run: dbRun } = require('../db/connection');
+        dbRun(
+          `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'soul_modified', ?, ?, 'success')`,
+          [
+            `agent:${name}`,
+            JSON.stringify({ agent: name, existed_before: existedBefore, old_size: oldSize, new_size: soulDocument.length, workspace }),
+          ]
+        );
+      } catch {}
+    }
+
+    console.log(`[OpenClawBridge] Registered agent "${name}" → ${workspace}`);
+    return { openclawId: name, workspace };
+  }
+
+  /**
+   * Schedule an agent for cron execution.
+   * Scheduling is handled by the schedules table + scheduleRunner.js,
+   * so this just returns confirmation.
+   */
+  async scheduleAgent(agentId, { cron, message, name, timezone } = {}) {
+    console.log(`[OpenClawBridge] Schedule registered for "${agentId}": ${cron} (${timezone || 'UTC'})`);
+    return { scheduled: true, cron, timezone: timezone || 'UTC' };
+  }
+
+  /**
+   * Remove an agent's schedule.
+   */
+  async unscheduleAgent(agentId) {
+    console.log(`[OpenClawBridge] Unscheduled agent "${agentId}"`);
+    return { unscheduled: true };
+  }
+
+  /**
+   * Write/update SOUL.md for an agent.
+   */
+  async writeSoulDocument(agentId, content) {
+    const soulPath = path.join(process.cwd(), 'openclaw-skills', agentId, 'SOUL.md');
+    if (fs.existsSync(path.dirname(soulPath))) {
+      fs.writeFileSync(soulPath, content, 'utf-8');
+      console.log(`[OpenClawBridge] Updated SOUL.md for "${agentId}"`);
+      return { updated: true };
+    }
+    throw new Error(`Workspace not found for agent "${agentId}"`);
+  }
+
+  /**
+   * Remove an agent workspace.
+   */
+  async removeAgent(agentId) {
+    console.log(`[OpenClawBridge] Agent "${agentId}" removed from registry`);
+    return { removed: true };
   }
 
   /** Verify CLI is installed. */

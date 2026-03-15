@@ -101,6 +101,11 @@ async function initDatabase() {
     { sql: "ALTER TABLE cfo_leads ADD COLUMN source_agent TEXT DEFAULT 'cfo'", desc: 'cfo_leads source_agent' },
     { sql: "ALTER TABLE cfo_content_pieces ADD COLUMN source_agent TEXT DEFAULT 'cfo'", desc: 'cfo_content_pieces source_agent' },
     { sql: "ALTER TABLE cfo_outreach_sequences ADD COLUMN source_agent TEXT DEFAULT 'cfo'", desc: 'cfo_outreach_sequences source_agent' },
+    // Training upgrade — lineage tracking + activity types
+    { sql: "ALTER TABLE agent_skills ADD COLUMN promoted_from INTEGER", desc: 'agent_skills promoted_from' },
+    { sql: "ALTER TABLE agent_skills ADD COLUMN source_activity TEXT", desc: 'agent_skills source_activity' },
+    { sql: "ALTER TABLE training_sessions ADD COLUMN activity_type TEXT DEFAULT 'youtube'", desc: 'training_sessions activity_type' },
+    { sql: "ALTER TABLE training_sessions ADD COLUMN queue_item_id INTEGER", desc: 'training_sessions queue_item_id' },
   ];
 
   for (const migration of migrations) {

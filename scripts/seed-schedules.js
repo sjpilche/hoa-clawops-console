@@ -201,6 +201,14 @@ setTimeout(() => {
       cron: '0 7 * * 1-5', // Mon-Fri 7 AM
       message: '{}',
     },
+    // ── Idle Training ──
+    {
+      name: 'Idle Training Cycle',
+      description: 'Trains up to 3 idle agents via YouTube + Ollama when system has spare capacity. Skills level up over time. $0/run.',
+      openclaw_id: 'idle-trainer',
+      cron: '0 */2 * * *', // Every 2 hours — checks capacity first, only trains if idle
+      message: '{"max_agents": 3}',
+    },
   ];
 
   let created = 0;

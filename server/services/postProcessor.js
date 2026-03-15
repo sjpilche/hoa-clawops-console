@@ -16,6 +16,8 @@
 'use strict';
 
 const { run, get } = require('../db/connection');
+const { checkContent } = require('./contentGuard');
+const ralphQA = require('./ralphQA');
 
 /**
  * Parse JSON from agent output — handles raw JSON and ```json``` code blocks.
@@ -25,6 +27,21 @@ function parseAgentJSON(text) {
   const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (m) try { return JSON.parse(m[1]); } catch {}
   return null;
+}
+
+/**
+ * Detect the outreach angle type for A/B tracking.
+ * Returns one of: pain_signal, social_proof, curious_question, direct_ask, industry_insight, general
+ */
+function detectAngleType(body) {
+  if (!body) return 'general';
+  const lower = body.toLowerCase();
+  if (/\b(noticed|saw that|came across|spotted|found that)\b.*\b(hiring|posting|job|position|growing|expanding)\b/i.test(lower)) return 'pain_signal';
+  if (/\b(similar companies|other (GCs?|contractors)|companies like|peers in)\b/i.test(lower)) return 'social_proof';
+  if (/\?\s*$/.test(body.split('\n').slice(0, 3).join(' '))) return 'curious_question'; // question in opening lines
+  if (/\b(free|complimentary|no cost|pilot|data health check)\b.*\b(review|audit|assessment|analysis)\b/i.test(lower)) return 'direct_ask';
+  if (/\b(industry|construction|market|trend|regulation)\b.*\b(change|shift|challenge|impact)\b/i.test(lower)) return 'industry_insight';
+  return 'general';
 }
 
 /**
@@ -40,29 +57,117 @@ function postProcessLLMOutput(agent, outputText, message) {
   try {
     const name = agent.name;
 
-    // ── Content engines → cfo_content_pieces ──
+    // ── Content engines → cfo_content_pieces (with QA + Brain obs + self-eval) ──
     if (name === 'cfo-content-engine' || name === 'jake-content-engine') {
       const source = name.startsWith('jake-') ? 'jake' : 'cfo';
       const p = parseAgentJSON(outputText);
       if (p?.content_markdown) {
         run(
-          `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, source_agent, status) VALUES (?, ?, ?, ?, ?, ?, 'draft')`,
+          `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, source_agent, status, qa_status) VALUES (?, ?, ?, ?, ?, ?, 'draft', 'pending')`,
           [p.pillar || 'general', p.channel || 'linkedin', p.title || 'Untitled', p.content_markdown, p.cta || '', source]
         );
+
+        // Auto-trigger Ralph QA on content
+        try {
+          const inserted = get('SELECT id FROM cfo_content_pieces WHERE source_agent = ? ORDER BY id DESC LIMIT 1', [source]);
+          if (inserted) {
+            const qaResult = ralphQA.reviewSingleContent(inserted.id);
+            console.log(`[RalphQA] Content #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+          }
+        } catch (qaErr) {
+          console.warn('[RalphQA] Content review failed (non-fatal):', qaErr.message);
+        }
+
+        // Brain Layer 1: content_drafted observation
+        try {
+          const brain = require('./collectiveBrain');
+          const today = new Date().toISOString().slice(0, 10);
+          const wordCount = p.content_markdown.split(/\s+/).filter(Boolean).length;
+          brain.observe(`content-${today}`, name, 'content_drafted', {
+            subject: p.title || 'Untitled',
+            content: `Content drafted: "${p.title}" (${p.pillar}/${p.channel}, ${wordCount} words, ${source} brand).`,
+            confidence: 1.0,
+            metadata: { pillar: p.pillar, channel: p.channel, word_count: wordCount, source_agent: source },
+          });
+        } catch {}
+
+        // Parse and store self-evaluation scorecard if present
+        try {
+          const selfEvalMatch = outputText.match(/SELF-EVALUATION[\s\S]*?((?:\w[\w\s]+:\s*\d+\/10[\s\n]*)+)/);
+          if (selfEvalMatch) {
+            const selfEvalText = selfEvalMatch[0].slice(0, 500);
+            const inserted = get('SELECT id, qa_notes FROM cfo_content_pieces WHERE source_agent = ? ORDER BY id DESC LIMIT 1', [source]);
+            if (inserted) {
+              const combined = [inserted.qa_notes, `LLM Self-Eval: ${selfEvalText.replace(/\n/g, ' | ')}`].filter(Boolean).join(' || ');
+              run('UPDATE cfo_content_pieces SET qa_notes = ? WHERE id = ?', [combined, inserted.id]);
+            }
+          }
+        } catch {}
       }
     }
 
-    // ── Outreach agents → cfo_outreach_sequences ──
+    // ── Outreach agents → cfo_outreach_sequences (with content guard) ──
     if (name === 'cfo-outreach-agent' || name === 'jake-outreach-agent') {
       const source = name.startsWith('jake-') ? 'jake' : 'cfo';
       const p = parseAgentJSON(outputText);
       if (p?.email_body || p?.body_text) {
+        const body = p.email_body || p.body_text;
+        const subject = p.email_subject || p.subject || 'Outreach';
+
+        // Content safety check — flag dangerous content before saving
+        const guard = checkContent(body, subject);
+        const status = guard.safe ? 'draft' : 'flagged';
+        if (!guard.safe) {
+          console.warn(`[ContentGuard] ${name} output flagged (${guard.flagCount} issues):`, guard.flags.map(f => `${f.type}:${f.match}`).join(', '));
+        }
+
         let leadId = null;
         try { leadId = JSON.parse(message)?.lead_id || null; } catch {}
+
+        // Detect angle type for A/B tracking
+        const angleType = detectAngleType(body);
+
         run(
-          `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, source_agent, status) VALUES (?, 'blitz', ?, ?, ?, ?, 'draft')`,
-          [leadId, p.email_subject || p.subject || 'Outreach', p.email_body || p.body_text, p.pilot_offer || null, source]
+          `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, source_agent, status, qa_status, angle_type) VALUES (?, 'blitz', ?, ?, ?, ?, ?, 'pending', ?)`,
+          [leadId, subject, body, p.pilot_offer || null, source, status, angleType]
         );
+
+        // Auto-trigger Ralph QA on the newly inserted draft
+        try {
+          const inserted = get('SELECT id FROM cfo_outreach_sequences WHERE lead_id = ? ORDER BY id DESC LIMIT 1', [leadId]);
+          if (inserted) {
+            const qaResult = ralphQA.reviewSingleOutreach(inserted.id);
+            console.log(`[RalphQA] Auto-reviewed outreach #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+
+            // Brain Layer 1: outreach_drafted observation
+            try {
+              const brain = require('./collectiveBrain');
+              const today = new Date().toISOString().slice(0, 10);
+              brain.observe(`outreach-${today}`, name, 'outreach_drafted', {
+                subject: p.email_subject || p.subject || 'Outreach',
+                content: `Outreach drafted for lead #${leadId} (${source}). QA: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100). Angle: ${angleType}.`,
+                confidence: 1.0,
+                metadata: { lead_id: leadId, qa_score: qaResult.score, qa_passed: qaResult.passed, angle_type: angleType, source_agent: source },
+              });
+            } catch {}
+          }
+        } catch (qaErr) {
+          console.warn('[RalphQA] Auto-review failed (non-fatal):', qaErr.message);
+        }
+
+        // Parse and store self-evaluation scorecard if present (cfo-outreach produces this)
+        try {
+          const selfEvalMatch = outputText.match(/SELF-EVALUATION[\s\S]*?((?:\w[\w\s]+:\s*\d+\/10[\s\n]*)+)/);
+          if (selfEvalMatch) {
+            const selfEvalText = selfEvalMatch[0].slice(0, 500);
+            // Append to qa_notes if we have the inserted row
+            const inserted = get('SELECT id, qa_notes FROM cfo_outreach_sequences WHERE lead_id = ? ORDER BY id DESC LIMIT 1', [leadId]);
+            if (inserted) {
+              const combined = [inserted.qa_notes, `LLM Self-Eval: ${selfEvalText.replace(/\n/g, ' | ')}`].filter(Boolean).join(' || ');
+              run('UPDATE cfo_outreach_sequences SET qa_notes = ? WHERE id = ?', [combined, inserted.id]);
+            }
+          }
+        } catch {}
       }
     }
 

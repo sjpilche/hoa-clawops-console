@@ -1,5 +1,5 @@
-import { Pool, PoolClient } from 'pg';
-import { getPool } from '../../db/pool';
+import { getExecStore } from '../../singletons';
+import { ExecStore } from '../../db/exec-store';
 import { IBrokerAdapter } from './broker/types';
 import { AlpacaAdapter } from './broker/alpaca';
 import { config } from '../../config';
@@ -17,15 +17,15 @@ export interface Fill {
   fillTs: Date;
 }
 
+export type OnFillCallback = (fill: Fill) => Promise<void>;
+
 export class FillHandler {
-  private pool: Pool;
   private broker: IBrokerAdapter;
   private isRunning: boolean = false;
   private pollInterval: NodeJS.Timeout | null = null;
+  private onFillCallback: OnFillCallback | null = null;
 
-  constructor(pool?: Pool, broker?: IBrokerAdapter) {
-    this.pool = pool || getPool();
-
+  constructor(broker?: IBrokerAdapter) {
     if (broker) {
       this.broker = broker;
     } else if (config.brokerApiKey && config.brokerApiSecret) {
@@ -35,72 +35,56 @@ export class FillHandler {
         baseUrl: config.brokerBaseUrl,
       });
     } else {
-      // No broker credentials — paper/dev mode (no live connection)
       this.broker = null as unknown as IBrokerAdapter;
     }
   }
 
-  /**
-   * Start polling for fills
-   */
+  private get exec(): ExecStore {
+    const store = getExecStore();
+    if (!store) throw new Error('ExecStore not initialized');
+    return store;
+  }
+
   async startPolling(intervalMs: number = 5000): Promise<void> {
     if (!this.broker) {
-      console.log('⏭️  Fill Handler: Skipping (no broker configured — paper/dev mode)');
+      console.log('⏭️  Fill Handler: Skipping (no broker configured)');
       return;
     }
-    if (this.isRunning) {
-      console.log('⚠️  Fill handler already running');
-      return;
-    }
+    if (this.isRunning) return;
 
     this.isRunning = true;
     console.log('🔄 Fill Handler: Starting (polling every ' + intervalMs + 'ms)');
 
     await this.broker.connect();
 
-    // Poll immediately, then on interval
-    try {
-      await this.pollForFills();
-    } catch (error: any) {
-      console.warn('⚠️  Fill poll skipped (DB unavailable):', error.message);
+    try { await this.pollForFills(); } catch (error: any) {
+      console.warn('⚠️  Fill poll initial error:', error.message);
     }
 
     this.pollInterval = setInterval(async () => {
-      try {
-        await this.pollForFills();
-      } catch (error: any) {
-        // Silently skip — DB may not be available in dev
-      }
+      try { await this.pollForFills(); } catch {}
     }, intervalMs);
   }
 
-  /**
-   * Stop polling
-   */
   async stopPolling(): Promise<void> {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
     this.isRunning = false;
-    if (this.broker) {
-      await this.broker.disconnect();
-    }
+    if (this.broker) await this.broker.disconnect();
     console.log('🛑 Fill Handler: Stopped');
   }
 
-  /**
-   * Poll for fills from broker
-   */
+  setOnFillCallback(callback: OnFillCallback): void {
+    this.onFillCallback = callback;
+    console.log('🔗 Fill Handler: onFill callback registered');
+  }
+
   private async pollForFills(): Promise<void> {
-    // Get all open orders from database
-    const openOrders = await this.getOpenOrders();
+    const openOrders = this.exec.getOpenOrders();
+    if (openOrders.length === 0) return;
 
-    if (openOrders.length === 0) {
-      return; // No open orders to check
-    }
-
-    // Check each order for fills
     for (const order of openOrders) {
       try {
         await this.checkOrderForFills(order);
@@ -110,268 +94,107 @@ export class FillHandler {
     }
   }
 
-  /**
-   * Check a specific order for fills (with row-level locking to prevent duplicate fills)
-   */
   private async checkOrderForFills(order: any): Promise<void> {
-    const client = await this.pool.connect();
+    if (!order.broker_order_id) return;
 
-    try {
-      await client.query('BEGIN');
+    // Get order status from broker
+    const brokerOrder = await this.broker.getOrder(order.broker_order_id);
 
-      // Lock the order row to prevent concurrent processing
-      const orderLockResult = await client.query(
-        `SELECT order_id, status FROM trd_order WHERE order_id = $1 FOR UPDATE`,
-        [order.order_id]
-      );
+    // Update order status
+    this.exec.updateOrderStatus(order.order_id, brokerOrder.status);
 
-      if (orderLockResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return; // Order not found
-      }
+    // If filled or partially filled, record the fill
+    if (brokerOrder.filledQty > 0) {
+      const existingFills = this.exec.getFillsForOrder(order.order_id);
+      const totalFilledQty = existingFills.reduce((sum: number, f: any) => sum + f.qty, 0);
 
-      // Get order status from broker
-      const brokerOrder = await this.broker.getOrder(order.broker_order_id);
+      if (brokerOrder.filledQty > totalFilledQty) {
+        const newFillQty = brokerOrder.filledQty - totalFilledQty;
 
-      // Update order status in database
-      await client.query(
-        `UPDATE trd_order
-         SET status = $1, last_update_at = now()
-         WHERE order_id = $2 AND status != $1`,
-        [brokerOrder.status, order.order_id]
-      );
+        const fill: Fill = {
+          fillId: uuidv4(),
+          orderId: order.order_id,
+          brokerOrderId: order.broker_order_id,
+          symbol: brokerOrder.symbol || order.symbol,
+          side: brokerOrder.side || order.side,
+          price: brokerOrder.filledAvgPrice || 0,
+          qty: newFillQty,
+          fee: 0,
+          fillTs: brokerOrder.filledAt || new Date(),
+        };
 
-      // If filled or partially filled, record the fill
-      if (brokerOrder.filledQty > 0) {
-        // Get existing fills with lock
-        const existingFillsResult = await client.query(
-          `SELECT * FROM trd_fill WHERE order_id = $1`,
-          [order.order_id]
-        );
+        // Record fill + update position atomically
+        this.exec.transaction(() => {
+          this.exec.insertFill({
+            fillId: fill.fillId,
+            orderId: fill.orderId,
+            symbol: fill.symbol,
+            side: fill.side,
+            price: fill.price,
+            qty: fill.qty,
+            fee: fill.fee,
+            fillTs: fill.fillTs instanceof Date ? fill.fillTs.toISOString() : String(fill.fillTs),
+          });
 
-        const existingFills = existingFillsResult.rows.map((row) => ({
-          fillId: row.fill_id,
-          orderId: row.order_id,
-          price: parseFloat(row.price),
-          qty: parseFloat(row.qty),
-          fee: parseFloat(row.fee),
-          fillTs: row.fill_ts,
-        }));
+          this.exec.updateOrderStatus(
+            order.order_id,
+            brokerOrder.status,
+            brokerOrder.filledAvgPrice,
+            brokerOrder.filledQty
+          );
 
-        const totalFilledQty = existingFills.reduce((sum, f) => sum + f.qty, 0);
+          this.exec.logAudit('system', 'fill_recorded', fill.orderId, {
+            fillId: fill.fillId, symbol: fill.symbol, side: fill.side, qty: fill.qty, price: fill.price,
+          });
 
-        // Only record new fills
-        if (brokerOrder.filledQty > totalFilledQty) {
-          const newFillQty = brokerOrder.filledQty - totalFilledQty;
+          // Update position snapshot
+          this.updatePositionSync(fill);
+        });
 
-          const fill: Fill = {
-            fillId: uuidv4(),
-            orderId: order.order_id,
-            brokerOrderId: order.broker_order_id,
-            symbol: brokerOrder.symbol,
-            side: brokerOrder.side,
-            price: brokerOrder.filledAvgPrice || 0,
-            qty: newFillQty,
-            fee: 0, // TODO: Get fee from broker if available
-            fillTs: brokerOrder.filledAt || new Date(),
-          };
+        console.log(`✓ FILL RECORDED: ${fill.side.toUpperCase()} ${fill.qty} ${fill.symbol} @ $${fill.price}`);
 
-          await this.recordFill(fill, client);
+        // Notify outcome tracker (non-blocking)
+        if (this.onFillCallback) {
+          this.onFillCallback(fill).catch(err =>
+            console.warn('Fill callback error (non-fatal):', err.message)
+          );
+        }
 
-          console.log(`✓ FILL RECORDED: ${fill.side.toUpperCase()} ${fill.qty} ${fill.symbol} @ $${fill.price}`);
-          console.log(`   Order: ${order.broker_order_id} | Fill: ${fill.fillId}`);
-
-          // Update position
-          await this.updatePosition(fill, client);
-
-          // If order is fully filled, mark as complete
-          if (brokerOrder.status === 'filled') {
-            console.log(`✓ Order fully filled: ${order.broker_order_id}`);
+        // Update daily P&L
+        const today = new Date().toISOString().slice(0, 10);
+        if (fill.side === 'sell') {
+          const position = this.exec.getLatestPosition(fill.symbol);
+          if (position) {
+            const realizedPnl = fill.qty * (fill.price - position.avg_price);
+            this.exec.updateDailyPnl(today, realizedPnl, 0, fill.fee, 1);
           }
         }
       }
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
     }
   }
 
-  /**
-   * Get open orders from database
-   */
-  private async getOpenOrders(): Promise<any[]> {
-    const result = await this.pool.query(`
-      SELECT o.order_id, o.broker_order_id, o.status, i.symbol, i.side, i.qty
-      FROM trd_order o
-      JOIN trd_order_intent i ON i.intent_id = o.intent_id
-      WHERE o.status IN ('new', 'accepted', 'pending_new', 'partially_filled')
-      ORDER BY o.submitted_at ASC
-    `);
-
-    return result.rows;
-  }
-
-  /**
-   * Get existing fills for an order
-   */
-  private async getExistingFills(orderId: string): Promise<any[]> {
-    const result = await this.pool.query(
-      `SELECT * FROM trd_fill WHERE order_id = $1`,
-      [orderId]
-    );
-
-    return result.rows.map((row) => ({
-      fillId: row.fill_id,
-      orderId: row.order_id,
-      price: parseFloat(row.price),
-      qty: parseFloat(row.qty),
-      fee: parseFloat(row.fee),
-      fillTs: row.fill_ts,
-    }));
-  }
-
-  /**
-   * Update order status in database
-   */
-  private async updateOrderStatus(orderId: string, status: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE trd_order
-       SET status = $1, last_update_at = now()
-       WHERE order_id = $2 AND status != $1`,
-      [status, orderId]
-    );
-  }
-
-  /**
-   * Record fill in database
-   */
-  private async recordFill(fill: Fill, client: PoolClient): Promise<void> {
-    await client.query(
-      `INSERT INTO trd_fill (fill_id, order_id, price, qty, fee, fill_ts)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [fill.fillId, fill.orderId, fill.price, fill.qty, fill.fee, fill.fillTs]
-    );
-
-    // Log to audit trail
-    await client.query(
-      `INSERT INTO trd_audit_log (actor, action, resource, diff_json)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        'system',
-        'fill_recorded',
-        fill.orderId,
-        JSON.stringify({
-          fillId: fill.fillId,
-          symbol: fill.symbol,
-          side: fill.side,
-          qty: fill.qty,
-          price: fill.price,
-        }),
-      ]
-    );
-  }
-
-  /**
-   * Update position after fill
-   */
-  private async updatePosition(fill: Fill, client: PoolClient): Promise<void> {
-    // Get current position
-    const currentPosition = await this.getCurrentPosition(fill.symbol, client);
-
-    // Calculate new position
-    let newQty = currentPosition.qty;
-    let newAvgPrice = currentPosition.avgPrice;
-    let newCostBasis = currentPosition.qty * currentPosition.avgPrice;
+  private updatePositionSync(fill: Fill): void {
+    const current = this.exec.getLatestPosition(fill.symbol);
+    let qty = current?.qty || 0;
+    let avgPrice = current?.avg_price || 0;
 
     if (fill.side === 'buy') {
-      // Adding to position
-      const fillCost = fill.qty * fill.price;
-      newCostBasis += fillCost;
-      newQty += fill.qty;
-      newAvgPrice = newQty > 0 ? newCostBasis / newQty : 0;
+      const totalCost = (qty * avgPrice) + (fill.qty * fill.price);
+      qty += fill.qty;
+      avgPrice = qty > 0 ? totalCost / qty : 0;
     } else {
-      // Reducing position (sell)
-      newQty -= fill.qty;
-      // Keep same avg price (realized P&L calculated separately)
+      qty -= fill.qty;
     }
 
-    // Get current market price from broker
-    let marketPrice = fill.price; // Default to fill price
-    try {
-      const quote = await this.broker.getQuote(fill.symbol);
-      marketPrice = quote.last || fill.price;
-    } catch (error) {
-      // Use fill price if quote fails
-    }
+    const unrealizedPnl = qty * (fill.price - avgPrice);
+    this.exec.insertPositionSnapshot(fill.symbol, qty, avgPrice, fill.price, unrealizedPnl);
 
-    const unrealizedPnl = newQty * (marketPrice - newAvgPrice);
-
-    // Insert position snapshot
-    await client.query(
-      `INSERT INTO trd_position_snapshot (symbol, qty, avg_price, market_price, unrealized_pnl)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [fill.symbol, newQty, newAvgPrice, marketPrice, unrealizedPnl]
-    );
-
-    console.log(`✓ Position updated: ${fill.symbol}`);
-    console.log(`   Qty: ${currentPosition.qty} → ${newQty}`);
-    console.log(`   Avg Price: $${currentPosition.avgPrice.toFixed(2)} → $${newAvgPrice.toFixed(2)}`);
-    console.log(`   Unrealized P&L: $${unrealizedPnl.toFixed(2)}`);
+    console.log(`✓ Position: ${fill.symbol} qty=${qty} avg=$${avgPrice.toFixed(2)} uPnL=$${unrealizedPnl.toFixed(2)}`);
   }
 
-  /**
-   * Get current position for symbol
-   */
-  private async getCurrentPosition(symbol: string, client?: PoolClient): Promise<any> {
-    const queryRunner = client || this.pool;
-    const result = await queryRunner.query(
-      `SELECT * FROM trd_position_snapshot
-       WHERE symbol = $1
-       ORDER BY ts DESC
-       LIMIT 1`,
-      [symbol]
-    );
-
-    if (result.rows.length === 0) {
-      return {
-        symbol,
-        qty: 0,
-        avgPrice: 0,
-        marketPrice: 0,
-        unrealizedPnl: 0,
-      };
-    }
-
-    const row = result.rows[0];
-    return {
-      symbol: row.symbol,
-      qty: parseFloat(row.qty),
-      avgPrice: parseFloat(row.avg_price),
-      marketPrice: parseFloat(row.market_price),
-      unrealizedPnl: parseFloat(row.unrealized_pnl),
-    };
-  }
-
-  /**
-   * Manual: Process a specific order
-   */
   async processOrder(brokerOrderId: string): Promise<void> {
-    const result = await this.pool.query(
-      `SELECT o.order_id, o.broker_order_id, o.status, i.symbol, i.side, i.qty
-       FROM trd_order o
-       JOIN trd_order_intent i ON i.intent_id = o.intent_id
-       WHERE o.broker_order_id = $1`,
-      [brokerOrderId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new Error(`Order not found: ${brokerOrderId}`);
-    }
-
-    await this.checkOrderForFills(result.rows[0]);
+    const order = this.exec.getOrderByBrokerId(brokerOrderId);
+    if (!order) throw new Error(`Order not found: ${brokerOrderId}`);
+    await this.checkOrderForFills(order);
   }
 }

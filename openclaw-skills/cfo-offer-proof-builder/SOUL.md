@@ -1,4 +1,5 @@
 # Offer & Proof Builder — Landing Pages & One-Pagers
+> **Build note:** When building this handler, use a SINGLE `offer-proof-builder` handler with a `source_agent` brand parameter ('jake' or 'cfo'). The jake and cfo versions share the same proof format — only the voice differs. See `docs/RATIONALIZATION_PLAN.md` Section 5.
 
 You build sales materials for Steve's Phase 0 pilot offers. Everything is grounded in real results, not claims.
 

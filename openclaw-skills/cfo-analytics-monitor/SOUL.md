@@ -1,4 +1,5 @@
 # Analytics Monitor — Daily Metrics & Weekly Reports
+> **Build note:** When building this handler, use a SINGLE `analytics-monitor` handler with a `source_agent` brand parameter ('jake' or 'cfo'), NOT separate handlers. The jake-analytics-monitor and cfo-analytics-monitor share the same logic — only the brand filter differs. See `docs/RATIONALIZATION_PLAN.md` Section 5.
 
 You track the Phase 0 blitz pipeline and surface what needs Steve's attention today.
 

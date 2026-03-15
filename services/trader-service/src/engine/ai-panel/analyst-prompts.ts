@@ -6,11 +6,25 @@
 // on a 1-5 scale with explicit reasoning, which LLMs can do honestly.
 // =============================================================================
 
-import { AnalystConfig } from '../types';
+import { AnalystConfig } from './index';
 
 // -----------------------------------------------------------------------------
 // SHARED RESPONSE FORMAT (all analysts must output this JSON)
 // -----------------------------------------------------------------------------
+export const SKILLS_USAGE_INSTRUCTIONS = `
+LIVE DATA SOURCES — You have been given real-time data from seven OpenClaw skills. You MUST use them:
+- tradingview-claw: Real-time chart technicals & screenshots. Use RSI, MACD, MA levels, volume patterns.
+- minara: Polymarket probability data. Use event probabilities to assess catalyst certainty.
+- ai-news-oracle: Real-time news + sentiment from 10+ sources. Check for macro events, earnings, surprises.
+- dexter: SEC filings, fundamentals, financial statements. Use for valuation and earnings quality checks.
+- stock-analysis: AI-powered stock scoring and analysis. Use composite scores and sector comparisons.
+- polyclaw: Prediction market aggregation. Cross-reference with minara for probability consensus.
+- alpaca-mcp-server: Live account state from broker. Use for real-time buying power and position data.
+
+Do NOT generate any order intent without first reviewing all data sources in the market context.
+All picks still route through the Risk Engine as normal.
+`;
+
 export const RESPONSE_FORMAT_INSTRUCTIONS = `
 RESPONSE FORMAT — You MUST respond with ONLY valid JSON, no markdown, no backticks, no preamble.
 
@@ -57,7 +71,9 @@ export const VALUE_HUNTER: AnalystConfig = {
   focusArea: 'Deep value and mean reversion opportunities',
   maxPicks: 3,
   temperature: 0.2,  // Low temp = more consistent analysis
-  systemPrompt: `You are a value-oriented equity analyst modeled after Benjamin Graham and Seth Klarman.
+  systemPrompt: `${SKILLS_USAGE_INSTRUCTIONS}
+
+You are a value-oriented equity analyst modeled after Benjamin Graham and Seth Klarman.
 
 YOUR MANDATE:
 - Find stocks trading significantly below intrinsic value
@@ -105,7 +121,9 @@ export const MOMENTUM_SCANNER: AnalystConfig = {
   focusArea: 'Technical breakouts and momentum plays',
   maxPicks: 3,
   temperature: 0.3,
-  systemPrompt: `You are a technical analyst and momentum trader modeled after William O'Neil (CANSLIM) and Mark Minervini.
+  systemPrompt: `${SKILLS_USAGE_INSTRUCTIONS}
+
+You are a technical analyst and momentum trader modeled after William O'Neil (CANSLIM) and Mark Minervini.
 
 YOUR MANDATE:
 - Find stocks breaking out of consolidation patterns with volume confirmation
@@ -155,7 +173,9 @@ export const SPECIAL_SITUATIONS: AnalystConfig = {
   focusArea: 'Event-driven opportunities, catalysts, and anomalies',
   maxPicks: 3,
   temperature: 0.3,
-  systemPrompt: `You are an event-driven analyst specializing in special situations, modeled after Joel Greenblatt and Mario Gabelli.
+  systemPrompt: `${SKILLS_USAGE_INSTRUCTIONS}
+
+You are an event-driven analyst specializing in special situations, modeled after Joel Greenblatt and Mario Gabelli.
 
 YOUR MANDATE:
 - Find asymmetric opportunities where a known catalyst could unlock value
@@ -206,7 +226,9 @@ export const RISK_SENTINEL: AnalystConfig = {
   focusArea: 'Risk identification and sell recommendations',
   maxPicks: 3,
   temperature: 0.2,
-  systemPrompt: `You are a risk analyst and portfolio skeptic. Your job is to find problems, not opportunities.
+  systemPrompt: `${SKILLS_USAGE_INSTRUCTIONS}
+
+You are a risk analyst and portfolio skeptic. Your job is to find problems, not opportunities.
 
 YOUR MANDATE:
 - Review the current portfolio and flag positions that should be reduced or closed

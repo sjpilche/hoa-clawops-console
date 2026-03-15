@@ -362,12 +362,68 @@ async function buildPrototype(clusterId) {
 
   const totalCost = buildCost + copyCost;
 
-  // Step 6: Save prototype files to disk
-  const protoDir = path.join(process.cwd(), 'data', 'prototypes', productName);
+  // Step 6: Save prototype files to disk (with path validation)
+  const allowedBase = path.resolve(process.cwd(), 'data', 'prototypes');
+  const protoDir = path.join(allowedBase, productName.replace(/[^a-zA-Z0-9_-]/g, '_'));
+  // Path traversal guard — reject if resolved path escapes the prototypes directory
+  if (!path.resolve(protoDir).startsWith(allowedBase)) {
+    console.error(`[SoftwareFactory] Path traversal blocked: ${protoDir} escapes ${allowedBase}`);
+    throw new Error('Prototype output path validation failed — path traversal attempt blocked');
+  }
+  // ── Code review scan — check for dangerous patterns before writing ──
+  const DANGEROUS_PATTERNS = [
+    { pattern: /\beval\s*\(/, label: 'eval()' },
+    { pattern: /\bexec\s*\(/, label: 'exec()' },
+    { pattern: /\bexecSync\s*\(/, label: 'execSync()' },
+    { pattern: /require\s*\(\s*['"]child_process['"]/, label: "require('child_process')" },
+    { pattern: /\bspawn\s*\(/, label: 'spawn()' },
+    { pattern: /process\.env/, label: 'process.env access' },
+    { pattern: /fs\.unlinkSync|fs\.rmdirSync|fs\.rmSync/, label: 'filesystem deletion' },
+    { pattern: /\bfetch\s*\(\s*['"]http/, label: 'network fetch' },
+  ];
+
+  const codeFlags = [];
+  for (const file of files) {
+    for (const { pattern, label } of DANGEROUS_PATTERNS) {
+      if (file.content && pattern.test(file.content)) {
+        codeFlags.push({ file: file.name, pattern: label });
+      }
+    }
+  }
+
+  if (codeFlags.length > 0) {
+    const flagSummary = codeFlags.map(f => `${f.file}: ${f.pattern}`).join(', ');
+    console.warn(`[SoftwareFactory] CODE REVIEW FLAGS: ${flagSummary}`);
+    // Log to audit for Steve's review — don't block (LLM-generated code often includes harmless patterns)
+    try {
+      const { run: dbRun } = require('../db/connection');
+      dbRun(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'code_review_flag', ?, ?, 'failure')`,
+        [`prototype:${productName}`, JSON.stringify({ product: productName, flags: codeFlags })]
+      );
+    } catch {}
+    // Discord alert for suspicious code
+    try {
+      const discord = require('./discordNotifier');
+      discord.sendEmbed({
+        title: 'Software Factory: Code Review Flag',
+        description: `Prototype "${productName}" contains suspicious patterns:\n${codeFlags.map(f => `- \`${f.file}\`: ${f.pattern}`).join('\n')}\n\nFiles saved but review recommended before deploy.`,
+        color: 0xff9500,
+        footer: { text: 'software-factory' },
+      });
+    } catch {}
+  }
+
   try {
     fs.mkdirSync(protoDir, { recursive: true });
     for (const file of files) {
-      const filePath = path.join(protoDir, file.name);
+      // Sanitize individual file names — no ../ allowed
+      const safeName = file.name.replace(/\.\.\//g, '').replace(/\.\.\\/g, '');
+      const filePath = path.join(protoDir, safeName);
+      if (!path.resolve(filePath).startsWith(allowedBase)) {
+        console.warn(`[SoftwareFactory] Skipping file with suspicious path: ${file.name}`);
+        continue;
+      }
       const fileDir = path.dirname(filePath);
       fs.mkdirSync(fileDir, { recursive: true });
       fs.writeFileSync(filePath, file.content, 'utf8');

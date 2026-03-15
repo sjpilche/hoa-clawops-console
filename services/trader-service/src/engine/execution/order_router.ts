@@ -1,10 +1,10 @@
-import { Pool, PoolClient } from 'pg';
 import { RiskEngine } from '../risk/risk_engine';
 import { AlpacaAdapter } from './broker/alpaca';
 import { IBrokerAdapter } from './broker/types';
 import { config } from '../../config';
 import { v4 as uuidv4 } from 'uuid';
-import { getPool } from '../../db/pool';
+import { getExecStore } from '../../singletons';
+import { ExecStore } from '../../db/exec-store';
 
 // Order Intent (what the strategy wants to do)
 export interface OrderIntent {
@@ -18,7 +18,7 @@ export interface OrderIntent {
   limitPrice?: number;
   stopPrice?: number;
   timeInForce?: 'day' | 'gtc' | 'ioc' | 'fok';
-  signalPrice?: number; // For slippage checks
+  signalPrice?: number;
 }
 
 // Order Result (what happened)
@@ -33,14 +33,10 @@ export interface OrderResult {
 }
 
 export class OrderRouter {
-  private pool: Pool;
   private riskEngine: RiskEngine;
   private broker: IBrokerAdapter;
 
-  constructor(pool?: Pool, broker?: IBrokerAdapter) {
-    this.pool = pool || getPool();
-
-    // Initialize broker (Alpaca for now)
+  constructor(broker?: IBrokerAdapter) {
     if (broker) {
       this.broker = broker;
     } else if (config.brokerApiKey && config.brokerApiSecret) {
@@ -50,33 +46,25 @@ export class OrderRouter {
         baseUrl: config.brokerBaseUrl,
       });
     } else {
-      // No broker credentials — paper/dev mode (no live connection)
       this.broker = null as unknown as IBrokerAdapter;
     }
 
-    // Initialize risk engine with broker for real-time price checks
-    this.riskEngine = new RiskEngine(this.pool, this.broker);
+    this.riskEngine = new RiskEngine(this.broker);
+  }
+
+  private get exec(): ExecStore {
+    const store = getExecStore();
+    if (!store) throw new Error('ExecStore not initialized');
+    return store;
   }
 
   /**
    * Main entry point: Route an order intent through the system
-   *
-   * Flow (wrapped in database transaction):
-   * 1. BEGIN transaction
-   * 2. Log intent to database
-   * 3. Run pre-trade risk checks
-   * 4. If pass: submit to broker
-   * 5. Log order to database
-   * 6. COMMIT transaction
-   * 7. Return result
-   *
-   * If any step fails, ROLLBACK transaction to maintain audit trail consistency
    */
   async submitOrder(intent: OrderIntent): Promise<OrderResult> {
     console.log(`\n→ ORDER ROUTER: Processing intent ${intent.intentId}`);
     console.log(`   ${intent.side.toUpperCase()} ${intent.qty} ${intent.symbol} @ ${intent.orderType}`);
 
-    // Check if broker is available
     if (!this.broker) {
       return {
         success: false,
@@ -102,12 +90,10 @@ export class OrderRouter {
 
     console.log(`✓ Risk checks PASSED (${riskCheck.checksPassed.length} checks)`);
 
-    // Step 2: Connect to broker and submit order
+    // Step 2: Submit to broker
     try {
       await this.broker.connect();
-      console.log(`✓ Connected to broker`);
 
-      console.log(`→ Submitting order to broker...`);
       const brokerOrder = await this.broker.submitOrder({
         symbol: intent.symbol,
         qty: intent.qty,
@@ -119,11 +105,35 @@ export class OrderRouter {
         clientOrderId: intent.intentId,
       });
 
-      console.log(`✓ Order submitted to broker: ${brokerOrder.id}`);
-      console.log(`   Status: ${brokerOrder.status}`);
+      console.log(`✓ Order submitted to broker: ${brokerOrder.id} (status: ${brokerOrder.status})`);
 
-      // Step 3: Log to DB (non-fatal — DB may not be available in dev)
-      const orderId = await this.tryLogOrderToDb(intent, brokerOrder);
+      // Step 3: Log to SQLite
+      const orderId = uuidv4();
+      this.exec.transaction(() => {
+        this.exec.insertOrder({
+          orderId,
+          intentId: intent.intentId,
+          strategyId: intent.strategyId,
+          signalId: intent.signalId,
+          brokerOrderId: brokerOrder.id,
+          symbol: intent.symbol,
+          side: intent.side,
+          qty: intent.qty,
+          orderType: intent.orderType,
+          limitPrice: intent.limitPrice,
+          stopPrice: intent.stopPrice,
+          timeInForce: intent.timeInForce,
+          signalPrice: intent.signalPrice,
+          status: brokerOrder.status || 'submitted',
+        });
+
+        this.exec.logAudit('system', 'order_submitted', orderId, {
+          symbol: intent.symbol, side: intent.side, qty: intent.qty,
+          brokerOrderId: brokerOrder.id,
+        });
+      });
+
+      console.log(`✓ Order logged: ${orderId}`);
 
       return {
         success: true,
@@ -144,145 +154,23 @@ export class OrderRouter {
     }
   }
 
-  /**
-   * Attempt to log order to DB — non-fatal if DB unavailable
-   */
-  private async tryLogOrderToDb(intent: OrderIntent, brokerOrder: any): Promise<string | undefined> {
-    let client;
-    try {
-      client = await this.pool.connect();
-      await client.query('BEGIN');
-      await this.logIntent(intent, client);
-      const orderId = await this.logOrder(intent.intentId, brokerOrder, client);
-      await this.logAudit('system', 'order_submitted', intent.intentId, {
-        symbol: intent.symbol,
-        side: intent.side,
-        qty: intent.qty,
-        brokerOrderId: brokerOrder.id,
-      }, client);
-      await client.query('COMMIT');
-      console.log(`✓ Order logged to database: ${orderId}`);
-      return orderId;
-    } catch (_err) {
-      try { if (client) await client.query('ROLLBACK'); } catch (_) {}
-      console.warn(`⚠️  Order not logged to DB (DB unavailable) — broker order ID: ${brokerOrder.id}`);
-      return undefined;
-    } finally {
-      if (client) client.release();
-    }
-  }
-
-  /**
-   * Log order intent to database
-   */
-  private async logIntent(intent: OrderIntent, client: PoolClient): Promise<void> {
-    await client.query(
-      `INSERT INTO trd_order_intent (
-        intent_id, strategy_id, signal_id, symbol, side, qty,
-        order_type, limit_price, stop_price, time_in_force, signal_price
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [
-        intent.intentId,
-        intent.strategyId || null,
-        intent.signalId || null,
-        intent.symbol,
-        intent.side,
-        intent.qty,
-        intent.orderType,
-        intent.limitPrice || null,
-        intent.stopPrice || null,
-        intent.timeInForce || 'day',
-        intent.signalPrice || null,
-      ]
-    );
-  }
-
-  /**
-   * Log order to database
-   */
-  private async logOrder(intentId: string, brokerOrder: any, client: PoolClient): Promise<string> {
-    const orderId = uuidv4();
-
-    await client.query(
-      `INSERT INTO trd_order (
-        order_id, intent_id, broker_order_id, status, submitted_at
-      ) VALUES ($1, $2, $3, $4, $5)`,
-      [
-        orderId,
-        intentId,
-        brokerOrder.id,
-        brokerOrder.status,
-        brokerOrder.submittedAt || new Date(),
-      ]
-    );
-
-    return orderId;
-  }
-
-  /**
-   * Log to audit trail
-   */
-  private async logAudit(
-    actor: string,
-    action: string,
-    resource: string,
-    diff: any,
-    client?: PoolClient
-  ): Promise<void> {
-    const queryRunner = client || this.pool;
-    await queryRunner.query(
-      `INSERT INTO trd_audit_log (actor, action, resource, diff_json)
-       VALUES ($1, $2, $3, $4)`,
-      [actor, action, resource, JSON.stringify(diff)]
-    );
-  }
-
-  /**
-   * Get order status from broker
-   */
   async getOrderStatus(brokerOrderId: string): Promise<any> {
     await this.broker.connect();
     return await this.broker.getOrder(brokerOrderId);
   }
 
-  /**
-   * Cancel order (wrapped in transaction)
-   */
   async cancelOrder(brokerOrderId: string): Promise<void> {
-    const client = await this.pool.connect();
+    await this.broker.connect();
+    await this.broker.cancelOrder(brokerOrderId);
 
-    try {
-      await client.query('BEGIN');
-
-      // Cancel with broker first
-      await this.broker.connect();
-      await this.broker.cancelOrder(brokerOrderId);
-
-      // Update order status in database
-      await client.query(
-        `UPDATE trd_order
-         SET status = 'cancelled', last_update_at = now()
-         WHERE broker_order_id = $1`,
-        [brokerOrderId]
-      );
-
-      // Log to audit trail
-      await this.logAudit('system', 'order_cancelled', brokerOrderId, {}, client);
-
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+    const order = this.exec.getOrderByBrokerId(brokerOrderId);
+    if (order) {
+      this.exec.updateOrderStatus(order.order_id, 'cancelled');
+      this.exec.logAudit('system', 'order_cancelled', order.order_id, { brokerOrderId });
     }
   }
 
-  /**
-   * Close connection
-   */
   async close(): Promise<void> {
-    await this.broker.disconnect();
-    await this.pool.end();
+    if (this.broker) await this.broker.disconnect();
   }
 }

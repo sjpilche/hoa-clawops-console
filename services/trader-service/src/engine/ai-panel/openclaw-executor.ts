@@ -39,8 +39,8 @@ export class OpenClawExecutor {
       const account = await this.broker.getAccount();
       const positions = await this.broker.getPositions();
 
-      const totalValue = parseFloat(account.portfolio_value);
-      const cash = parseFloat(account.cash);
+      const totalValue = account.portfolioValue || 0;
+      const cash = account.cash || 0;
 
       const positionInfos: PositionInfo[] = positions.map((p: any) => {
         const marketValue = parseFloat(p.market_value);

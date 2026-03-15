@@ -3,10 +3,9 @@ import { OrderRouter, OrderIntent } from '../../engine/execution/order_router';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticateJWT, requireRole } from '../middleware/auth';
 import { validate, orderIntentSchema, paginationSchema } from '../middleware/validate';
-import { getPool } from '../../db/pool';
+import { getExecStore } from '../../singletons';
 
 const router = Router();
-const pool = getPool(); // Use singleton pool
 const orderRouter = new OrderRouter();
 
 // POST /api/orders/submit - Submit a new order (PROTECTED)
@@ -135,32 +134,12 @@ router.get('/',
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
-    const result = await pool.query(`
-      SELECT
-        i.intent_id,
-        i.strategy_id,
-        i.symbol,
-        i.side,
-        i.qty,
-        i.order_type,
-        i.limit_price,
-        i.created_at as intent_created_at,
-        o.order_id,
-        o.broker_order_id,
-        o.status,
-        o.submitted_at,
-        r.passed as risk_passed,
-        r.fail_reason
-      FROM trd_order_intent i
-      LEFT JOIN trd_risk_check r ON r.intent_id = i.intent_id
-      LEFT JOIN trd_order o ON o.intent_id = i.intent_id
-      ORDER BY i.created_at DESC
-      LIMIT $1 OFFSET $2
-    `, [limit, offset]);
+    const exec = getExecStore();
+    const orders = exec ? exec.getOrderHistory(limit, offset) : [];
 
     res.json({
-      orders: result.rows,
-      count: result.rows.length,
+      orders,
+      count: orders.length,
       timestamp: new Date().toISOString(),
     });
   } catch (_error: any) {

@@ -5,10 +5,10 @@
 // API keys come from environment variables (never hardcoded).
 // =============================================================================
 
-import { LLMProvider, LLMRequest, LLMResponse } from '../types';
+import { LLMProvider, LLMRequest, LLMResponse } from './index';
 
 export class LLMClient {
-  private apiKeys: Record<LLMProvider, string>;
+  private apiKeys: Record<string, string>;
 
   constructor() {
     this.apiKeys = {
@@ -28,6 +28,8 @@ export class LLMClient {
         return this.callOpenAI(request, start);
       case 'grok':
         return this.callGrok(request, start);
+      case 'ollama':
+        return this.callOllama(request, start);
       default:
         throw new Error(`Unknown provider: ${request.provider}`);
     }
@@ -61,7 +63,7 @@ export class LLMClient {
       throw new Error(`Claude API error ${response.status}: ${err}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     const text = data.content?.map((c: any) => c.text || '').join('') || '';
 
     return {
@@ -107,7 +109,7 @@ export class LLMClient {
       throw new Error(`OpenAI API error ${response.status}: ${err}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     return {
       content: data.choices?.[0]?.message?.content || '',
@@ -146,7 +148,7 @@ export class LLMClient {
       throw new Error(`Grok API error ${response.status}: ${err}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     return {
       content: data.choices?.[0]?.message?.content || '',
@@ -154,6 +156,53 @@ export class LLMClient {
       completionTokens: data.usage?.completion_tokens || 0,
       latencyMs: Date.now() - start,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ollama (Local LLM — $0/run)
+  // ---------------------------------------------------------------------------
+  private async callOllama(req: LLMRequest, start: number): Promise<LLMResponse> {
+    const host = process.env.OLLAMA_HOST || '127.0.0.1';
+    const port = process.env.OLLAMA_PORT || '11434';
+    const model = req.model || process.env.OLLAMA_DEFAULT_MODEL || 'llama3.2:3b';
+
+    const controller = new AbortController();
+    const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS || '180000'); // 3 min timeout (CPU inference is slow)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(`http://${host}:${port}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: req.systemPrompt },
+            { role: 'user', content: req.userPrompt },
+          ],
+          stream: false,
+          options: { temperature: req.temperature ?? 0.3 },
+          ...(req.responseFormat === 'json' ? { format: 'json' } : {}),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Ollama error ${response.status}: ${err}`);
+      }
+
+      const data = await response.json() as any;
+
+      return {
+        content: data.message?.content || '',
+        promptTokens: data.prompt_eval_count || 0,
+        completionTokens: data.eval_count || 0,
+        latencyMs: Date.now() - start,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -168,6 +217,12 @@ export class LLMClient {
       'gpt-4o-mini': { input: 0.15, output: 0.60 },
       'grok-3': { input: 3.0, output: 15.0 },
       'grok-3-mini': { input: 0.30, output: 0.50 },
+      'grok-4-1-fast-non-reasoning': { input: 3.0, output: 15.0 },
+      // Ollama models — free
+      'llama3.2:3b': { input: 0, output: 0 },
+      'llama3.2:7b': { input: 0, output: 0 },
+      'qwen2.5:7b': { input: 0, output: 0 },
+      'mistral:7b': { input: 0, output: 0 },
     };
 
     const rates = pricing[model] || { input: 5.0, output: 15.0 };

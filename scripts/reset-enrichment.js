@@ -36,8 +36,13 @@ async function main() {
     return;
   }
 
-  console.log(`Resetting ${leads.length} leads to 'pending':`);
-  leads.forEach(l => console.log(`  [${l.id}] ${l.company_name} (${l.city}, ${l.state}) — ${l.source} — was: ${l.enrichment_status}`));
+  console.log(`Found ${leads.length} leads to reset:`);
+  leads.slice(0, 10).forEach(l => console.log(`  [${l.id}] ${l.company_name} (${l.city}, ${l.state}) — ${l.source} — was: ${l.enrichment_status}`));
+  if (leads.length > 10) console.log(`  ... and ${leads.length - 10} more`);
+
+  const { confirmOrDryRun } = require('./lib/confirm');
+  const dryRun = await confirmOrDryRun(`Reset ${leads.length} leads to 'pending' enrichment status`, process.argv);
+  if (dryRun) return;
 
   run(`UPDATE cfo_leads SET enrichment_status = 'pending', enrichment_method = NULL, enriched_at = NULL WHERE ${where}`, params);
   console.log(`\n✅ Reset ${leads.length} leads to pending. Run trigger-enricher.js to re-enrich.`);

@@ -1,117 +1,274 @@
 // =============================================================================
-// Panel Scheduler
+// Trading Scheduler — 3-minute loop with run lock
 // =============================================================================
-// Runs the AI analyst panel on a configurable schedule.
-// Default: Once daily at 9:45 AM ET (15 min after market open, data has settled)
+// Replaces cron-based child-process spawner with inline PanelRunner execution.
+//
+// Features:
+//   - 3-minute interval (configurable via PANEL_INTERVAL_MS)
+//   - Boolean run lock (Node.js is single-threaded, no mutex needed)
+//   - Market hours guard (9:30 AM - 4:00 PM ET, Mon-Fri)
+//   - triggerNow() for event-driven runs (skip interval wait)
+//   - Daily distillation at 4:15 PM ET
 //
 // Usage:
-//   npx ts-node scheduler.ts                  # Start with defaults
-//   PANEL_CRON="0 10,14 * * 1-5" npx ts-node scheduler.ts  # Custom: 10am + 2pm
+//   const scheduler = new TradingScheduler(panelRunner, distillation);
+//   scheduler.start();
 // =============================================================================
 
-import { execSync, spawn } from 'child_process';
-import * as path from 'path';
+import { PanelRunner, PanelRunOptions, PanelRunResult } from './panel-runner';
+import { DistillationEngine } from '../learning/distillation';
 
-// Default: 9:45 AM ET, Monday-Friday
-// Cron format: minute hour day month weekday
-const CRON_SCHEDULE = process.env.PANEL_CRON || '45 9 * * 1-5';
-const DRY_RUN = process.env.PANEL_DRY_RUN === 'true';
-const DIRECT_ALPACA = process.env.PANEL_DIRECT_ALPACA === 'true';
+// ---------------------------------------------------------------------------
+// Timezone helper — ET extraction without toLocaleString parse bug
+// ---------------------------------------------------------------------------
 
-function parseCron(expr: string): { minute: string; hour: string; days: string } {
-  const parts = expr.split(' ');
-  return {
-    minute: parts[0] || '*',
-    hour: parts[1] || '*',
-    days: parts[4] || '*',
-  };
-}
-
-function shouldRunNow(expr: string): boolean {
+/**
+ * Returns Eastern Time components derived via Intl.DateTimeFormat.
+ * Safe on any host timezone (avoids `new Date(toLocaleString(...))` which
+ * parses the locale string in the *host* timezone, not ET).
+ */
+function getEasternTime(): { day: number; hours: number; minutes: number; timeInMinutes: number; dateKey: string } {
   const now = new Date();
-  const parts = expr.split(' ');
-
-  const minute = parts[0];
-  const hour = parts[1];
-  const dayOfMonth = parts[2];
-  const month = parts[3];
-  const dayOfWeek = parts[4];
-
-  const matchesMinute = minute === '*' || minute.split(',').includes(String(now.getMinutes()));
-  const matchesHour = hour === '*' || hour.split(',').includes(String(now.getHours()));
-  const matchesDayOfMonth = dayOfMonth === '*' || dayOfMonth.split(',').includes(String(now.getDate()));
-  const matchesMonth = month === '*' || month.split(',').includes(String(now.getMonth() + 1));
-  const matchesDayOfWeek = dayOfWeek === '*' || dayOfWeek.split(',').includes(String(now.getDay()))
-    || (dayOfWeek.includes('-') && isInRange(now.getDay(), dayOfWeek));
-
-  return matchesMinute && matchesHour && matchesDayOfMonth && matchesMonth && matchesDayOfWeek;
-}
-
-function isInRange(value: number, range: string): boolean {
-  const [start, end] = range.split('-').map(Number);
-  return value >= start && value <= end;
-}
-
-async function runPanel(): Promise<void> {
-  console.log(`\n🕐 ${new Date().toISOString()} — Triggering panel run...`);
-
-  const args: string[] = [];
-  if (DRY_RUN) args.push('--dry-run');
-  if (DIRECT_ALPACA) args.push('--direct-alpaca');
-
-  const scriptPath = path.join(__dirname, 'run-panel.ts');
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['ts-node', scriptPath, ...args], {
-      stdio: 'inherit',
-      shell: true,
-    });
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        console.log(`✅ Panel run completed successfully`);
-        resolve();
-      } else {
-        console.error(`❌ Panel run exited with code ${code}`);
-        reject(new Error(`Exit code ${code}`));
-      }
-    });
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', weekday: 'short',
+    hour12: false,
   });
+  const parts = Object.fromEntries(fmt.formatToParts(now).map(p => [p.type, p.value]));
+  const hours = parseInt(parts.hour, 10) % 24;  // Intl may return "24" for midnight
+  const minutes = parseInt(parts.minute, 10);
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const day = dayMap[parts.weekday] ?? new Date().getDay();
+  const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+  return { day, hours, minutes, timeInMinutes: hours * 60 + minutes, dateKey };
 }
 
-// =============================================================================
-// Main loop — check every minute if we should run
-// =============================================================================
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
-async function main() {
-  const cron = parseCron(CRON_SCHEDULE);
-  console.log(`${'🦞'.repeat(20)}`);
-  console.log(`🦞 AI Analyst Panel Scheduler`);
-  console.log(`🦞 Schedule: ${CRON_SCHEDULE}`);
-  console.log(`🦞 (Minute: ${cron.minute}, Hour: ${cron.hour}, Days: ${cron.days})`);
-  console.log(`🦞 Dry Run: ${DRY_RUN}`);
-  console.log(`🦞 Direct Alpaca: ${DIRECT_ALPACA}`);
-  console.log(`${'🦞'.repeat(20)}\n`);
-  console.log('Waiting for next scheduled run...\n');
+const DEFAULT_INTERVAL_MS = 180_000;  // 3 minutes
+const DISTILLATION_HOUR = 16;         // 4 PM ET
+const DISTILLATION_MINUTE = 15;       // 4:15 PM ET
 
-  let lastRunMinute = -1;
+// ---------------------------------------------------------------------------
+// TradingScheduler
+// ---------------------------------------------------------------------------
 
-  setInterval(async () => {
-    const now = new Date();
-    const currentMinute = now.getHours() * 60 + now.getMinutes();
+export class TradingScheduler {
+  private panelRunner: PanelRunner;
+  private distillation: DistillationEngine | null;
+  private intervalMs: number;
+  private dryRun: boolean;
 
-    // Avoid running twice in the same minute
-    if (currentMinute === lastRunMinute) return;
+  // Run lock
+  private runLock: boolean = false;
+  private lastRunStarted: Date | null = null;
+  private lastRunResult: PanelRunResult | null = null;
 
-    if (shouldRunNow(CRON_SCHEDULE)) {
-      lastRunMinute = currentMinute;
+  // Timers
+  private panelTimer: NodeJS.Timeout | null = null;
+  private isRunning: boolean = false;
+
+  // Stats
+  private totalRuns: number = 0;
+  private totalErrors: number = 0;
+  private startedAt: Date | null = null;
+
+  // Distillation tracking
+  private lastDistillationDate: string | null = null;
+
+  constructor(
+    panelRunner: PanelRunner,
+    distillation?: DistillationEngine | null,
+    intervalMs?: number,
+  ) {
+    this.panelRunner = panelRunner;
+    this.distillation = distillation || null;
+    this.intervalMs = intervalMs || parseInt(process.env.PANEL_INTERVAL_MS || '') || DEFAULT_INTERVAL_MS;
+    this.dryRun = process.env.PANEL_DRY_RUN === 'true';
+  }
+
+  // -------------------------------------------------------------------------
+  // Start / Stop
+  // -------------------------------------------------------------------------
+
+  start(): void {
+    if (this.isRunning) {
+      console.log('⚠️  Scheduler already running');
+      return;
+    }
+
+    this.isRunning = true;
+    this.startedAt = new Date();
+
+    console.log(`\n${'🦞'.repeat(20)}`);
+    console.log(`🦞 Trading Scheduler Started`);
+    console.log(`🦞 Interval: ${this.intervalMs / 1000}s (${(this.intervalMs / 60000).toFixed(1)} min)`);
+    console.log(`🦞 Dry Run: ${this.dryRun}`);
+    console.log(`🦞 Distillation: ${this.distillation ? 'enabled (4:15 PM ET)' : 'disabled'}`);
+    console.log(`🦞 Market hours: 9:30 AM - 4:00 PM ET, Mon-Fri`);
+    console.log(`${'🦞'.repeat(20)}\n`);
+
+    // Run immediately on start (if market hours)
+    this.tick();
+
+    // Then set interval
+    this.panelTimer = setInterval(() => this.tick(), this.intervalMs);
+  }
+
+  stop(): void {
+    if (this.panelTimer) {
+      clearInterval(this.panelTimer);
+      this.panelTimer = null;
+    }
+    this.isRunning = false;
+    console.log(`🛑 Scheduler stopped. Total runs: ${this.totalRuns}, errors: ${this.totalErrors}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // Trigger now (skip interval wait)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Trigger an immediate panel run, bypassing the interval.
+   * Useful for event-driven runs (e.g., major news alert).
+   */
+  async triggerNow(reason?: string, options?: PanelRunOptions): Promise<PanelRunResult | null> {
+    console.log(`⚡ Manual trigger: ${reason || 'user request'}`);
+    return this.executeRun(options);
+  }
+
+  // -------------------------------------------------------------------------
+  // Main tick
+  // -------------------------------------------------------------------------
+
+  private async tick(): Promise<void> {
+    // Check market hours
+    if (!this.isMarketHours()) {
+      // Check for distillation time (4:15 PM ET)
+      this.checkDistillation();
+      return;
+    }
+
+    await this.executeRun();
+  }
+
+  private async executeRun(options?: PanelRunOptions): Promise<PanelRunResult | null> {
+    // Run lock check
+    if (this.runLock) {
+      const elapsed = this.lastRunStarted
+        ? ((Date.now() - this.lastRunStarted.getTime()) / 1000).toFixed(0)
+        : '?';
+      console.log(`🔒 Run lock active (running for ${elapsed}s) — skipping tick`);
+      return null;
+    }
+
+    // Acquire lock
+    this.runLock = true;
+    this.lastRunStarted = new Date();
+    this.totalRuns++;
+
+    try {
+      const result = await this.panelRunner.run({
+        dryRun: this.dryRun,
+        ...options,
+      });
+
+      this.lastRunResult = result;
+
+      if (result.error) {
+        this.totalErrors++;
+        console.error(`❌ Panel run #${this.totalRuns} failed: ${result.error}`);
+      } else {
+        console.log(`✅ Panel run #${this.totalRuns} complete: ${result.trades.length} trade(s), executed=${result.executed}`);
+      }
+
+      return result;
+    } catch (err: any) {
+      this.totalErrors++;
+      console.error(`❌ Panel run #${this.totalRuns} threw: ${err.message}`);
+      return null;
+    } finally {
+      this.runLock = false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Market hours check
+  // -------------------------------------------------------------------------
+
+  /**
+   * Check if current time is within market hours.
+   * 9:30 AM - 4:00 PM ET, Monday through Friday.
+   */
+  private isMarketHours(): boolean {
+    // Allow override for testing
+    if (process.env.FORCE_MARKET_HOURS === 'true') return true;
+
+    const { day, timeInMinutes } = getEasternTime();
+
+    // Monday (1) through Friday (5)
+    if (day < 1 || day > 5) return false;
+
+    // 9:30 AM (570 min) to 4:00 PM (960 min)
+    if (timeInMinutes < 570 || timeInMinutes >= 960) return false;
+
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // Distillation (daily after market close)
+  // -------------------------------------------------------------------------
+
+  private checkDistillation(): void {
+    if (!this.distillation) return;
+
+    const { day, hours, minutes, dateKey } = getEasternTime();
+
+    if (day < 1 || day > 5) return;  // Weekdays only
+
+    if (this.lastDistillationDate === dateKey) return;  // Already ran today
+
+    if (hours === DISTILLATION_HOUR && minutes >= DISTILLATION_MINUTE && minutes < DISTILLATION_MINUTE + 30) {
+      console.log('🧪 Running daily distillation (4:15 PM ET)...');
+      this.lastDistillationDate = dateKey;
+
       try {
-        await runPanel();
-      } catch (err) {
-        console.error('Panel run failed:', err);
+        const result = this.distillation.runDistillation();
+        console.log(`🧪 Distillation: ${result.promoted} promoted, ${result.avoidPatterns} avoid patterns`);
+      } catch (err: any) {
+        console.error('🧪 Distillation error:', err.message);
       }
     }
-  }, 30_000); // Check every 30 seconds
-}
+  }
 
-main().catch(console.error);
+  // -------------------------------------------------------------------------
+  // Status
+  // -------------------------------------------------------------------------
+
+  getStatus(): {
+    running: boolean;
+    locked: boolean;
+    totalRuns: number;
+    totalErrors: number;
+    intervalMs: number;
+    dryRun: boolean;
+    startedAt: Date | null;
+    lastRunStarted: Date | null;
+    marketHours: boolean;
+  } {
+    return {
+      running: this.isRunning,
+      locked: this.runLock,
+      totalRuns: this.totalRuns,
+      totalErrors: this.totalErrors,
+      intervalMs: this.intervalMs,
+      dryRun: this.dryRun,
+      startedAt: this.startedAt,
+      lastRunStarted: this.lastRunStarted,
+      marketHours: this.isMarketHours(),
+    };
+  }
+}

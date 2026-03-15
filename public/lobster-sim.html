@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lobster University - ClawOps Training Sim</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a12;color:#e0e0e0;font-family:'Courier New',monospace;overflow:hidden;height:100vh}
+#app{display:flex;height:100vh}
+
+/* ── Sidebar ── */
+#sidebar{width:320px;background:#0d0d1a;border-right:2px solid #ff3333;overflow-y:auto;flex-shrink:0;display:flex;flex-direction:column}
+#sidebar::-webkit-scrollbar{width:6px}
+#sidebar::-webkit-scrollbar-thumb{background:#ff3333;border-radius:3px}
+#sidebar-header{padding:12px;text-align:center;border-bottom:1px solid #222;position:sticky;top:0;background:#0d0d1a;z-index:10}
+#sidebar-header h1{color:#ff4444;font-size:16px;text-shadow:0 0 10px #ff000066}
+#sidebar-header h1 span{color:#ff8888}
+.sys-bar{display:flex;gap:8px;margin-top:8px;font-size:10px;justify-content:center}
+.sys-pill{padding:2px 8px;border-radius:10px;background:#1a1a2e}
+.sys-pill.ok{border:1px solid #2ecc71;color:#2ecc71}
+.sys-pill.warn{border:1px solid #f39c12;color:#f39c12}
+.sys-pill.bad{border:1px solid #e74c3c;color:#e74c3c}
+#agent-list{flex:1;overflow-y:auto;padding:4px}
+.agent-card{padding:8px;margin:4px;border-radius:6px;background:#111122;border:1px solid #222;cursor:pointer;transition:all .2s;font-size:11px}
+.agent-card:hover{border-color:#ff4444;background:#1a1a2e}
+.agent-card.selected{border-color:#ff6666;box-shadow:0 0 8px #ff000033}
+.agent-card .name{color:#ff8888;font-weight:bold;font-size:12px}
+.agent-card .role{color:#666;font-size:10px}
+.agent-card .status{display:inline-block;padding:1px 6px;border-radius:8px;font-size:9px;margin-left:4px}
+.status-idle{background:#1a3a1a;color:#2ecc71}
+.status-running{background:#3a2a1a;color:#f39c12}
+.status-training{background:#2a1a3a;color:#9b59b6}
+.status-resting{background:#1a2a3a;color:#7f8c8d}
+.status-disabled{background:#2a1a1a;color:#e74c3c}
+.agent-card .skills{color:#9b59b6;font-size:10px}
+.agent-card .quip{color:#555;font-size:9px;font-style:italic;margin-top:2px}
+#stats-panel{padding:10px;border-top:1px solid #222;background:#0d0d1a;font-size:10px;position:sticky;bottom:0}
+#stats-panel .stat{display:flex;justify-content:space-between;padding:1px 0}
+#stats-panel .stat .v{color:#ff8888}
+
+/* ── Main Canvas Area ── */
+#main{flex:1;display:flex;flex-direction:column;position:relative}
+#top-bar{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:#0d0d1a;border-bottom:1px solid #222;font-size:12px}
+#top-bar .title{color:#ff4444;font-size:14px}
+#top-bar .gates{font-size:11px}
+.gate-open{color:#2ecc71}.gate-blocked{color:#e74c3c}
+#canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+canvas{image-rendering:pixelated;border:1px solid #222;border-radius:4px}
+
+/* ── Feed Ticker ── */
+#ticker{height:36px;background:#0a0a14;border-top:1px solid #ff333333;display:flex;align-items:center;overflow:hidden;position:relative}
+#ticker-label{background:#ff3333;color:#000;padding:4px 10px;font-size:11px;font-weight:bold;z-index:2;flex-shrink:0}
+#ticker-content{flex:1;overflow:hidden;white-space:nowrap}
+#ticker-text{display:inline-block;animation:scroll-ticker 60s linear infinite;font-size:11px;color:#ff888888}
+@keyframes scroll-ticker{0%{transform:translateX(100%)}100%{transform:translateX(-200%)}}
+
+/* ── Agent Detail Popup ── */
+#detail-panel{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:500px;max-height:80vh;background:#111122;border:2px solid #ff4444;border-radius:12px;z-index:100;overflow-y:auto;box-shadow:0 0 40px #ff000033}
+#detail-panel.show{display:block}
+#detail-header{padding:16px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center}
+#detail-header h2{color:#ff6666;font-size:16px}
+#detail-close{background:none;border:1px solid #ff4444;color:#ff4444;padding:4px 12px;border-radius:4px;cursor:pointer;font-family:inherit}
+#detail-close:hover{background:#ff444433}
+#detail-body{padding:16px}
+.detail-section{margin-bottom:16px}
+.detail-section h3{color:#ff8888;font-size:12px;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
+.detail-section p,.detail-section li{font-size:11px;color:#aaa;line-height:1.6}
+.detail-section ul{list-style:none;padding-left:8px}
+.detail-section ul li::before{content:">";color:#ff4444;margin-right:6px}
+.skill-badge{display:inline-block;padding:2px 8px;margin:2px;border-radius:10px;background:#2a1a3a;border:1px solid #9b59b6;color:#bb88ff;font-size:10px}
+.detail-btn{padding:6px 14px;margin:4px;border-radius:6px;border:1px solid #ff4444;background:#1a0a0a;color:#ff8888;cursor:pointer;font-family:inherit;font-size:11px}
+.detail-btn:hover{background:#ff444422}
+#overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#00000088;z-index:99}
+#overlay.show{display:block}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h1>LOBSTER <span>UNIVERSITY</span></h1>
+      <div style="font-size:9px;color:#666;margin-top:2px">Where agents go from interns to geniuses</div>
+      <div class="sys-bar">
+        <span class="sys-pill" id="cpu-pill">CPU: --%</span>
+        <span class="sys-pill" id="ram-pill">RAM: --%</span>
+        <span class="sys-pill" id="agents-pill">Agents: --</span>
+      </div>
+    </div>
+    <div id="agent-list"></div>
+    <div id="stats-panel">
+      <div class="stat"><span>Sessions</span><span class="v" id="stat-sessions">0</span></div>
+      <div class="stat"><span>Skills Learned</span><span class="v" id="stat-skills">0</span></div>
+      <div class="stat"><span>QA Pending</span><span class="v" id="stat-pending">0</span></div>
+      <div class="stat"><span>QA Approved</span><span class="v" id="stat-approved">0</span></div>
+      <div class="stat"><span>Queue Depth</span><span class="v" id="stat-queue">0</span></div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div id="main">
+    <div id="top-bar">
+      <div class="title">ClawOps Idle Training — Live View</div>
+      <div class="gates" id="gate-status">Loading...</div>
+    </div>
+    <div id="canvas-wrap"><canvas id="world"></canvas></div>
+    <div id="ticker">
+      <div id="ticker-label">CLAW FEED</div>
+      <div id="ticker-content"><span id="ticker-text">Initializing Lobster University... please hold your claws...</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Popup -->
+<div id="overlay" onclick="closeDetail()"></div>
+<div id="detail-panel">
+  <div id="detail-header"><h2 id="detail-name">Agent</h2><button id="detail-close" onclick="closeDetail()">X</button></div>
+  <div id="detail-body"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+const API_BASE = window.location.port === '5174'
+  ? 'http://localhost:3001/api'
+  : `${window.location.origin}/api`;
+const POLL_MS = 8000;
+const W = 640, H = 480;
+const LOBSTER_W = 20, LOBSTER_H = 16;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+let agents = [];
+let trainingStats = {};
+let capacity = {};
+let gates = {};
+let sessions = [];
+let candidates = [];
+let skills = {};
+let selectedAgent = null;
+let lobsters = {}; // id → { x, y, targetX, targetY, state, frame, bubbleText, bubbleTimer, ... }
+let tickerItems = ['Lobster University is OPEN. Claws ready.'];
+let frame = 0;
+let lastPoll = 0;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROOMS — pixel coordinates on the 640x480 canvas
+// ═══════════════════════════════════════════════════════════════════════════
+const ROOMS = {
+  trainingLab: { x: 20, y: 40, w: 280, h: 200, label: 'Training Lab', color: '#1a0a2a' },
+  office:      { x: 340, y: 40, w: 280, h: 200, label: 'Office Floor', color: '#0a1a1a' },
+  lounge:      { x: 20, y: 280, w: 280, h: 160, label: 'Lobster Lounge', color: '#1a1a0a' },
+  qaGate:      { x: 340, y: 280, w: 280, h: 160, label: 'QA Gate', color: '#0a0a1a' },
+};
+
+// Desk positions inside rooms
+const DESKS = {
+  trainingLab: Array.from({length: 12}, (_, i) => ({
+    x: ROOMS.trainingLab.x + 30 + (i % 4) * 65,
+    y: ROOMS.trainingLab.y + 40 + Math.floor(i / 4) * 55
+  })),
+  office: Array.from({length: 12}, (_, i) => ({
+    x: ROOMS.office.x + 30 + (i % 4) * 65,
+    y: ROOMS.office.y + 40 + Math.floor(i / 4) * 55
+  })),
+  lounge: Array.from({length: 8}, (_, i) => ({
+    x: ROOMS.lounge.x + 30 + (i % 4) * 65,
+    y: ROOMS.lounge.y + 30 + Math.floor(i / 2) * 50
+  })),
+  qaGate: Array.from({length: 6}, (_, i) => ({
+    x: ROOMS.qaGate.x + 40 + (i % 3) * 85,
+    y: ROOMS.qaGate.y + 50 + Math.floor(i / 3) * 60
+  })),
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOBSTER ACCESSORIES by group
+// ═══════════════════════════════════════════════════════════════════════════
+const GROUP_HATS = {
+  'jake-marketing': { type: 'hardhat', color: '#f1c40f' },
+  'jake-pipeline':  { type: 'hardhat', color: '#e67e22' },
+  'hoa-marketing':  { type: 'tophat', color: '#3498db' },
+  'hoa-pipeline':   { type: 'cap', color: '#2ecc71' },
+  'hoa-intel':      { type: 'monocle', color: '#9b59b6' },
+  'mgmt-research':  { type: 'glasses', color: '#1abc9c' },
+  'owen-marketing': { type: 'crown', color: '#f39c12' },
+  'data-rehab':     { type: 'bandana', color: '#e74c3c' },
+  'opportunity-engine': { type: 'propeller', color: '#ff69b4' },
+  'core':           { type: 'crown', color: '#ff4444' },
+  'default':        { type: 'cap', color: '#95a5a6' },
+};
+
+const BUBBLES = [
+  'Nom nom learning...', 'My claws are TINGLING', 'Claw-esome!',
+  'Big brain time', 'Why do I exist?', '*intense lobster noises*',
+  'I am become claw', 'Pinch me, I learned!', 'Reject crab, return to lobster',
+  'This is fine.', 'YouTube said so...', 'Trust the process',
+  'Skill issue? Not anymore!', '404: Sleep not found', 'git push --force-claw',
+  'Allocating more claw-RAM...', 'sudo make me smarter', 'lobster.exe upgraded',
+  'I just had an epiphany!', '*clicks claws nervously*', 'Deploying claw update...',
+  'Error: too much knowledge', 'CLAW SMASH! ...wait, wrong franchise',
+];
+
+const FAIL_BUBBLES = [
+  'MY CLAWS!', '*rage pinch*', 'This is GARBAGE', 'Who coded this?!',
+  'REVERT REVERT', '*flips desk with claws*', 'Pain. Suffering. Lobster.',
+  'I trained for THIS?!', 'Timeout?! I AM the timeout!',
+];
+
+const SUCCESS_BUBBLES = [
+  'LEVEL UP BABY!', '*sparkle claws*', 'I am UNSTOPPABLE',
+  'QA: PASSED. Obviously.', 'Skill: ACQUIRED', '*victory dance*',
+  'Promoted! Suck it, crabs!', 'Knowledge: CONSUMED',
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API POLLING
+// ═══════════════════════════════════════════════════════════════════════════
+async function fetchJSON(path) {
+  try {
+    const token = localStorage.getItem('clawops_token');
+    const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+    const r = await fetch(`${API_BASE}${path}`, { headers });
+    if (r.status === 401) {
+      // Try to login
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'admin@clawops.local', password: 'changeme123' })
+      });
+      if (loginRes.ok) {
+        const data = await loginRes.json();
+        const jwt = data.token?.token || data.token;
+        localStorage.setItem('clawops_token', jwt);
+        const r2 = await fetch(`${API_BASE}${path}`, { headers: { 'Authorization': `Bearer ${jwt}` } });
+        return r2.ok ? await r2.json() : null;
+      }
+      return null;
+    }
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+async function pollData() {
+  const [agentData, statsData, capData, sessionData, candidateData] = await Promise.all([
+    fetchJSON('/agents'),
+    fetchJSON('/training/stats'),
+    fetchJSON('/training/capacity'),
+    fetchJSON('/training/sessions?limit=20'),
+    fetchJSON('/training/candidates?limit=20'),
+  ]);
+
+  if (agentData?.agents) {
+    agents = agentData.agents;
+    updateLobsters();
+    renderAgentList();
+  }
+  if (statsData) {
+    trainingStats = statsData;
+    updateStatsPanel();
+  }
+  if (capData) {
+    capacity = capData;
+    gates = capData.gates || {};
+    updateCapacityUI();
+  }
+  if (sessionData?.sessions) {
+    const newSessions = sessionData.sessions.filter(s => !sessions.find(os => os.id === s.id));
+    sessions = sessionData.sessions;
+    for (const s of newSessions) {
+      addTickerItem(s);
+      triggerTrainingAnimation(s);
+    }
+  }
+  if (candidateData?.candidates) candidates = candidateData.candidates;
+}
+
+function addTickerItem(session) {
+  const verbs = ['just learned', 'absorbed', 'crammed', 'downloaded into their claw-brain', 'unlocked the secret of'];
+  const verb = verbs[Math.floor(Math.random() * verbs.length)];
+  const emoji = session.activity_type === 'reflection' ? '💭' : session.activity_type === 'internal_corpus' ? '🏆' : '🎬';
+  const msg = `${emoji} ${session.agent_name} ${verb} "${session.skill_gained || session.topic}" — ${session.quip || 'No comment.'}`;
+  tickerItems.push(msg);
+  if (tickerItems.length > 30) tickerItems.shift();
+  document.getElementById('ticker-text').textContent = tickerItems.join('    ///    ');
+}
+
+function triggerTrainingAnimation(session) {
+  const lob = lobsters[session.agent_id];
+  if (lob) {
+    lob.state = 'training';
+    lob.trainingTopic = session.topic;
+    lob.trainingTimer = 300; // 5 seconds of animation
+    lob.bubbleText = SUCCESS_BUBBLES[Math.floor(Math.random() * SUCCESS_BUBBLES.length)];
+    lob.bubbleTimer = 180;
+    lob.sparkle = 60;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOBSTER STATE MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+function updateLobsters() {
+  for (const agent of agents) {
+    if (!lobsters[agent.id]) {
+      // New lobster — spawn in random room
+      const room = agent.status === 'running' ? ROOMS.office : ROOMS.lounge;
+      lobsters[agent.id] = {
+        x: room.x + 20 + Math.random() * (room.w - 40),
+        y: room.y + 20 + Math.random() * (room.h - 40),
+        targetX: 0, targetY: 0,
+        state: 'idle',
+        frame: Math.floor(Math.random() * 60),
+        bubbleText: null,
+        bubbleTimer: 0,
+        sparkle: 0,
+        trainingTimer: 0,
+        group: getGroup(agent),
+        facing: Math.random() > 0.5 ? 1 : -1,
+      };
+      pickTarget(agent.id, agent);
+    }
+
+    const lob = lobsters[agent.id];
+
+    // Update state based on agent status
+    if (agent.status === 'running' && lob.state !== 'working') {
+      lob.state = 'working';
+      pickTarget(agent.id, agent);
+    } else if (agent.status === 'idle' && lob.state === 'working') {
+      lob.state = 'idle';
+      pickTarget(agent.id, agent);
+    }
+  }
+}
+
+function getGroup(agent) {
+  try {
+    const cfg = JSON.parse(agent.config || '{}');
+    return cfg.group || 'default';
+  } catch { return 'default'; }
+}
+
+function pickTarget(id, agent) {
+  const lob = lobsters[id];
+  if (!lob) return;
+
+  let room;
+  if (lob.state === 'training') room = ROOMS.trainingLab;
+  else if (lob.state === 'working') room = ROOMS.office;
+  else if (lob.state === 'resting') room = ROOMS.lounge;
+  else room = [ROOMS.lounge, ROOMS.office, ROOMS.trainingLab][Math.floor(Math.random() * 3)];
+
+  lob.targetX = room.x + 20 + Math.random() * (room.w - 40);
+  lob.targetY = room.y + 20 + Math.random() * (room.h - 40);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI UPDATES
+// ═══════════════════════════════════════════════════════════════════════════
+function renderAgentList() {
+  const list = document.getElementById('agent-list');
+  // Only re-render if agent count changed
+  if (list.children.length === agents.length) {
+    // Just update statuses
+    for (const agent of agents) {
+      const card = document.getElementById(`card-${agent.id}`);
+      if (card) {
+        const statusEl = card.querySelector('.status');
+        const lob = lobsters[agent.id];
+        const displayState = lob?.state || agent.status;
+        statusEl.className = `status status-${displayState}`;
+        statusEl.textContent = displayState;
+      }
+    }
+    return;
+  }
+
+  list.innerHTML = '';
+  const sorted = [...agents].sort((a, b) => {
+    const aState = lobsters[a.id]?.state || a.status;
+    const bState = lobsters[b.id]?.state || b.status;
+    const order = { training: 0, working: 1, running: 1, idle: 2, resting: 3, disabled: 4 };
+    return (order[aState] ?? 5) - (order[bState] ?? 5);
+  });
+
+  for (const agent of sorted) {
+    const lob = lobsters[agent.id];
+    const displayState = lob?.state || agent.status;
+    const group = getGroup(agent);
+    const skillCount = skills[agent.id]?.length || 0;
+
+    const card = document.createElement('div');
+    card.className = `agent-card${selectedAgent === agent.id ? ' selected' : ''}`;
+    card.id = `card-${agent.id}`;
+    card.onclick = () => openDetail(agent.id);
+    card.innerHTML = `
+      <div><span class="name">${agent.name}</span><span class="status status-${displayState}">${displayState}</span></div>
+      <div class="role">${group} &middot; ${agent.description?.slice(0, 50) || 'Agent'}</div>
+      ${skillCount > 0 ? `<div class="skills">${skillCount} skills</div>` : ''}
+      ${lob?.bubbleText ? `<div class="quip">"${lob.bubbleText}"</div>` : ''}
+    `;
+    list.appendChild(card);
+  }
+}
+
+function updateStatsPanel() {
+  document.getElementById('stat-sessions').textContent = trainingStats.totalSessions || 0;
+  document.getElementById('stat-skills').textContent = trainingStats.totalSkills || 0;
+  document.getElementById('stat-pending').textContent = trainingStats.candidates?.pending || 0;
+  document.getElementById('stat-approved').textContent = trainingStats.candidates?.approved || 0;
+  document.getElementById('stat-queue').textContent = trainingStats.queueDepth || 0;
+}
+
+function updateCapacityUI() {
+  const cpu = capacity.cpuPercent || 0;
+  const ram = capacity.ramPercent || 0;
+  const cpuPill = document.getElementById('cpu-pill');
+  const ramPill = document.getElementById('ram-pill');
+  const agentsPill = document.getElementById('agents-pill');
+
+  cpuPill.textContent = `CPU: ${cpu}%`;
+  cpuPill.className = `sys-pill ${cpu < 60 ? 'ok' : cpu < 85 ? 'warn' : 'bad'}`;
+
+  ramPill.textContent = `RAM: ${ram}%`;
+  ramPill.className = `sys-pill ${ram < 85 ? 'ok' : ram < 95 ? 'warn' : 'bad'}`;
+
+  agentsPill.textContent = `Agents: ${agents.length}`;
+  agentsPill.className = 'sys-pill ok';
+
+  const gateEl = document.getElementById('gate-status');
+  if (gates.allowed) {
+    gateEl.innerHTML = '<span class="gate-open">TRAINING GATES: OPEN</span>';
+  } else {
+    gateEl.innerHTML = `<span class="gate-blocked">GATES BLOCKED: ${gates.reason || 'Unknown'}</span>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETAIL POPUP
+// ═══════════════════════════════════════════════════════════════════════════
+async function openDetail(agentId) {
+  selectedAgent = agentId;
+  const agent = agents.find(a => a.id === agentId);
+  if (!agent) return;
+
+  // Fetch skills for this agent
+  const skillData = await fetchJSON(`/training/skills?agent_id=${agentId}`);
+  if (skillData?.skills) skills[agentId] = skillData.skills;
+  const agentSkills = skills[agentId] || [];
+
+  const agentSessions = sessions.filter(s => s.agent_id === agentId).slice(0, 5);
+  const agentCandidates = candidates.filter(c => c.agent_id === agentId).slice(0, 3);
+  const group = getGroup(agent);
+  const hat = GROUP_HATS[group] || GROUP_HATS.default;
+
+  document.getElementById('detail-name').textContent = `${agent.name} (${hat.type})`;
+  document.getElementById('detail-body').innerHTML = `
+    <div class="detail-section">
+      <h3>Profile</h3>
+      <p>${agent.description || 'No description'}</p>
+      <p>Group: <span style="color:${hat.color}">${group}</span> &middot; Status: ${agent.status} &middot; Total runs: ${agent.total_runs || 0}</p>
+    </div>
+
+    <div class="detail-section">
+      <h3>Skills (${agentSkills.length})</h3>
+      ${agentSkills.length > 0
+        ? agentSkills.map(s => `<span class="skill-badge">${s.skill_name} Lv.${s.skill_level}</span>`).join('')
+        : '<p>No skills yet — lobster needs training!</p>'}
+    </div>
+
+    <div class="detail-section">
+      <h3>Recent Training</h3>
+      <ul>
+        ${agentSessions.length > 0
+          ? agentSessions.map(s => `<li><strong>${s.activity_type}</strong>: ${s.topic?.slice(0, 80)} ${s.quip ? `<br><em>"${s.quip}"</em>` : ''}</li>`).join('')
+          : '<li>No training sessions yet</li>'}
+      </ul>
+    </div>
+
+    ${agentCandidates.length > 0 ? `
+    <div class="detail-section">
+      <h3>Pending QA Candidates</h3>
+      <ul>
+        ${agentCandidates.map(c => `<li>${c.skill_name} — ${c.qa_verdict || 'awaiting QA'} ${c.qa_score ? `(${(c.qa_score * 100).toFixed(0)}%)` : ''}</li>`).join('')}
+      </ul>
+    </div>` : ''}
+
+    <div class="detail-section">
+      <h3>Actions</h3>
+      <button class="detail-btn" onclick="copyCommand('${agent.name}', 'train')">Force Train Now</button>
+      <button class="detail-btn" onclick="copyCommand('${agent.name}', 'stats')">View Stats</button>
+      <button class="detail-btn" onclick="copyCommand('${agent.name}', 'run')">Assign Real Task</button>
+    </div>
+  `;
+
+  document.getElementById('detail-panel').classList.add('show');
+  document.getElementById('overlay').classList.add('show');
+}
+
+function closeDetail() {
+  selectedAgent = null;
+  document.getElementById('detail-panel').classList.remove('show');
+  document.getElementById('overlay').classList.remove('show');
+}
+
+function copyCommand(agentName, action) {
+  const cmds = {
+    train: `curl -X POST ${API_BASE}/runs -H "Content-Type: application/json" -d '{"agent_name":"idle-trainer","message":"{\\"agent_id\\":\\"${agentName}\\"}"}'`,
+    stats: `node scripts/run-training-cycle.js --stats`,
+    run: `# Trigger a run for ${agentName} via the ClawOps UI or schedule`,
+  };
+  navigator.clipboard?.writeText(cmds[action] || '');
+  alert(`Copied ${action} command to clipboard!`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CANVAS RENDERING
+// ═══════════════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('world');
+const ctx = canvas.getContext('2d');
+canvas.width = W;
+canvas.height = H;
+
+// Scale canvas to fit container
+function resizeCanvas() {
+  const wrap = document.getElementById('canvas-wrap');
+  const scale = Math.min(wrap.clientWidth / W, wrap.clientHeight / H, 2);
+  canvas.style.width = `${W * scale}px`;
+  canvas.style.height = `${H * scale}px`;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Click detection
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+
+  // Find clicked lobster
+  for (const agent of agents) {
+    const lob = lobsters[agent.id];
+    if (!lob) continue;
+    if (Math.abs(mx - lob.x) < 14 && Math.abs(my - lob.y) < 14) {
+      openDetail(agent.id);
+      return;
+    }
+  }
+});
+
+function drawRoom(room) {
+  ctx.fillStyle = room.color;
+  ctx.fillRect(room.x, room.y, room.w, room.h);
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(room.x, room.y, room.w, room.h);
+  ctx.fillStyle = '#44444488';
+  ctx.font = '9px monospace';
+  ctx.fillText(room.label, room.x + 6, room.y + 14);
+}
+
+function drawDesk(x, y) {
+  ctx.fillStyle = '#2a2a3a';
+  ctx.fillRect(x - 8, y - 4, 16, 8);
+  ctx.strokeStyle = '#444';
+  ctx.strokeRect(x - 8, y - 4, 16, 8);
+  // Monitor
+  ctx.fillStyle = '#0a1a2a';
+  ctx.fillRect(x - 4, y - 10, 8, 6);
+  ctx.strokeStyle = '#336';
+  ctx.strokeRect(x - 4, y - 10, 8, 6);
+}
+
+function drawLobster(lob, agent) {
+  const { x, y, facing, state } = lob;
+  const f = lob.frame;
+  const group = lob.group;
+  const hat = GROUP_HATS[group] || GROUP_HATS.default;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(facing, 1);
+
+  // Tail wag (idle animation)
+  const tailWag = state === 'idle' || state === 'resting' ? Math.sin(f * 0.1) * 3 : 0;
+  const bounce = state === 'training' ? Math.abs(Math.sin(f * 0.15)) * 2 : 0;
+
+  // Body (ellipse)
+  ctx.fillStyle = '#cc2222';
+  ctx.beginPath();
+  ctx.ellipse(0, -bounce, 8, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#991111';
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(-6, 2 - bounce);
+  ctx.quadraticCurveTo(-12, 4 + tailWag - bounce, -14, 0 + tailWag - bounce);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#cc2222';
+  ctx.stroke();
+
+  // Tail fan
+  ctx.beginPath();
+  ctx.moveTo(-14, 0 + tailWag - bounce);
+  ctx.lineTo(-18, -3 + tailWag - bounce);
+  ctx.lineTo(-16, 1 + tailWag - bounce);
+  ctx.lineTo(-18, 4 + tailWag - bounce);
+  ctx.lineTo(-14, 0 + tailWag - bounce);
+  ctx.fillStyle = '#aa1111';
+  ctx.fill();
+
+  // Claws
+  const clawAnim = state === 'training' ? Math.sin(f * 0.2) * 4 : 0;
+  // Left claw
+  ctx.fillStyle = '#dd3333';
+  ctx.beginPath();
+  ctx.ellipse(8, -4 + clawAnim - bounce, 4, 3, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  // Claw pinch line
+  ctx.beginPath();
+  ctx.moveTo(11, -5 + clawAnim - bounce);
+  ctx.lineTo(13, -3 + clawAnim - bounce);
+  ctx.strokeStyle = '#991111';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // Right claw (lower)
+  ctx.beginPath();
+  ctx.ellipse(7, 3 - clawAnim - bounce, 3.5, 2.5, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eyes (googly!)
+  const eyeX = 4, eyeY = -5 - bounce;
+  // Left eye
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(eyeX - 2, eyeY, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(eyeX - 2 + Math.sin(f * 0.05) * 0.8, eyeY + Math.cos(f * 0.07) * 0.5, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+  // Right eye
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(eyeX + 2, eyeY - 1, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(eyeX + 2 + Math.sin(f * 0.06) * 0.8, eyeY - 1 + Math.cos(f * 0.08) * 0.5, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Expression overlays
+  if (state === 'training') {
+    // Sweat drops
+    if (f % 40 < 20) {
+      ctx.fillStyle = '#5599ff88';
+      ctx.beginPath();
+      ctx.arc(7, -9 - bounce, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Hat / accessory
+  drawAccessory(hat, -bounce);
+
+  ctx.restore();
+
+  // ── Overlays (not scaled/flipped) ──
+
+  // Training YouTube popup
+  if (state === 'training' && lob.trainingTimer > 0) {
+    const popY = y - 24;
+    ctx.fillStyle = '#111122cc';
+    ctx.fillRect(x - 20, popY - 14, 40, 12);
+    ctx.strokeStyle = '#ff444488';
+    ctx.strokeRect(x - 20, popY - 14, 40, 12);
+    // Fake play button
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath();
+    ctx.moveTo(x - 16, popY - 12);
+    ctx.lineTo(x - 16, popY - 4);
+    ctx.lineTo(x - 10, popY - 8);
+    ctx.fill();
+    // Scrolling text
+    const topicText = (lob.trainingTopic || 'Learning...').slice(0, 15);
+    ctx.fillStyle = '#888';
+    ctx.font = '5px monospace';
+    ctx.fillText(topicText, x - 8, popY - 6);
+  }
+
+  // Sparkles
+  if (lob.sparkle > 0) {
+    for (let i = 0; i < 4; i++) {
+      const sx = x + Math.sin(f * 0.3 + i * 1.5) * 15;
+      const sy = y - 10 + Math.cos(f * 0.4 + i * 2) * 10;
+      ctx.fillStyle = ['#ff4444', '#ffff44', '#44ff44', '#4444ff'][i];
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    // LEVEL UP text
+    if (lob.sparkle > 30) {
+      ctx.fillStyle = '#ffff00';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText('+1 SKILL!', x - 14, y - 28);
+    }
+  }
+
+  // Speech bubble
+  if (lob.bubbleText && lob.bubbleTimer > 0) {
+    const bx = x + 12 * facing;
+    const by = y - 20;
+    const text = lob.bubbleText;
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = '#111122ee';
+    ctx.strokeStyle = '#ff444466';
+    ctx.lineWidth = 0.5;
+    const pad = 3;
+    ctx.beginPath();
+    ctx.roundRect(bx - pad, by - 8, tw + pad * 2, 10, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ff8888';
+    ctx.font = '6px monospace';
+    ctx.fillText(text, bx, by);
+  }
+}
+
+function drawAccessory(hat, bounce) {
+  switch (hat.type) {
+    case 'hardhat':
+      ctx.fillStyle = hat.color;
+      ctx.beginPath();
+      ctx.arc(2, -9 - bounce, 5, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(-3, -9 - bounce, 10, 2);
+      break;
+    case 'tophat':
+      ctx.fillStyle = hat.color;
+      ctx.fillRect(-1, -16 - bounce, 8, 8);
+      ctx.fillRect(-3, -9 - bounce, 12, 2);
+      break;
+    case 'crown':
+      ctx.fillStyle = hat.color;
+      ctx.beginPath();
+      ctx.moveTo(-2, -9 - bounce);
+      ctx.lineTo(-3, -14 - bounce);
+      ctx.lineTo(0, -11 - bounce);
+      ctx.lineTo(3, -15 - bounce);
+      ctx.lineTo(6, -11 - bounce);
+      ctx.lineTo(9, -14 - bounce);
+      ctx.lineTo(8, -9 - bounce);
+      ctx.fill();
+      break;
+    case 'cap':
+      ctx.fillStyle = hat.color;
+      ctx.beginPath();
+      ctx.arc(3, -8 - bounce, 5, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(6, -9 - bounce, 6, 2);
+      break;
+    case 'glasses':
+      ctx.strokeStyle = hat.color;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(2, -5 - bounce, 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(7, -5 - bounce, 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(4.5, -5 - bounce);
+      ctx.lineTo(4.5, -5 - bounce);
+      ctx.stroke();
+      break;
+    case 'monocle':
+      ctx.strokeStyle = hat.color;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(6, -5 - bounce, 3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(6, -2 - bounce);
+      ctx.lineTo(4, 3 - bounce);
+      ctx.stroke();
+      break;
+    case 'bandana':
+      ctx.fillStyle = hat.color;
+      ctx.beginPath();
+      ctx.moveTo(-3, -7 - bounce);
+      ctx.lineTo(9, -7 - bounce);
+      ctx.lineTo(8, -9 - bounce);
+      ctx.lineTo(-2, -9 - bounce);
+      ctx.fill();
+      // Knot
+      ctx.beginPath();
+      ctx.moveTo(-3, -8 - bounce);
+      ctx.lineTo(-7, -6 - bounce);
+      ctx.lineTo(-5, -4 - bounce);
+      ctx.fill();
+      break;
+    case 'propeller':
+      ctx.fillStyle = hat.color;
+      ctx.beginPath();
+      ctx.arc(3, -10 - bounce, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      const pa = frame * 0.3;
+      ctx.strokeStyle = hat.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(3 + Math.cos(pa) * 5, -10 - bounce + Math.sin(pa) * 2);
+      ctx.lineTo(3 - Math.cos(pa) * 5, -10 - bounce - Math.sin(pa) * 2);
+      ctx.stroke();
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GAME LOOP
+// ═══════════════════════════════════════════════════════════════════════════
+function update() {
+  frame++;
+
+  for (const agent of agents) {
+    const lob = lobsters[agent.id];
+    if (!lob) continue;
+
+    lob.frame++;
+
+    // Move toward target
+    const dx = lob.targetX - lob.x;
+    const dy = lob.targetY - lob.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 2) {
+      const speed = lob.state === 'training' ? 0.3 : 0.5;
+      lob.x += (dx / dist) * speed;
+      lob.y += (dy / dist) * speed;
+      lob.facing = dx > 0 ? 1 : -1;
+    } else if (Math.random() < 0.005) {
+      pickTarget(agent.id, agent);
+    }
+
+    // Training timer
+    if (lob.trainingTimer > 0) lob.trainingTimer--;
+    if (lob.trainingTimer === 1) {
+      lob.state = 'idle';
+      pickTarget(agent.id, agent);
+    }
+
+    // Bubble timer
+    if (lob.bubbleTimer > 0) lob.bubbleTimer--;
+    if (lob.bubbleTimer === 0) lob.bubbleText = null;
+
+    // Sparkle timer
+    if (lob.sparkle > 0) lob.sparkle--;
+
+    // Random idle bubbles
+    if (lob.bubbleTimer === 0 && Math.random() < 0.001) {
+      lob.bubbleText = BUBBLES[Math.floor(Math.random() * BUBBLES.length)];
+      lob.bubbleTimer = 120;
+    }
+
+    // Random interactions between nearby lobsters
+    if (Math.random() < 0.0005) {
+      const others = agents.filter(a => a.id !== agent.id && lobsters[a.id]);
+      if (others.length > 0) {
+        const other = others[Math.floor(Math.random() * others.length)];
+        const oLob = lobsters[other.id];
+        if (oLob && Math.abs(lob.x - oLob.x) < 30 && Math.abs(lob.y - oLob.y) < 30) {
+          const events = [
+            [' high-fives ', '! '],
+            [' steals ', "'s coffee mug "],
+            [' challenges ', ' to a claw-off '],
+            [' gossips with ', ' about the boss '],
+          ];
+          const ev = events[Math.floor(Math.random() * events.length)];
+          lob.bubbleText = `*${ev[0].trim()}*`;
+          lob.bubbleTimer = 90;
+          oLob.bubbleText = `*${ev[1].trim()}*`;
+          oLob.bubbleTimer = 90;
+        }
+      }
+    }
+  }
+}
+
+function render() {
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw rooms
+  for (const room of Object.values(ROOMS)) drawRoom(room);
+
+  // Draw desks
+  for (const [roomName, deskList] of Object.entries(DESKS)) {
+    for (const desk of deskList) drawDesk(desk.x, desk.y);
+  }
+
+  // Draw hallways (simple lines between rooms)
+  ctx.strokeStyle = '#222';
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(300, 140);
+  ctx.lineTo(340, 140);
+  ctx.moveTo(160, 240);
+  ctx.lineTo(160, 280);
+  ctx.moveTo(480, 240);
+  ctx.lineTo(480, 280);
+  ctx.moveTo(300, 360);
+  ctx.lineTo(340, 360);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw lobsters (sorted by Y for depth)
+  const sortedAgents = [...agents].sort((a, b) => (lobsters[a.id]?.y || 0) - (lobsters[b.id]?.y || 0));
+  for (const agent of sortedAgents) {
+    const lob = lobsters[agent.id];
+    if (lob) drawLobster(lob, agent);
+  }
+
+  // Title overlay
+  ctx.fillStyle = '#ff444422';
+  ctx.font = 'bold 10px monospace';
+  ctx.fillText('LOBSTER UNIVERSITY', W / 2 - 60, 14);
+  ctx.fillStyle = '#ff444411';
+  ctx.font = '7px monospace';
+  ctx.fillText(`${agents.length} agents | frame ${frame}`, W / 2 - 45, 24);
+}
+
+function gameLoop() {
+  update();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+async function init() {
+  await pollData();
+  gameLoop();
+  setInterval(pollData, POLL_MS);
+}
+
+init();
+</script>
+</body>
+</html>

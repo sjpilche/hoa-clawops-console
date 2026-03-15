@@ -45,6 +45,18 @@ const ConfigSchema = z.object({
   consoleJwtPublicKey: z.string().optional().default(''),
   consoleUrl: z.string().default('http://localhost:5173'),
 
+  // Ollama (local LLM)
+  ollamaHost: z.string().default('127.0.0.1'),
+  ollamaPort: z.coerce.number().default(11434),
+  ollamaDefaultModel: z.string().default('llama3.2:3b'),
+
+  // Brain (recursive learning)
+  brainDbPath: z.string().optional(),  // Defaults to data/trader-brain.sqlite
+
+  // AI Panel
+  panelIntervalMs: z.coerce.number().default(180000),  // 3 minutes
+  panelDryRun: z.string().optional().transform((v) => v === 'true').default('false'),
+
   // Logging
   logLevel: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
 });
@@ -72,6 +84,12 @@ function loadConfig(): Config {
     consoleJwtAudience: process.env.CONSOLE_JWT_AUDIENCE,
     consoleJwtPublicKey: process.env.CONSOLE_JWT_PUBLIC_KEY,
     consoleUrl: process.env.CONSOLE_URL,
+    ollamaHost: process.env.OLLAMA_HOST,
+    ollamaPort: process.env.OLLAMA_PORT,
+    ollamaDefaultModel: process.env.OLLAMA_DEFAULT_MODEL,
+    brainDbPath: process.env.BRAIN_DB_PATH,
+    panelIntervalMs: process.env.PANEL_INTERVAL_MS,
+    panelDryRun: process.env.PANEL_DRY_RUN,
     logLevel: process.env.LOG_LEVEL,
   });
 

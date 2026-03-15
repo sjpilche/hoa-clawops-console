@@ -26,7 +26,8 @@ const helmet = require('helmet');
 const { initDatabase } = require('./db/connection');
 const { initSocketServer } = require('./websocket/socketServer');
 const auditLogger = require('./middleware/auditLogger');
-const { generalLimiter } = require('./middleware/rateLimiter');
+// Rate limiter disabled — single-user local console, no need
+// const { generalLimiter } = require('./middleware/rateLimiter');
 const { errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth');
@@ -54,6 +55,15 @@ const mgmtOutreachRoutes = require('./routes/mgmtOutreach');
 const healthRoutes    = require('./routes/health');
 const pipelineHealthRoutes = require('./routes/pipeline');
 const livempaintRoutes     = require('./routes/livempaint');
+const openclawRoutes       = require('./routes/openclaw');
+const opportunityRoutes    = require('./routes/opportunities');
+const revenueSignalRoutes  = require('./routes/revenue-signals');
+const trainingRoutes       = require('./routes/training');
+const directoryRoutes      = require('./routes/directory');
+const qaRoutes             = require('./routes/qa');
+const agentHealthRoutes    = require('./routes/agentHealth');
+const dashboardRoutes      = require('./routes/dashboard');
+const sendgridWebhookRoutes = require('./routes/sendgridWebhook');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -160,13 +170,15 @@ async function startServer() {
     // SECURITY: Different size limits for different route types
     app.use('/api/chat', express.json({ limit: '1mb' })); // Chat messages: 1MB
     app.use('/api/agents', express.json({ limit: '500kb' })); // Agent configs: 500KB
+    app.use('/api/webhooks', express.json({ limit: '2mb' })); // SendGrid webhooks: 2MB (email bodies)
+    app.use('/api/webhooks', express.urlencoded({ extended: true, limit: '2mb' })); // Inbound Parse multipart fallback
     app.use('/api', express.json({ limit: '100kb' })); // Everything else: 100KB
 
     app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
-    // --- Rate Limiting ---
-    // Apply to all API routes (100 req/min general)
-    app.use('/api', generalLimiter);
+    // --- Rate Limiting (DISABLED) ---
+    // Single-user local console — rate limiting just gets in the way
+    // app.use('/api', generalLimiter);
 
     // --- Audit Logging ---
     // EVERY API call is recorded (safety requirement)
@@ -198,6 +210,15 @@ async function startServer() {
     app.use('/api/health', healthRoutes);
     app.use('/api/pipeline', pipelineHealthRoutes);
     app.use('/api/livempaint', livempaintRoutes);
+    app.use('/api/openclaw',   openclawRoutes);
+    app.use('/api/opportunities', opportunityRoutes);
+    app.use('/api/rse', revenueSignalRoutes);
+    app.use('/api/training', trainingRoutes);
+    app.use('/api/directory', directoryRoutes);
+    app.use('/api/qa', qaRoutes);
+    app.use('/api/health/agents', agentHealthRoutes);
+    app.use('/api/dashboard', dashboardRoutes);
+    app.use('/api/webhooks', sendgridWebhookRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {

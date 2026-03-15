@@ -1,0 +1,154 @@
+{
+  "_doc": "Permission tiers for the OpenClaw agent fleet. See docs/LEAST_PRIVILEGE_GOVERNANCE.md for full model.",
+  "_updated": "2026-03-14",
+
+  "tiers": {
+    "0": {
+      "name": "Read Only",
+      "grants": ["db_read"],
+      "description": "Frozen agents + pure classifiers. Can read DB, nothing else."
+    },
+    "1": {
+      "name": "Internal Writer",
+      "grants": ["db_read", "db_write"],
+      "description": "Deterministic handlers that read and write to internal DB. No external access, no LLM."
+    },
+    "2": {
+      "name": "Scraper",
+      "grants": ["db_read", "db_write", "playwright"],
+      "description": "Playwright-based web scrapers. Can read public websites + write results to DB."
+    },
+    "3": {
+      "name": "LLM Agent",
+      "grants": ["db_read", "db_write", "llm_inference", "shell_spawn", "discord_notify"],
+      "description": "LLM-powered agents via OpenClaw bridge. Can generate text, write drafts, send Discord alerts."
+    },
+    "4": {
+      "name": "External Send",
+      "grants": ["db_read", "db_write", "llm_inference", "shell_spawn", "discord_notify", "external_api_write"],
+      "description": "Can post to external APIs (Facebook, GitHub). Highest agent-level permission."
+    },
+    "5": {
+      "name": "System",
+      "grants": ["db_read", "db_write", "llm_inference", "shell_spawn", "discord_notify", "file_write", "external_api_read"],
+      "description": "System-level agents (backup, training, transcript extraction). Full internal access."
+    }
+  },
+
+  "agent_tiers": {
+    "main": 3,
+    "daily-debrief": 3,
+    "morning-digest": 1,
+    "pipeline-director": 1,
+    "pipeline-state-tracker": 1,
+    "urgency-scorer": 1,
+    "tenacity-cadence-engine": 1,
+    "brain-distillation": 1,
+    "ralph-qa": 1,
+    "lead-dossier-generator": 1,
+    "idle-trainer": 5,
+    "database-backup": 5,
+    "pipeline-digest": 1,
+
+    "jake-lead-scout": 3,
+    "cfo-lead-scout": 2,
+    "jake-construction-discovery": 2,
+    "jake-contact-enricher": 2,
+    "jake-outreach-agent": 3,
+    "cfo-outreach-agent": 3,
+    "jake-follow-up-agent": 3,
+    "jake-reply-classifier": 1,
+    "jake-meeting-booker": 3,
+    "jake-crm-sync": 1,
+    "jake-content-engine": 3,
+    "cfo-content-engine": 3,
+    "jake-case-study-builder": 3,
+    "content-repurposer": 3,
+    "jake-permit-scanner": 2,
+    "bid-result-scraper": 2,
+    "jake-hiring-signal-agent": 3,
+    "jake-pain-signal-monitor": 3,
+    "competitor-intel": 3,
+    "jake-twitter-poster": 3,
+    "linkedin-direct-poster": 3,
+    "sms-follow-up": 4,
+
+    "hoa-discovery": 2,
+    "hoa-contact-finder": 2,
+    "hoa-contact-enricher": 2,
+    "hoa-outreach-drafter": 1,
+    "hoa-minutes-monitor": 2,
+    "google-reviews-monitor": 2,
+    "hoa-content-writer": 3,
+    "hoa-facebook-poster": 4,
+    "hoa-cms-publisher": 4,
+    "hoa-social-media": 3,
+    "hoa-social-engagement": 3,
+    "hoa-networker": 3,
+    "hoa-email-campaigns": 3,
+    "hoa-website-publisher": 4,
+    "hoa-special-assessment-monitor": 2,
+
+    "mgmt-portfolio-scraper": 2,
+    "mgmt-portfolio-mapper": 2,
+    "mgmt-contact-puller": 2,
+    "mgmt-review-scanner": 2,
+    "mgmt-cai-scraper": 2,
+
+    "opportunity-scanner": 1,
+    "opportunity-scorer": 3,
+    "software-factory": 5,
+    "traction-monitor": 1,
+
+    "rse-channel-monitor": 1,
+    "rse-transcript-extractor": 5,
+    "rse-signal-scorer": 3,
+    "rse-expert-librarian": 3,
+    "rse-feedback-loop": 1,
+    "rse-build-spec-generator": 3,
+    "rse-campaign-builder": 3,
+
+    "jake-analytics-monitor": 1,
+    "cfo-analytics-monitor": 1,
+    "jake-offer-proof-builder": 3,
+    "cfo-offer-proof-builder": 3,
+    "jake-pilot-deliverer": 3,
+    "cfo-pilot-deliverer": 3,
+    "jake-social-scheduler": 3,
+    "cfo-social-scheduler": 3,
+
+    "owen-content-engine": 0,
+    "owen-outreach-agent": 0,
+    "owen-social-scheduler": 0,
+    "owen-analytics-monitor": 0,
+    "owen-lead-scout": 0,
+    "data-rehab-scout": 0,
+    "data-rehab-content": 0,
+    "data-rehab-outreach": 0,
+    "dc-intel-owner-research": 0,
+    "dc-intel-research-queue": 0,
+    "polyclaw": 0
+  },
+
+  "confirmation_required": [
+    "email_send",
+    "social_post",
+    "github_push",
+    "sms_send",
+    "db_delete",
+    "schema_change",
+    "soul_modification"
+  ],
+
+  "cost_gates": {
+    "daily_cap_usd": 5.00,
+    "per_run_cap_usd": 1.00,
+    "llm_runs_per_hour": 20
+  },
+
+  "rate_limits": {
+    "discord_per_hour": 30,
+    "playwright_pages_per_hour": 100,
+    "enrichment_per_hour": 50
+  }
+}

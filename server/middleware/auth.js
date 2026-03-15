@@ -70,8 +70,9 @@ validateJWTSecret();
 
 // Failed authentication attempt tracking (simple in-memory, could use Redis in production)
 const failedAttempts = new Map();
-const MAX_FAILED_ATTEMPTS = process.env.NODE_ENV === 'production' ? 5 : 50;
-const LOCKOUT_DURATION_MS = process.env.NODE_ENV === 'production' ? 15 * 60 * 1000 : 30 * 1000; // 15 min prod, 30 sec dev
+// Single-user local console — generous limits to avoid self-lockouts
+const MAX_FAILED_ATTEMPTS = 10000;
+const LOCKOUT_DURATION_MS = 1000; // 1 second
 
 /**
  * Track failed authentication attempt

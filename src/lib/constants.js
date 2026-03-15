@@ -6,10 +6,12 @@
 /** Navigation items for the sidebar */
 export const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: 'LayoutDashboard' },
+  { path: '/mission-control', label: 'System Monitor', icon: 'Crosshair' },
   { path: '/chat', label: 'Agent Chat', icon: 'MessageSquare' },
   { path: '/domains', label: 'Domains', icon: 'Globe' },
   { path: '/agents', label: 'Agents', icon: 'Bot' },
   { path: '/hierarchy', label: 'Hierarchy', icon: 'GitBranch' },
+  { path: '/directory', label: 'Directory', icon: 'Users' },
   { path: '/extensions', label: 'Extensions', icon: 'Puzzle' },
   { path: '/tools', label: 'Tools', icon: 'Wrench' },
   { path: '/schedule', label: 'Scheduler', icon: 'Clock' },
@@ -30,6 +32,8 @@ export const NAV_ITEMS = [
   { path: '/blitz', label: 'Blitz Mode', icon: 'Zap' },
   { path: '/pipelines', label: 'Pipelines', icon: 'GitMerge' },
   { path: '/trading', label: 'Trader', icon: 'TrendingUp' },
+  { path: '/opportunities', label: 'Opportunities', icon: 'Radar' },
+  { path: '/rse', label: 'Signal Engine', icon: 'Radio' },
   { path: '/audit', label: 'Audit Log', icon: 'Shield' },
   { path: '/costs', label: 'Costs', icon: 'DollarSign' },
   { path: '/help', label: 'Help', icon: 'HelpCircle' },

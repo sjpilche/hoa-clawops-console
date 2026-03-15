@@ -439,12 +439,12 @@ powershell -Command "Get-Process node | Stop-Process -Force"
 
 ---
 
-## 10. Current State (Feb 26, 2026)
+## 10. Current State (March 2026)
 
 ### What's Live & Working
 - ✅ 50+ agents registered and schedulable
 - ✅ Jake construction discovery (Google Maps, $0, Tampa Bay: 23 leads, Denver: 31)
-- ✅ Jake contact enricher (24% email hit rate on Maps leads — 13/54)
+- ✅ Jake contact enricher (24% email hit rate on Maps leads)
 - ✅ HOA discovery (South Florida: 568 HOAs, 162 queries)
 - ✅ Blog pipeline (content-writer → cms-publisher → GitHub → Netlify live)
 - ✅ Discord notifications (every run + 7 AM morning digest)
@@ -454,6 +454,12 @@ powershell -Command "Get-Process node | Stop-Process -Force"
 - ✅ Collective Brain all 4 layers (nightly distillation at 2 AM)
 - ✅ Brain context injected into every scheduled LLM run
 - ✅ Morning digest → Discord (yesterday's stats, costs, pipeline health)
+- ✅ Urgency Scorer — scores all leads 0-100 across Fit/Pain/Timeliness/Enrichment (Upgrade A)
+- ✅ Lead Dossier Generator — personalized Markdown dossier per lead (Upgrade B)
+- ✅ Pipeline State Tracker + Director — auto-dispatch next actions (Upgrade C)
+- ✅ Playwright Reliability Layer — circuit breaker, browser pool, auto-restart (Upgrade D)
+- ✅ Tenacity Cadence Engine — 12-touch adaptive cadence, Brain v2 (Upgrade E)
+- ✅ 2,030 bounced emails removed from cfo_leads (Mar 2026 SendGrid suppression)
 
 ### Active Schedule (Automatic, No Human Touch)
 ```
@@ -530,4 +536,19 @@ Daily 2 AM   [brain distillation]         ← Nightly KB update
 
 ---
 
-*Last updated: 2026-02-26 | ClawOps Console | Jake Marketing + HOA Project Funding*
+---
+
+## 13. Related Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [CLAUDE.md](../CLAUDE.md) | Developer quick-reference — stack, commands, architecture rules |
+| [STATUS.md](../STATUS.md) | Current system health, upgrade status, recent activity |
+| [docs/COLLECTIVE-BRAIN.md](COLLECTIVE-BRAIN.md) | 4-layer learning system deep dive |
+| [docs/CADENCE-ENGINE.md](CADENCE-ENGINE.md) | 12-touch adaptive cadence specification |
+| [docs/PIPELINE-ORCHESTRATION.md](PIPELINE-ORCHESTRATION.md) | Schedule runner, pipeline runner, director, post-processor |
+| [docs/API-REFERENCE.md](API-REFERENCE.md) | All API endpoints + WebSocket events + special handlers |
+| [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common issues and fixes |
+| [docs/ARCHITECTURE.md](ARCHITECTURE.md) | System diagrams |
+
+*Last updated: 2026-03-13 | ClawOps Console v2.1 | Jake Marketing + HOA Project Funding*

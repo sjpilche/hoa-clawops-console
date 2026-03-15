@@ -69,6 +69,34 @@ const SCHEDULES = [
     cron: '0 2 * * *',
     message: '{"mode":"distillation_only"}',
   },
+  {
+    name: 'Outreach Sender — Daily 10 AM',
+    description: 'Sends all approved outreach emails via SendGrid. Urgency-ranked. $0/run.',
+    agent_name: 'outreach-sender',
+    cron: '0 10 * * 1-5',
+    message: '{"limit":50,"product":"both"}',
+  },
+  {
+    name: 'Ralph QA — Daily 9:30 AM',
+    description: 'Reviews pending outreach drafts before sender fires at 10 AM. $0/run.',
+    agent_name: 'ralph-qa',
+    cron: '30 9 * * 1-5',
+    message: '{"mode":"both","limit":30}',
+  },
+  {
+    name: 'Database Backup — Daily 3 AM',
+    description: 'SQLite backup with 7-day retention. $0/run.',
+    agent_name: 'database-backup',
+    cron: '0 3 * * *',
+    message: '{}',
+  },
+  {
+    name: 'Weekly Portfolio Review — Friday 5 PM',
+    description: 'Scores all active agents, posts scorecard to Discord. $0/run.',
+    agent_name: 'weekly-portfolio-review',
+    cron: '0 17 * * 5',
+    message: '{}',
+  },
 
   // ═══════════════════════════════════════════════════════════════
   // JAKE CFO — Construction Finance
@@ -194,7 +222,7 @@ const SCHEDULES = [
   },
 
   // ═══════════════════════════════════════════════════════════════
-  // OWEN CFO — Property Management Finance
+  // OWEN CFO — Property Management Finance (FROZEN — reactivate when PM product launches)
   // ═══════════════════════════════════════════════════════════════
   {
     name: 'Owen — Lead Scout — Tue 7 AM',
@@ -202,6 +230,7 @@ const SCHEDULES = [
     agent_name: 'owen-lead-scout',
     cron: '0 7 * * 2',
     message: '{"trade":"PM","region":"Florida","limit":8}',
+    enabled: false,
   },
   {
     name: 'Owen — Content Engine — Tue 8 AM',
@@ -209,6 +238,7 @@ const SCHEDULES = [
     agent_name: 'owen-content-engine',
     cron: '0 8 * * 2',
     message: '{"output_count":3}',
+    enabled: false,
   },
   {
     name: 'Owen — Outreach Agent — Wed/Fri 10 AM',
@@ -216,6 +246,7 @@ const SCHEDULES = [
     agent_name: 'owen-outreach-agent',
     cron: '0 10 * * 3,5',
     message: '{"limit":10,"source_agent":"owen"}',
+    enabled: false,
   },
   {
     name: 'Owen — Social Scheduler — Wed 9 AM',
@@ -223,6 +254,7 @@ const SCHEDULES = [
     agent_name: 'owen-social-scheduler',
     cron: '0 9 * * 3',
     message: '{}',
+    enabled: false,
   },
   {
     name: 'Owen — Analytics Monitor — Daily 7:45 AM',
@@ -230,10 +262,11 @@ const SCHEDULES = [
     agent_name: 'owen-analytics-monitor',
     cron: '45 7 * * 1-5',
     message: '{}',
+    enabled: false,
   },
 
   // ═══════════════════════════════════════════════════════════════
-  // DATA REHAB — Foot-in-Door Data Cleaning
+  // DATA REHAB — Foot-in-Door Data Cleaning (FROZEN — reactivate when data audit product launches)
   // ═══════════════════════════════════════════════════════════════
   {
     name: 'Data Rehab — Scout — Mon/Wed 8 AM',
@@ -241,6 +274,7 @@ const SCHEDULES = [
     agent_name: 'data-rehab-scout',
     cron: '0 8 * * 1,3',
     message: '{"limit":10}',
+    enabled: false,
   },
   {
     name: 'Data Rehab — Outreach — Tue/Thu 11 AM',
@@ -248,6 +282,7 @@ const SCHEDULES = [
     agent_name: 'data-rehab-outreach',
     cron: '0 11 * * 2,4',
     message: '{"limit":10}',
+    enabled: false,
   },
   {
     name: 'Data Rehab — Content Engine — Wed 8 AM',
@@ -255,6 +290,7 @@ const SCHEDULES = [
     agent_name: 'data-rehab-content',
     cron: '0 8 * * 3',
     message: '{"output_count":2}',
+    enabled: false,
   },
 
   // ═══════════════════════════════════════════════════════════════
@@ -323,10 +359,123 @@ const SCHEDULES = [
     cron: '0 8 * * 5',
     message: '{"limit":10}',
   },
+
+  // ═══════════════════════════════════════════════════════════════
+  // OPPORTUNITY ENGINE
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'Opportunity Scanner — Daily 3 AM',
+    description: 'Scans Reddit, HN, PH for pain signals. Classifies via Ollama ($0). Clusters semantically.',
+    agent_name: 'opportunity-scanner',
+    cron: '0 3 * * *',
+    message: '{}',
+  },
+  {
+    name: 'Opportunity Scorer — Daily 4 AM',
+    description: 'Scores clusters with 3+ signals using ICE+RPS+ALS. GPT-4o ~$0.01/cluster.',
+    agent_name: 'opportunity-scorer',
+    cron: '0 4 * * *',
+    message: '{"limit":10}',
+  },
+  {
+    name: 'Software Factory — Daily 4:30 AM',
+    description: 'Builds prototypes from top-scored clusters (score >= 75). DeepSeek $0, GPT-4o ~$0.10 fallback.',
+    agent_name: 'software-factory',
+    cron: '30 4 * * *',
+    message: '{}',
+  },
+  {
+    name: 'Traction Monitor — Daily 11 PM',
+    description: 'Checks deployed prototype metrics. 14-day kill gate. Revenue alerts. $0/run.',
+    agent_name: 'traction-monitor',
+    cron: '0 23 * * *',
+    message: '{}',
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // REVENUE SIGNAL ENGINE
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'RSE — Channel Monitor — Daily 5 AM',
+    description: 'Checks YouTube RSS feeds for new videos from curated creators. $0/run.',
+    agent_name: 'rse-channel-monitor',
+    cron: '0 5 * * *',
+    message: '{}',
+  },
+  {
+    name: 'RSE — Transcript Extractor — Daily 5:30 AM',
+    description: 'Pulls transcripts via yt-dlp for pending videos. $0/run.',
+    agent_name: 'rse-transcript-extractor',
+    cron: '30 5 * * *',
+    message: '{"limit":15}',
+  },
+  {
+    name: 'RSE — Signal Scorer — Daily 6 AM',
+    description: 'Scores transcripts via Ollama. Rejects fluff aggressively. $0/run.',
+    agent_name: 'rse-signal-scorer',
+    cron: '0 6 * * *',
+    message: '{"limit":10}',
+  },
+  {
+    name: 'RSE — Build Spec Generator — Weekdays 7 AM',
+    description: 'Generates build specs from accepted signals. ~$0.03/run.',
+    agent_name: 'rse-build-spec-generator',
+    cron: '0 7 * * 1-5',
+    message: '{"limit":3}',
+  },
+  {
+    name: 'RSE — Idea Evaluator — Weekdays 7:30 AM',
+    description: 'Evaluates accepted signals into ranked business opportunities. Scores build effort, revenue potential, stack fit. ~$0.01/run.',
+    agent_name: 'rse-code-builder',
+    cron: '30 7 * * 1-5',
+    message: '{"action":"evaluate","limit":10}',
+  },
+  {
+    name: 'RSE — Campaign Builder — Tue/Thu 8 AM',
+    description: 'Creates campaigns from signals + specs. Feeds Jake/CFO pipeline. ~$0.03/run.',
+    agent_name: 'rse-campaign-builder',
+    cron: '0 8 * * 2,4',
+    message: '{"limit":3}',
+  },
+  {
+    name: 'Dream Team — Nightly Cycle — 11 PM',
+    description: 'Full Dream Team cycle: data collection, scorecards, self-assessment, Ralph QA, Todd actions. ~$0.07/night.',
+    agent_name: 'dream-team-nightly',
+    cron: '0 23 * * *',
+    message: '{}',
+  },
+  {
+    name: 'Dream Team — Morning Report — 6:30 AM',
+    description: 'Todd assembles overnight accountability report → Discord. ~$0.006.',
+    agent_name: 'dream-team-nightly',
+    cron: '30 6 * * *',
+    message: '{"phase":"report"}',
+  },
+  {
+    name: 'RSE — Expert Librarian — Daily 2 AM',
+    description: 'Extracts proven patterns from high-scoring signals into expert library. $0/run.',
+    agent_name: 'rse-expert-librarian',
+    cron: '0 2 * * *',
+    message: '{"limit":10,"min_score":4.0}',
+  },
+  {
+    name: 'RSE — Feedback Loop — Sunday 3 AM',
+    description: 'Updates source trust scores, prunes fluff creators, tracks outcomes. $0/run.',
+    agent_name: 'rse-feedback-loop',
+    cron: '0 3 * * 0',
+    message: '{}',
+  },
 ];
 
 async function main() {
   await initDatabase();
+
+  // --clean flag: wipe all existing schedules before seeding (fixes duplicates from legacy seed scripts)
+  if (process.argv.includes('--clean')) {
+    const count = get('SELECT COUNT(*) AS c FROM schedules')?.c || 0;
+    run('DELETE FROM schedules');
+    console.log(`🧹 Cleaned ${count} existing schedules`);
+  }
 
   let created = 0;
   let skipped = 0;
@@ -347,11 +496,12 @@ async function main() {
     }
 
     const id = uuidv4();
+    const enabled = s.enabled !== undefined ? (s.enabled ? 1 : 0) : 1;
     run(
-      'INSERT INTO schedules (id, name, description, agent_id, agent_name, cron_expression, message, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
-      [id, s.name, s.description, agent.id, agent.name, s.cron, s.message]
+      'INSERT INTO schedules (id, name, description, agent_id, agent_name, cron_expression, message, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, s.name, s.description, agent.id, agent.name, s.cron, s.message, enabled]
     );
-    console.log(`✅ Created: ${s.name} → ${agent.name} [${s.cron}]`);
+    console.log(`${enabled ? '✅' : '⏸️ '} Created: ${s.name} → ${agent.name} [${s.cron}]${enabled ? '' : ' (DISABLED — frozen product)'}`);
     created++;
   }
 

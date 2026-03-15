@@ -15,6 +15,27 @@
 const https = require('https');
 const http = require('http');
 
+// ── Rate limiting — prevents runaway schedules from spamming Discord ──
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_MAX = 30;                     // max 30 messages per hour
+const rateBuckets = {};                         // key: 'global' or agentName
+
+function isRateLimited(key = 'global') {
+  const now = Date.now();
+  if (!rateBuckets[key]) rateBuckets[key] = [];
+
+  // Prune old entries
+  rateBuckets[key] = rateBuckets[key].filter(ts => now - ts < RATE_LIMIT_WINDOW_MS);
+
+  if (rateBuckets[key].length >= RATE_LIMIT_MAX) {
+    console.warn(`[DiscordNotifier] Rate limited: ${key} (${rateBuckets[key].length}/${RATE_LIMIT_MAX} in last hour)`);
+    return true;
+  }
+
+  rateBuckets[key].push(now);
+  return false;
+}
+
 /**
  * Post a JSON payload to a Discord webhook URL.
  * @param {string} webhookUrl
@@ -83,6 +104,10 @@ function notifyRunCompleted({ agentName, status, outputText, durationMs, costUsd
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl || process.env.DISCORD_ENABLED !== 'true') return;
 
+  // Rate limit: max 30 messages/hour globally, prevents runaway spam
+  if (isRateLimited('global')) return;
+  if (agentName && isRateLimited(agentName)) return;
+
   const succeeded = status === 'completed';
   const color = succeeded ? 0x57f287 : 0xed4245; // green / red
   const emoji = succeeded ? '✅' : '❌';
@@ -118,4 +143,22 @@ function notifyRunCompleted({ agentName, status, outputText, durationMs, costUsd
   });
 }
 
-module.exports = { notifyRunCompleted };
+/**
+ * Send a Discord embed with rate limiting.
+ * Used by special handlers that post directly (morning_digest, traction_monitor, etc.)
+ */
+function sendEmbed(embed) {
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || process.env.DISCORD_ENABLED !== 'true') return Promise.resolve();
+  if (isRateLimited('global')) return Promise.resolve();
+  return postWebhook(webhookUrl, { embeds: [embed] }).catch(err => {
+    console.warn('[DiscordNotifier] sendEmbed failed (non-fatal):', err.message);
+  });
+}
+
+module.exports = { notifyRunCompleted, postWebhook: (body) => {
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl || process.env.DISCORD_ENABLED !== 'true') return Promise.resolve();
+  if (isRateLimited('global')) return Promise.resolve();
+  return postWebhook(webhookUrl, body);
+}, sendEmbed };

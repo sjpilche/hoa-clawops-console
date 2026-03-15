@@ -6,7 +6,7 @@
 // =============================================================================
 
 /** Which LLM provider to use for a given analyst */
-export type LLMProvider = 'claude' | 'openai' | 'grok';
+export type LLMProvider = 'claude' | 'openai' | 'grok' | 'ollama';
 
 /** Analyst conviction level — maps to position sizing */
 export type Conviction = 1 | 2 | 3 | 4 | 5;

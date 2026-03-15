@@ -15,7 +15,8 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Shield, Zap, DollarSign, FileText, Database,
   Bell, Save, RefreshCw, CheckCircle, AlertCircle,
-  ChevronRight, Info, Cpu, Clock, Activity
+  ChevronRight, Info, Cpu, Clock, Activity,
+  Archive, Search, HardDrive, AlertTriangle
 } from 'lucide-react';
 import { api } from '../lib/api';
 
@@ -174,6 +175,10 @@ export default function SettingsPage() {
     // Integrations
     notification_email: '',
     slack_webhook_url: '',
+    // Ollama
+    ollama_enabled: false,
+    ollama_model: 'llama3.2:3b',
+    ollama_host: 'http://localhost:11434',
   });
 
   const [original, setOriginal] = useState(null); // Last saved snapshot for dirty tracking
@@ -182,9 +187,20 @@ export default function SettingsPage() {
   const [saveResult, setSaveResult] = useState(null); // null | 'success' | 'error'
   const [saveMessage, setSaveMessage] = useState('');
 
-  // Load settings from API on mount
+  // ── System panel state ────────────────────────────────────────────────────
+  const [backupStatus, setBackupStatus] = useState(null);  // { status, latest_backup, days_since_backup, backup_count }
+  const [backupRunning, setBackupRunning] = useState(false);
+  const [backupMsg, setBackupMsg] = useState(null);        // { type: 'success'|'error', text }
+  const [approvalCount, setApprovalCount] = useState(null); // number | null
+  const [memQuery, setMemQuery] = useState('');
+  const [memResults, setMemResults] = useState(null);      // null | { results, total, query }
+  const [memSearching, setMemSearching] = useState(false);
+
+  // Load settings + system status on mount
   useEffect(() => {
     loadSettings();
+    loadBackupStatus();
+    loadApprovals();
   }, []);
 
   const loadSettings = async () => {
@@ -208,6 +224,70 @@ export default function SettingsPage() {
   const set = useCallback((key, value) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   }, []);
+
+  // ── Ollama state ──────────────────────────────────────────────────────────
+  const [ollamaStatus, setOllamaStatus] = useState(null); // { available, models }
+
+  useEffect(() => {
+    loadOllamaStatus();
+  }, []);
+
+  const loadOllamaStatus = async () => {
+    try {
+      const res = await api.get('/openclaw/ollama/status');
+      setOllamaStatus(res);
+    } catch { setOllamaStatus({ available: false, models: [] }); }
+  };
+
+  // ── System helpers ────────────────────────────────────────────────────────
+
+  const loadBackupStatus = async () => {
+    try {
+      const res = await api.get('/openclaw/backup/status');
+      setBackupStatus(res);
+    } catch { /* non-fatal */ }
+  };
+
+  const loadApprovals = async () => {
+    try {
+      const res = await api.get('/openclaw/approvals');
+      setApprovalCount(res.pending_count ?? 0);
+    } catch { /* non-fatal */ }
+  };
+
+  const handleBackupNow = async () => {
+    setBackupRunning(true);
+    setBackupMsg(null);
+    try {
+      const res = await api.post('/openclaw/backup', { label: `console-${new Date().toISOString().slice(0,10)}` });
+      if (res.success) {
+        setBackupMsg({ type: 'success', text: `Backup created${res.latest_backup ? ` — ${res.latest_backup.name}` : ''}` });
+        await loadBackupStatus();
+      } else {
+        setBackupMsg({ type: 'error', text: res.output || 'Backup failed' });
+      }
+    } catch (err) {
+      setBackupMsg({ type: 'error', text: err.message || 'Backup failed' });
+    } finally {
+      setBackupRunning(false);
+      setTimeout(() => setBackupMsg(null), 6000);
+    }
+  };
+
+  const handleMemSearch = async (e) => {
+    e.preventDefault();
+    if (!memQuery.trim()) return;
+    setMemSearching(true);
+    setMemResults(null);
+    try {
+      const res = await api.get(`/openclaw/memory/search?q=${encodeURIComponent(memQuery)}&limit=20`);
+      setMemResults(res);
+    } catch (err) {
+      setMemResults({ error: err.message, results: [], total: 0, query: memQuery });
+    } finally {
+      setMemSearching(false);
+    }
+  };
 
   // Compute which settings have changed
   const isDirty = original && Object.entries(settings).some(
@@ -461,6 +541,93 @@ export default function SettingsPage() {
             </div>
           </Section>
 
+          {/* ── 2b. Local Ollama (free inference) ── */}
+          <Section
+            icon={Cpu}
+            color="accent-success"
+            title="Local Ollama"
+            description="Route eligible agents through local llama3.2:3b — zero API cost"
+            badge={
+              ollamaStatus === null ? null :
+              ollamaStatus.available ? 'Connected' : 'Offline'
+            }
+          >
+            <SettingRow
+              label="Enable Ollama"
+              hint="Agents tagged use_ollama:true in their config will use local inference instead of OpenAI"
+            >
+              <div className="flex items-center gap-3">
+                <Toggle
+                  value={settings.ollama_enabled}
+                  onChange={(v) => set('ollama_enabled', v)}
+                />
+                <span className="text-sm text-text-secondary">
+                  {settings.ollama_enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+            </SettingRow>
+
+            <div className="border-t border-border" />
+
+            <SettingRow
+              label="Default Model"
+              hint="Model to use when agents don't specify one — must be pulled in Ollama"
+            >
+              <SelectInput
+                value={settings.ollama_model}
+                onChange={(v) => set('ollama_model', v)}
+                options={[
+                  ...(ollamaStatus?.models || []).map(m => ({ value: m, label: m })),
+                  ...(ollamaStatus?.models?.length === 0 ? [{ value: 'llama3.2:3b', label: 'llama3.2:3b (default)' }] : []),
+                ]}
+              />
+            </SettingRow>
+
+            <div className="border-t border-border" />
+
+            <SettingRow label="Ollama Host" hint="Only change if Ollama is on a different machine or port">
+              <TextInput
+                value={settings.ollama_host}
+                onChange={(v) => set('ollama_host', v)}
+                placeholder="http://localhost:11434"
+              />
+            </SettingRow>
+
+            {/* Status box */}
+            <div className="rounded-lg border border-border bg-bg-elevated px-4 py-3 text-xs space-y-2 mt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Status</span>
+                {ollamaStatus === null
+                  ? <span className="text-text-muted">Checking…</span>
+                  : ollamaStatus.available
+                  ? <StatusBadge status="success" label="Ollama reachable" />
+                  : <StatusBadge status="error" label="Ollama offline" />
+                }
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Loaded models</span>
+                <span className="text-text-primary font-mono">
+                  {ollamaStatus?.models?.join(', ') || '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Cost per run</span>
+                <span className="text-accent-success font-medium">$0.00</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Best for</span>
+                <span className="text-text-secondary">debrief · digest · follow-up drafts</span>
+              </div>
+              <button
+                onClick={loadOllamaStatus}
+                className="text-xs text-text-muted hover:text-text-primary flex items-center gap-1 transition-colors pt-1"
+              >
+                <RefreshCw size={10} />
+                Refresh status
+              </button>
+            </div>
+          </Section>
+
           {/* ── 3. Cost Management ── */}
           <Section
             icon={DollarSign}
@@ -596,6 +763,121 @@ export default function SettingsPage() {
                 placeholder="https://hooks.slack.com/services/..."
               />
             </SettingRow>
+          </Section>
+
+          {/* ── 7. System — Backup, Approvals, Memory Search ── */}
+          <Section
+            icon={HardDrive}
+            color="accent-warning"
+            title="System"
+            description="OpenClaw backup, pending approvals, and memory inspector"
+            badge={approvalCount > 0 ? `${approvalCount} pending` : null}
+          >
+            {/* Backup widget */}
+            <SettingRow
+              label="OpenClaw Backup"
+              hint={
+                backupStatus
+                  ? backupStatus.status === 'never'
+                    ? 'No backups found — create one now'
+                    : backupStatus.status === 'recent'
+                    ? `Last backup: ${backupStatus.days_since_backup === 0 ? 'today' : `${backupStatus.days_since_backup}d ago`} (${backupStatus.backup_count} total)`
+                    : backupStatus.status === 'stale'
+                    ? `⚠ Last backup ${backupStatus.days_since_backup}d ago — consider backing up`
+                    : `Last backup ${backupStatus.days_since_backup ?? '?'}d ago`
+                  : 'Click to check backup status'
+              }
+            >
+              <div className="flex items-center gap-2">
+                {backupMsg && (
+                  <span className={`text-xs ${backupMsg.type === 'success' ? 'text-accent-success' : 'text-accent-danger'}`}>
+                    {backupMsg.text}
+                  </span>
+                )}
+                <button
+                  onClick={handleBackupNow}
+                  disabled={backupRunning}
+                  className="px-3 py-1.5 text-sm bg-accent-warning/10 border border-accent-warning/30 text-accent-warning rounded-lg hover:bg-accent-warning/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 font-medium whitespace-nowrap"
+                >
+                  <Archive size={13} />
+                  {backupRunning ? 'Backing up…' : 'Backup Now'}
+                </button>
+              </div>
+            </SettingRow>
+
+            <div className="border-t border-border" />
+
+            {/* Approvals */}
+            <SettingRow
+              label="Pending Approvals"
+              hint="Exec-level actions queued in OpenClaw that require confirmation before running"
+            >
+              <div className="flex items-center gap-3">
+                {approvalCount === null ? (
+                  <span className="text-xs text-text-muted">Checking…</span>
+                ) : approvalCount === 0 ? (
+                  <StatusBadge status="success" label="None pending" />
+                ) : (
+                  <StatusBadge status="warning" label={`${approvalCount} pending`} />
+                )}
+                <button
+                  onClick={loadApprovals}
+                  className="text-xs text-text-muted hover:text-text-primary flex items-center gap-1 transition-colors"
+                >
+                  <RefreshCw size={11} />
+                  Refresh
+                </button>
+              </div>
+            </SettingRow>
+
+            <div className="border-t border-border" />
+
+            {/* Memory search */}
+            <div>
+              <div className="text-sm font-medium text-text-primary mb-1">Brain Memory Search</div>
+              <div className="text-xs text-text-muted mb-3">
+                Query what your agents know — searches the OpenClaw memory index (Layer 4 KB)
+              </div>
+              <form onSubmit={handleMemSearch} className="flex gap-2">
+                <input
+                  type="text"
+                  value={memQuery}
+                  onChange={(e) => setMemQuery(e.target.value)}
+                  placeholder="e.g. Tampa Bay construction outreach…"
+                  className="flex-1 px-3 py-2 bg-bg-elevated border border-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary transition-colors"
+                />
+                <button
+                  type="submit"
+                  disabled={memSearching || !memQuery.trim()}
+                  className="px-3 py-2 text-sm bg-accent-primary text-white rounded-lg hover:bg-opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                >
+                  <Search size={13} />
+                  {memSearching ? 'Searching…' : 'Search'}
+                </button>
+              </form>
+
+              {memResults && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="text-xs text-text-muted">
+                    {memResults.error
+                      ? <span className="text-accent-danger">{memResults.error}</span>
+                      : `${memResults.total} results for "${memResults.query}"`
+                    }
+                  </div>
+                  {(memResults.results || []).slice(0, 10).map((r, i) => (
+                    <div key={i} className="px-3 py-2 rounded-lg bg-bg-elevated border border-border text-xs text-text-secondary">
+                      {r.content || r.text || r.value || JSON.stringify(r)}
+                      {r.score != null && (
+                        <span className="ml-2 text-text-muted">score: {typeof r.score === 'number' ? r.score.toFixed(3) : r.score}</span>
+                      )}
+                    </div>
+                  ))}
+                  {memResults.results?.length === 0 && !memResults.error && (
+                    <div className="text-xs text-text-muted italic">No results found.</div>
+                  )}
+                </div>
+              )}
+            </div>
           </Section>
 
           {/* ── Footer ── */}

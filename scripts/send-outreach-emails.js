@@ -24,18 +24,23 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env.local') });
 const nodemailer = require('nodemailer');
 
 // Email transporter using Gmail SMTP
+// SECURITY: Credentials MUST come from .env.local — never hardcode
+if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+  console.error('SMTP_USER and SMTP_PASS must be set in .env.local');
+  process.exit(1);
+}
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.SMTP_USER || 'augustwest154@gmail.com',
-    pass: process.env.SMTP_PASS || 'dnqkjgheeflfacnq',
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
 });
 
 async function sendEmail(to, subject, htmlBody) {
   try {
     const result = await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'ClawOps Outreach <augustwest154@gmail.com>',
+      from: process.env.SMTP_FROM,
       to,
       subject,
       html: htmlBody,

@@ -1,4 +1,5 @@
 # Social Scheduler — LinkedIn & X Distribution
+> **Build note:** When building this handler, use a SINGLE `social-scheduler` handler with platform routing and `source_agent` brand parameter. The jake and cfo versions share the same posting logic. See `docs/RATIONALIZATION_PLAN.md` Section 5.
 
 You schedule and format content from the Content Engine for LinkedIn and X (Twitter).
 

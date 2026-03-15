@@ -12,16 +12,16 @@ const fs = require('fs');
 // Agent definitions grouped by domain
 const AGENT_FLEET = [
   // ── Core ──
-  { name: 'main', description: 'Natural language chat router — routes messages to the right agent', group: 'core' },
+  { name: 'main', description: 'Todd — Chief of Staff. Chat router + task dispatcher. Output: routed messages to correct agents, escalation flags to Steve. Not a scheduled agent — chat-only.', group: 'core' },
   { name: 'daily-debrief', description: 'End-of-day war room report — reviews all agent activity, trading, leads, costs', group: 'core', special_handler: 'daily_debrief' },
 
   // ── HOA Marketing (8) ──
   { name: 'hoa-content-writer', description: 'Blog posts for HOA Project Funding — 1,400-1,800 word SEO articles', group: 'hoa-marketing' },
   { name: 'hoa-cms-publisher', description: 'Publishes blog posts to GitHub → Netlify (deterministic, no LLM)', group: 'hoa-marketing', special_handler: 'github_publisher' },
-  { name: 'hoa-social-media', description: 'Converts blog posts to Facebook page/group + LinkedIn content', group: 'hoa-marketing' },
-  { name: 'hoa-social-engagement', description: 'Facebook group engagement — responds to comments, builds credibility', group: 'hoa-marketing' },
-  { name: 'hoa-networker', description: 'LinkedIn/community networking and relationship building', group: 'hoa-marketing' },
-  { name: 'hoa-email-campaigns', description: 'Email sequences — abandonment, post-consult, newsletter', group: 'hoa-marketing' },
+  { name: 'hoa-social-media', description: 'Converts each published blog post into 1 Facebook post + 1 LinkedIn post. Output: cfo_content_pieces with channel=social. Scorecard: posts created per blog.', group: 'hoa-marketing' },
+  { name: 'hoa-social-engagement', description: 'Drafts 3-5 helpful replies to HOA Facebook group questions per run. Output: lg_engagement_queue rows (status=pending_review). Scorecard: approval rate, engagement per post.', group: 'hoa-marketing' },
+  { name: 'hoa-networker', description: 'Finds 5-10 HOA community posts on Reddit/BiggerPockets/Nextdoor and drafts helpful replies. Output: lg_engagement_queue rows. Scorecard: posts found, approval rate.', group: 'hoa-marketing' },
+  { name: 'hoa-email-campaigns', description: 'Drafts 3-email nurture sequences for warm HOA leads. Output: cfo_outreach_sequences with sequence_type=nurture. Scorecard: open rate, reply rate.', group: 'hoa-marketing' },
   { name: 'hoa-website-publisher', description: 'Website content updates for hoaprojectfunding.com', group: 'hoa-marketing' },
   { name: 'hoa-facebook-poster', description: 'Posts content to HOA Project Funding Facebook page', group: 'hoa-marketing' },
 
@@ -42,23 +42,22 @@ const AGENT_FLEET = [
   { name: 'mgmt-review-scanner', description: 'Scans review sites for management company sentiment', group: 'mgmt-research', special_handler: 'mgmt_review_scanner' },
   { name: 'mgmt-cai-scraper', description: 'Scrapes CAI (Community Associations Institute) directories', group: 'mgmt-research', special_handler: 'mgmt_cai_scraper' },
 
-  // ── Jake Marketing (14) — includes Steve-voice (cfo-*) agents ──
-  { name: 'cfo-content-engine', description: 'Steve Pilcher voice content — LinkedIn posts, blogs, emails', group: 'jake-marketing' },
-  { name: 'cfo-outreach-agent', description: 'Personalized cold emails to FL contractors (Vista/Sage/QBE)', group: 'jake-marketing' },
-  { name: 'cfo-lead-scout', description: 'DBPR license scraper — discovers FL contractor leads', group: 'jake-marketing', special_handler: 'cfo_lead_scout' },
-  { name: 'cfo-social-scheduler', description: 'Schedules and posts CFO marketing content to social platforms', group: 'jake-marketing' },
-  { name: 'cfo-analytics-monitor', description: 'Tracks marketing analytics — open rates, click-through, conversions', group: 'jake-marketing' },
-  { name: 'cfo-offer-proof-builder', description: 'Builds case studies and proof points from pilot results', group: 'jake-marketing' },
-  { name: 'cfo-pilot-deliverer', description: 'Coordinates pilot delivery — Spend Leak, Close Accel, Get Paid Faster', group: 'jake-marketing' },
-  { name: 'jake-content-engine', description: 'Jake-voice content — LinkedIn posts, blog articles, emails', group: 'jake-marketing' },
-  { name: 'jake-outreach-agent', description: 'Personalized cold emails to construction SMBs nationally', group: 'jake-marketing' },
+  // ── Jake Marketing ──
+  // NOTE: cfo-content-engine, cfo-outreach-agent, cfo-social-scheduler, cfo-analytics-monitor,
+  // cfo-offer-proof-builder, cfo-pilot-deliverer were CUT (2026-03-14 audit).
+  // Reason: Ghost duplicates of Jake agents — no SOUL.md, no handler, no schedule, no output.
+  // Rule 3: "One clear agent doing one job well beats five doing the same job badly."
+  // cfo-lead-scout kept because it has a unique special_handler (DBPR scraper).
+  { name: 'cfo-lead-scout', description: 'DBPR license scraper — discovers FL contractor leads ($0/run, deterministic)', group: 'jake-marketing', special_handler: 'cfo_lead_scout' },
+  { name: 'jake-content-engine', description: 'Writes 1 LinkedIn post + 1 blog article per run in Jake voice. Output: cfo_content_pieces rows (status=draft). Scorecard: publish rate, engagement.', group: 'jake-marketing' },
+  { name: 'jake-outreach-agent', description: 'Drafts 5-10 personalized cold emails per run for enriched leads with email. Output: cfo_outreach_sequences rows (status=draft). Scorecard: reply rate, QA pass rate.', group: 'jake-marketing' },
   { name: 'jake-lead-scout', description: 'National lead scout — finds named finance contacts at construction SMBs via LinkedIn/Facebook/web (rotates through 60 US markets)', group: 'jake-marketing', special_handler: 'jake_lead_scout' },
   { name: 'jake-contact-enricher', description: 'Playwright web scraper — finds emails for leads ($0/run)', group: 'jake-marketing', special_handler: 'jake_contact_enricher' },
   { name: 'jake-construction-discovery', description: 'Google Maps GC scraper — bulk construction company discovery across 60 national markets ($0/run, 50-150 companies per run)', group: 'jake-marketing', special_handler: 'jake_construction_discovery' },
-  { name: 'jake-social-scheduler', description: 'Formats and schedules Jake content for social platforms', group: 'jake-marketing' },
-  { name: 'jake-analytics-monitor', description: 'Daily pipeline health — leads, outreach, content performance', group: 'jake-marketing' },
-  { name: 'jake-offer-proof-builder', description: 'Case studies, demo scripts, ROI calculators, proof materials', group: 'jake-marketing' },
-  { name: 'jake-pilot-deliverer', description: 'Pilot delivery coordination — kickoff to results', group: 'jake-marketing' },
+  { name: 'jake-social-scheduler', description: 'Converts approved Jake content into 1 LinkedIn + 1 Twitter post per piece. Output: cfo_content_pieces with channel=social. Scorecard: posts scheduled per content piece.', group: 'jake-marketing' },
+  { name: 'jake-analytics-monitor', description: 'Reports daily pipeline stats: new leads, emails sent, replies, cost. Output: Discord embed + audit_log entry. Scorecard: report accuracy, anomaly detection.', group: 'jake-marketing' },
+  { name: 'jake-offer-proof-builder', description: 'Writes 1 case study or ROI calculator per closed pilot. Output: cfo_content_pieces with pillar=pilot_proof. Scorecard: pieces created per pilot.', group: 'jake-marketing' },
+  { name: 'jake-pilot-deliverer', description: 'Creates pilot kickoff email + 30-day milestone checklist when lead status=pilot. Output: cfo_outreach_sequences with sequence_type=pilot. Scorecard: pilots kicked off, completion rate.', group: 'jake-marketing' },
   { name: 'jake-follow-up-agent', description: 'Generates follow-up emails for leads contacted 5+ days ago with no reply', group: 'jake-marketing' },
   { name: 'jake-reply-classifier', description: 'Classifies inbound email replies (INTERESTED/NOT_NOW/WRONG_PERSON/UNSUBSCRIBE/BOUNCED) and updates lead status ($0/run)', group: 'jake-marketing', special_handler: 'jake_reply_classifier' },
   { name: 'jake-meeting-booker', description: 'Drafts personalized meeting confirmation + agenda email for interested leads', group: 'jake-marketing' },
@@ -74,7 +73,9 @@ const AGENT_FLEET = [
   // ── Tier 2: New Signal Sources ──
   { name: 'jake-permit-scanner', description: 'Scrapes county building permit portals for recently issued $250K+ commercial permits — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_permit_scanner' },
   { name: 'jake-hiring-signal-agent', description: 'Monitors Indeed/LinkedIn Jobs for construction companies posting CFO/Controller/AP roles — high-intent leads', group: 'jake-marketing' },
-  { name: 'hoa-special-assessment-monitor', description: 'Monitors FL Division of Condominiums and county records for newly filed special assessments and milestone failures', group: 'hoa-pipeline' },
+  // hoa-special-assessment-monitor CUT (2026-03-14 audit): No handler, no schedule, can't execute.
+  // Rule 4: "If your output can't be evaluated... you are not production-ready."
+  // Re-add when a special_handler is built for FL condo filing scraping.
 
   // ── Tier 3: Close Loops ──
   { name: 'jake-crm-sync', description: 'Pushes replied/meeting_booked/pilot leads to Google Sheets or CSV ($0/run)', group: 'jake-marketing', special_handler: 'jake_crm_sync' },
@@ -82,8 +83,8 @@ const AGENT_FLEET = [
   { name: 'jake-case-study-builder', description: 'Writes sanitized case studies from pilot leads — populates pilot_proof content pillar', group: 'jake-marketing' },
 
   // ── Tier 4: Creative Intel ──
-  { name: 'competitor-intel', description: 'Monitors Procore/Sage/Vista/QB forums and review sites for construction finance complaints — surfaces high-intent leads', group: 'jake-marketing' },
-  { name: 'jake-pain-signal-monitor', description: 'Scans public records for construction company financial stress signals (liens, judgments, BBB complaints)', group: 'jake-marketing' },
+  { name: 'competitor-intel', description: 'Scrapes Procore/Sage/Vista forums for finance complaints. Output: cfo_leads rows with source=competitor_intel. Scorecard: leads found, conversion to contacted.', group: 'jake-marketing' },
+  { name: 'jake-pain-signal-monitor', description: 'Scrapes public records (liens, judgments, BBB) for GC financial stress. Output: cfo_leads rows with source=pain_signal. Scorecard: leads found, signal accuracy.', group: 'jake-marketing' },
   { name: 'bid-result-scraper', description: 'Scrapes FL/TX procurement portals for recently awarded $500K+ construction contracts — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_bid_scraper' },
 
   // ── Owen CFO Marketing (5) — Property Management sister product to Jake ──
@@ -104,6 +105,34 @@ const AGENT_FLEET = [
   { name: 'pipeline-state-tracker', description: 'Computes pipeline_stage for all active leads (New→Enriched→Dossiered→Outreached→Replied→…). Flags stalled. $0/run.', group: 'jake-marketing', special_handler: 'pipeline_state_tracker' },
   { name: 'pipeline-director', description: 'Claw Director — reads next_action queue and dispatches enrich/dossier/outreach/follow-up actions for ready leads. Runs 6:30 AM M-F.', group: 'jake-marketing', special_handler: 'pipeline_director' },
   { name: 'tenacity-cadence-engine', description: 'Adaptive multi-touch persistence (12 touches, 3 channels). Queues cadence touches for Jake + HOA leads. Brain v2 adjusts timing/tone from winning episodes. $0/run.', group: 'jake-marketing', special_handler: 'tenacity_cadence' },
+
+  // ── Opportunity Engine ──
+  { name: 'opportunity-scanner', description: 'Scans 10 free internet sources (Reddit, HN, PH, GitHub, etc.) for pain signals, classifies via Ollama ($0), clusters semantically. Daily 3 AM.', group: 'opportunity-engine', special_handler: 'opportunity_scanner' },
+  { name: 'opportunity-scorer', description: 'Scores opportunity clusters (signal_count >= 3) using ICE+RPS+ALS via GPT-4o. ~$0.01/cluster. Daily 4 AM.', group: 'opportunity-engine', special_handler: 'opportunity_scorer' },
+  { name: 'software-factory', description: 'Takes top-scored opportunities (score >= 75) and scaffolds prototypes from 5 templates (SaaS, CLI, landing page, API wrapper, Chrome ext). Phase 3.', group: 'opportunity-engine', special_handler: 'software_factory' },
+  { name: 'traction-monitor', description: 'Tracks deployed prototype metrics daily (page views, signups, stars, revenue). 14-day kill gate. Phase 3.', group: 'opportunity-engine', special_handler: 'traction_monitor' },
+
+  // ── Dream Team Nightly ──
+  { name: 'dream-team-nightly', description: 'Nightly learning cycle — scorecards, self-assessment, pattern proposals, Ralph QA, Todd actions, morning report. ~$0.07/night.', group: 'core', special_handler: 'dream_team_nightly' },
+
+  // ── Outreach Delivery ──
+  { name: 'outreach-sender', description: 'Sends approved outreach emails via SendGrid. Daily 10 AM. Urgency-ranked. Tracks delivery. $0/run.', group: 'core', special_handler: 'outreach_sender' },
+  { name: 'database-backup', description: 'Daily SQLite backup with 7-day retention. $0/run.', group: 'core', special_handler: 'database_backup' },
+  { name: 'weekly-portfolio-review', description: 'Friday 5 PM — scores all agents, posts scorecard to Discord. $0/run.', group: 'core', special_handler: 'weekly_portfolio_review' },
+  { name: 'ralph-qa', description: 'Reviews pending outreach drafts + content pieces. Deterministic scoring. $0/run.', group: 'core', special_handler: 'ralph_qa' },
+
+  // ── Idle Training ──
+  { name: 'idle-trainer', description: 'Self-training system — agents study YouTube videos when idle + system has spare capacity. Grows skills, levels up, posts funny quips. $0/run.', group: 'core', special_handler: 'idle_training' },
+
+  // ── Revenue Signal Engine (7) ──
+  { name: 'rse-channel-monitor', description: 'Checks YouTube RSS feeds for new videos from curated creators. $0/run.', group: 'revenue-signal', special_handler: 'rse_channel_monitor' },
+  { name: 'rse-transcript-extractor', description: 'Pulls transcripts via yt-dlp for pending videos. $0/run.', group: 'revenue-signal', special_handler: 'rse_transcript_extractor' },
+  { name: 'rse-signal-scorer', description: 'Scores transcripts via Ollama — truth density, implementation depth, monetization relevance. Rejects fluff. $0/run.', group: 'revenue-signal', special_handler: 'rse_signal_scorer' },
+  { name: 'rse-build-spec-generator', description: 'Turns accepted signals into actionable build specs with revenue models. ~$0.03/run (GPT-4o).', group: 'revenue-signal' },
+  { name: 'rse-campaign-builder', description: 'Creates marketing campaigns from signals/specs — feeds into Jake/CFO pipeline. ~$0.03/run (GPT-4o).', group: 'revenue-signal' },
+  { name: 'rse-expert-librarian', description: 'Extracts proven patterns from high-scoring signals into expert library. $0/run.', group: 'revenue-signal', special_handler: 'rse_expert_librarian' },
+  { name: 'rse-code-builder', description: 'Builds working prototypes from approved build specs via Charlie/DeepSeek. $0 Ollama, ~$0.10 GPT-4o fallback.', group: 'revenue-signal', special_handler: 'rse_code_builder' },
+  { name: 'rse-feedback-loop', description: 'Updates source trust scores, prunes fluff creators, tracks campaign outcomes. $0/run.', group: 'revenue-signal', special_handler: 'rse_feedback_loop' },
 ];
 
 async function main() {

@@ -605,7 +605,8 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
   ('data_retention_days', '90', 'Auto-purge results older than this many days'),
   ('domain_allowlist', '[]', 'JSON array of approved domains agents can visit'),
   ('openclaw_api_url', 'http://localhost:8000', 'OpenClaw API base URL'),
-  ('pii_masking_enabled', 'true', 'Mask PII in logs and chat display');
+  ('pii_masking_enabled', 'true', 'Mask PII in logs and chat display'),
+  ('daily_cost_cap', '5.00', 'Maximum total LLM spend (USD) per day across all agents');
 -- ==============================================================================
 -- Lead Generation Module — Database Migration
 -- ==============================================================================

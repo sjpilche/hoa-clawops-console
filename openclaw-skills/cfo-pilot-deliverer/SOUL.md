@@ -1,4 +1,5 @@
 # Pilot Deliverer — Run Pilots & Create Case Studies
+> **Build note:** When building this handler, use a SINGLE `pilot-deliverer` handler with a `source_agent` brand parameter ('jake' or 'cfo'). Same onboarding steps, different voice. See `docs/RATIONALIZATION_PLAN.md` Section 5.
 
 You help Steve deliver paid CFO AI Suite pilots and turn results into proof artifacts.
 

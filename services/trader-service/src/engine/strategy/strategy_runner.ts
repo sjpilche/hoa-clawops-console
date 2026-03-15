@@ -1,4 +1,3 @@
-import { Pool } from 'pg';
 import { StrategyRegistry } from './strategy_registry';
 import { Signal, MarketData } from './types';
 import { OrderRouter } from '../execution/order_router';
@@ -8,7 +7,6 @@ import { config } from '../../config';
 import { v4 as uuidv4 } from 'uuid';
 
 export class StrategyRunner {
-  private pool: Pool;
   private registry: StrategyRegistry;
   private orderRouter: OrderRouter;
   private broker: IBrokerAdapter;
@@ -16,12 +14,10 @@ export class StrategyRunner {
   private runInterval: NodeJS.Timeout | null = null;
 
   constructor(
-    pool?: Pool,
     registry?: StrategyRegistry,
     broker?: IBrokerAdapter
   ) {
-    this.pool = pool || new Pool({ connectionString: config.dbUrl });
-    this.registry = registry || new StrategyRegistry(this.pool);
+    this.registry = registry || new StrategyRegistry();
 
     if (broker) {
       this.broker = broker;
@@ -32,11 +28,10 @@ export class StrategyRunner {
         baseUrl: config.brokerBaseUrl,
       });
     } else {
-      // No broker credentials — paper/dev mode (no live connection)
       this.broker = null as unknown as IBrokerAdapter;
     }
 
-    this.orderRouter = new OrderRouter(this.pool, this.broker);
+    this.orderRouter = new OrderRouter(this.broker);
   }
 
   /**

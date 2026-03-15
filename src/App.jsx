@@ -63,6 +63,10 @@ import CampaignSettings from '@/pages/CampaignSettings';
 import { CampaignLayout } from '@/layouts/CampaignLayout';
 import PipelineHealthPage from '@/pages/PipelineHealthPage';
 import LivempaintPage from '@/pages/LivempaintPage';
+import MissionControlPage from '@/pages/MissionControlPage';
+import OpportunityEnginePage from '@/pages/OpportunityEnginePage';
+import RSEEnginePage from '@/pages/RSEEnginePage';
+import AgentDirectoryPage from '@/pages/AgentDirectoryPage';
 
 /**
  * Protected Route wrapper.
@@ -99,6 +103,7 @@ export default function App() {
         <Route path="/agents/:id" element={<AgentDetailPage />} />
         <Route path="/agents/:id/edit" element={<AgentBuilderPage />} />
         <Route path="/hierarchy" element={<HierarchyPage />} />
+        <Route path="/directory" element={<AgentDirectoryPage />} />
         <Route path="/extensions" element={<ExtensionsPage />} />
         <Route path="/tools" element={<ToolsPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
@@ -120,6 +125,9 @@ export default function App() {
         <Route path="/data-rehab" element={<CfoMarketingPage defaultSource="data-rehab" />} />
         <Route path="/pipeline-health" element={<PipelineHealthPage />} />
         <Route path="/livempaint" element={<LivempaintPage />} />
+        <Route path="/mission-control" element={<MissionControlPage />} />
+        <Route path="/opportunities" element={<OpportunityEnginePage />} />
+        <Route path="/rse" element={<RSEEnginePage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />

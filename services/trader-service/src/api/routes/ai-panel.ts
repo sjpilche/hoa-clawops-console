@@ -31,18 +31,30 @@ router.post('/run', async (req: Request, res: Response) => {
       });
     }
 
+    // Aggregate across all analyst reports
+    const allPicks = result.reports.flatMap(r => r.picks || []);
+    const commentary = result.reports.map(r => `[${r.analystName}] ${r.marketCommentary}`).join('\n');
+
     res.json({
       success: true,
       runId: result.runId,
       timestamp: result.timestamp,
       summary: {
-        marketCommentary: result.report.marketCommentary,
-        picksCount: result.report.picks?.length || 0,
+        analystCount: result.reports.length,
+        marketCommentary: commentary,
+        picksCount: allPicks.length,
         tradesCount: result.trades.length,
         executed: result.executed,
-        llmCost: result.report.costEstimateUSD,
+        totalLLMCost: result.totalLLMCost,
       },
-      picks: result.report.picks,
+      reports: result.reports.map(r => ({
+        analyst: r.analystName,
+        provider: r.provider,
+        picks: r.picks.length,
+        cost: r.costEstimateUSD,
+        latencyMs: r.latencyMs,
+      })),
+      aggregatedPicks: result.aggregatedPicks,
       trades: result.trades,
       executionResults: result.executionResults,
     });
@@ -61,15 +73,21 @@ router.post('/run', async (req: Request, res: Response) => {
  */
 router.get('/status', async (_req: Request, res: Response) => {
   try {
-    const enabled = process.env.PANEL_ENABLED === 'true';
     const hasGrokKey = !!process.env.GROK_API_KEY;
+    const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+    const hasClaudeKey = !!process.env.ANTHROPIC_API_KEY;
 
     res.json({
-      enabled,
-      configured: hasGrokKey,
-      model: process.env.PANEL_MODEL || 'grok-4-1-fast-non-reasoning',
-      schedule: process.env.PANEL_CRON || '45 9 * * 1-5',
-      provider: 'grok',
+      version: '0.2.0',
+      analysts: [
+        { name: 'Value Hunter', tier: 0, provider: 'ollama', status: 'active' },
+        { name: 'Momentum Scanner', tier: 1, provider: 'openai', status: hasOpenAIKey ? 'active' : 'no_key' },
+        { name: 'Special Situations', tier: 2, provider: 'grok', status: hasGrokKey ? 'active' : 'no_key' },
+        { name: 'Risk Sentinel', tier: 0, provider: 'ollama', status: 'active' },
+      ],
+      schedule: `${process.env.PANEL_INTERVAL_MS || 180000}ms interval`,
+      dryRun: process.env.PANEL_DRY_RUN === 'true',
+      keys: { grok: hasGrokKey, openai: hasOpenAIKey, claude: hasClaudeKey },
     });
   } catch (error: any) {
     res.status(500).json({

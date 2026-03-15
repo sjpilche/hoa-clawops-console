@@ -107,9 +107,6 @@ async function executeSchedule(schedule) {
 
   console.log(`[ScheduleRunner] 🚀 Firing: "${schedule.name}" (agent: ${schedule.agent_id})`);
 
-  // Mark as last_run_at immediately to prevent double-fire within the same minute
-  run("UPDATE schedules SET last_run_at = datetime('now') WHERE id = ?", [schedule.id]);
-
   const agent = get('SELECT * FROM agents WHERE id = ?', [schedule.agent_id]);
   if (!agent) {
     console.error(`[ScheduleRunner] Agent not found: ${schedule.agent_id}`);
@@ -121,11 +118,17 @@ async function executeSchedule(schedule) {
   const message = schedule.message || '';
   const startTime = Date.now();
 
-  // Insert a run record
+  // Insert a run record — use system user for scheduled runs
+  const systemUser = get("SELECT id FROM users LIMIT 1");
+  const userId = systemUser?.id || 'system';
   run(`
-    INSERT INTO runs (id, agent_id, status, trigger, result_data, created_at, updated_at)
-    VALUES (?, ?, 'running', 'scheduled', ?, datetime('now'), datetime('now'))
-  `, [runId, agent.id, JSON.stringify({ message, sessionId: runId, json: true })]);
+    INSERT INTO runs (id, agent_id, user_id, status, trigger, result_data, created_at, updated_at)
+    VALUES (?, ?, ?, 'running', 'scheduled', ?, datetime('now'), datetime('now'))
+  `, [runId, agent.id, userId, JSON.stringify({ message, sessionId: runId, json: true })]);
+
+  // Mark last_run_at AFTER successful INSERT — prevents phantom fires where
+  // the schedule looks "ran" but no run record exists in the DB
+  run("UPDATE schedules SET last_run_at = datetime('now') WHERE id = ?", [schedule.id]);
 
   try {
     const handlers = getHandlers();
@@ -154,8 +157,11 @@ async function executeSchedule(schedule) {
       try { getPipelineRunner().onRunCompleted(runId, outputText); } catch {}
 
     } else {
-      // ── LLM agent — use the bridge ──
-      const bridge = require('./openclawBridge');
+      // ── LLM agent — route to Ollama (free) or OpenClaw (OpenAI) based on agent config + global setting ──
+      const ollamaEnabled = get("SELECT value FROM settings WHERE key='ollama_enabled'")?.value === 'true';
+      const useOllama = ollamaEnabled && (agentConfig.use_ollama === true);
+      const bridge = useOllama ? require('./ollamaBridge') : require('./openclawBridge');
+      if (useOllama) console.log(`[ScheduleRunner] 🦙 Using Ollama for "${agent.name}" (free local inference)`);
       const brain  = require('./collectiveBrain');
       // Use daily session ID for continuity — agents remember context across runs on the same day
       const today = new Date().toISOString().slice(0, 10);
@@ -184,17 +190,31 @@ async function executeSchedule(schedule) {
       });
 
       // Prepend brain context to the agent's message
-      const enrichedMessage = brainContext ? brainContext + message : message;
+      // Truncate brain context to avoid Windows 8191 char command-line limit
+      // Windows has 8191 char command-line limit for OpenClaw CLI.
+      // Reserve ~4000 for agent message + CLI overhead, cap brain at 2000.
+      const maxBrainLen = 2000;
+      const truncatedBrain = brainContext && brainContext.length > maxBrainLen
+        ? brainContext.slice(0, maxBrainLen) + '\n[... brain context truncated ...]\n'
+        : brainContext;
+      let enrichedMessage = truncatedBrain ? truncatedBrain + message : message;
+      // Hard cap total message at 6000 chars to guarantee CLI doesn't overflow
+      if (enrichedMessage.length > 6000) {
+        console.warn(`[ScheduleRunner] Message too long (${enrichedMessage.length} chars), truncating to 6000`);
+        enrichedMessage = enrichedMessage.slice(0, 6000) + '\n[... message truncated ...]';
+      }
 
       // Pass agent.name as agentId (matches OpenClaw registration slug), NOT the UUID
+      const ollamaModel = get("SELECT value FROM settings WHERE key='ollama_model'")?.value || 'llama3.2:3b';
       const bridgeResult = await bridge.runAgent(agent.name, {
         openclawId: agentConfig.openclaw_id || agent.name,
         message: enrichedMessage,
         sessionId: agentSessionId,
+        ollamaModel,
       });
       const parsed = bridge.constructor.parseOutput(bridgeResult.output);
       const durationMs = Date.now() - startTime;
-      const costUsd = parsed.costUsd || 0;
+      const costUsd = useOllama ? 0 : (parsed.costUsd || 0);
       const tokensUsed = parsed.tokensUsed || 0;
       const outputText = parsed.text || bridgeResult.output || 'Done';
       const resultData = JSON.stringify({ sessionId: runId, message, outputText });
@@ -276,12 +296,60 @@ async function maybeRunBrainCouncil() {
   }
 }
 
+// ── Schedule drift detection ──────────────────────────────────────────────────
+// Checks if any schedule that should have fired in the last tick window was missed.
+const DRIFT_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+function checkScheduleDrift(schedules) {
+  const now = Date.now();
+  for (const schedule of schedules) {
+    if (!schedule.last_run_at || !schedule.enabled) continue;
+    // Only check schedules that are currently due (should be running now)
+    if (!isDue(schedule.cron_expression)) continue;
+
+    const lastRun = new Date(schedule.last_run_at).getTime();
+    const drift = now - lastRun;
+
+    // If last run was more than 65 minutes ago AND the schedule is due now,
+    // it means we missed the last fire window
+    if (drift > 65 * 60 * 1000) {
+      const driftMinutes = Math.round(drift / 60000);
+      console.warn(`[ScheduleDrift] "${schedule.name}" — last ran ${driftMinutes}m ago, due now. Possible missed fire.`);
+
+      // Log to audit_log for tracking
+      try {
+        run(
+          `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'schedule_drift', ?, ?, 'failure')`,
+          [`schedule:${schedule.id}`, JSON.stringify({ name: schedule.name, drift_minutes: driftMinutes, cron: schedule.cron_expression, last_run: schedule.last_run_at })]
+        );
+      } catch {}
+
+      // Discord alert for significant drift
+      if (driftMinutes > 120) {
+        try {
+          const discord = require('./discordNotifier');
+          discord.sendEmbed({
+            title: `Schedule Drift: "${schedule.name}"`,
+            description: `Last ran ${driftMinutes} minutes ago but is due now. Possible server downtime or cron failure.`,
+            color: 0xff9500,
+            timestamp: new Date().toISOString(),
+          });
+        } catch {}
+      }
+    }
+  }
+}
+
 // ── Main tick ─────────────────────────────────────────────────────────────────
 async function tick() {
   if (_checkRunning) return;
   _checkRunning = true;
   try {
     const schedules = all('SELECT * FROM schedules WHERE enabled = 1 ORDER BY created_at ASC');
+
+    // Check for schedule drift before executing
+    checkScheduleDrift(schedules);
+
     for (const schedule of schedules) {
       if (isDue(schedule.cron_expression) && !alreadyRanThisMinute(schedule.last_run_at)) {
         executeSchedule(schedule).catch(e =>

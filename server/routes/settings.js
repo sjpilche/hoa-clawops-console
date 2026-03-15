@@ -37,6 +37,9 @@ const VALID_KEYS = new Set([
   'default_model',
   'notification_email',
   'slack_webhook_url',
+  'ollama_enabled',
+  'ollama_model',
+  'ollama_host',
 ]);
 
 // Seed any missing keys with defaults (called once on module load)
@@ -50,6 +53,9 @@ function ensureDefaultSettings() {
     ['default_model', 'gpt-4o', 'Default LLM model for new agents'],
     ['notification_email', '', 'Email address for system alerts'],
     ['slack_webhook_url', '', 'Slack webhook URL for agent notifications'],
+    ['ollama_enabled', 'false', 'Route agents with use_ollama:true through local Ollama instead of OpenAI'],
+    ['ollama_model', 'llama3.2:3b', 'Default Ollama model for local inference'],
+    ['ollama_host', 'http://localhost:11434', 'Ollama API base URL'],
   ];
   for (const [key, value, description] of defaults) {
     try {

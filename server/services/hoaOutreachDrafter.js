@@ -16,14 +16,36 @@ const path = require('path');
 // DATABASE CONNECTION (hoa_leads.sqlite)
 // ═══════════════════════════════════════════════════════════════════════════
 
+const { checkContent } = require('./contentGuard');
+
 const DB_PATH = path.resolve('./hoa_leads.sqlite');
 let db = null;
+let _qaColumnsChecked = false;
 
 async function getHoaDb() {
   if (db) return db;
   const SQL = await initSqlJs();
   const fileBuffer = fs.readFileSync(DB_PATH);
   db = new SQL.Database(fileBuffer);
+
+  // Auto-add QA columns if missing (migration 039)
+  if (!_qaColumnsChecked) {
+    try {
+      const cols = db.exec("PRAGMA table_info(outreach_queue)")[0]?.values?.map(r => r[1]) || [];
+      if (!cols.includes('qa_status')) {
+        db.run("ALTER TABLE outreach_queue ADD COLUMN qa_status TEXT DEFAULT NULL");
+        db.run("ALTER TABLE outreach_queue ADD COLUMN qa_score INTEGER DEFAULT NULL");
+        db.run("ALTER TABLE outreach_queue ADD COLUMN qa_notes TEXT DEFAULT NULL");
+        db.run("ALTER TABLE outreach_queue ADD COLUMN qa_reviewed_at TEXT DEFAULT NULL");
+        saveHoaDb();
+        console.log('[HOA Outreach] QA columns added to outreach_queue');
+      }
+    } catch (e) {
+      console.warn('[HOA Outreach] QA column check failed (non-fatal):', e.message);
+    }
+    _qaColumnsChecked = true;
+  }
+
   return db;
 }
 
@@ -467,12 +489,36 @@ async function draftOutreach(leadId) {
       const scheduledDate = new Date();
       scheduledDate.setDate(scheduledDate.getDate() + email.send_delay_days);
 
+      // Content guard check before insert
+      const guard = checkContent(email.body, email.subject);
+      const sendStatus = guard.safe ? 'draft' : 'flagged';
+      if (!guard.safe) {
+        console.warn(`[Outreach Drafter] Content flagged for lead ${leadId} email ${email.sequence_number}: ${guard.flags.map(f => `${f.type}:${f.match}`).join(', ')}`);
+      }
+
+      // QA scoring — lightweight subject + body check
+      let qaScore = 70; // base for template-based drafts
+      if (email.subject && email.subject.length >= 10 && email.subject.length <= 50) qaScore += 10;
+      if (email.body && email.body.length >= 50 && email.body.length <= 300) qaScore += 10;
+      if (signalQuotes.length > 0) qaScore += 10; // uses real meeting minutes data
+      for (const flag of guard.flags) {
+        if (flag.severity === 'high') qaScore -= 20;
+        else if (flag.severity === 'medium') qaScore -= 10;
+        else qaScore -= 5;
+      }
+      qaScore = Math.max(0, Math.min(100, qaScore));
+      const qaStatus = qaScore >= 70 ? 'passed' : 'failed';
+      const qaNotes = guard.flags.length > 0
+        ? `Flags: ${guard.flags.map(f => `${f.type}:${f.match}`).join(', ')}`
+        : 'Clean — template-based, no issues';
+
       runHoaDb(`
         INSERT INTO outreach_queue (
           id, lead_id, contact_id, email_sequence_number,
           subject_line, email_body, scenario, scenario_description,
-          minutes_quote_used, scheduled_send_date, send_status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'))
+          minutes_quote_used, scheduled_send_date, send_status, created_at,
+          qa_status, qa_score, qa_notes, qa_reviewed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, datetime('now'))
       `, [
         queueId,
         leadId,
@@ -483,10 +529,29 @@ async function draftOutreach(leadId) {
         scenarioMap[templateKey] || 'D',
         template.scenario,
         signalQuotes.length > 0 ? signalQuotes[0].quote : '',
-        scheduledDate.toISOString().split('T')[0] // YYYY-MM-DD format
+        scheduledDate.toISOString().split('T')[0],
+        sendStatus,
+        qaStatus,
+        qaScore,
+        qaNotes,
       ]);
       queueIds.push(queueId);
     }
+
+    // Brain Layer 1 observation for HOA outreach
+    try {
+      const brain = require('./collectiveBrain');
+      brain.observe(
+        `hoa-outreach-${new Date().toISOString().slice(0, 10)}`,
+        'hoa-outreach-drafter', 'outreach_drafted',
+        {
+          subject: contact.email,
+          content: `HOA outreach drafted for lead #${leadId} (${template.scenario}). 3-email sequence. Contact: ${contact.email}.`,
+          confidence: 1.0,
+          metadata: { lead_id: leadId, scenario: templateKey, contact_email: contact.email, emails_drafted: emails.length },
+        }
+      );
+    } catch {}
 
     // Update lead status to drafted
     runHoaDb(

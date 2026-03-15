@@ -61,6 +61,18 @@ Action needed: Refresh FACEBOOK_ACCESS_TOKEN in .env.local
 Instructions: See refresh-facebook-token.md
 ```
 
+## Content Safety Rules
+
+Posts must never contain:
+- **Banned words:** "guaranteed", "risk-free", "free money", "act now", "limited time", "no obligation"
+- **False claims:** Specific dollar amounts saved, interest rates, or approval guarantees
+- **Competitor mentions:** Never name other HOA lending companies
+- **Misleading language:** "Pre-approved", "instant funding", "zero cost"
+- **ALL CAPS** in post body
+- **Multiple exclamation marks** (!!!)
+
+If a post in the queue contains any of these, report it as flagged and do NOT publish.
+
 ## Token Reminder
 
 Facebook Page access tokens expire every ~60 days. If you see an OAuthException error, the token needs refreshing. Notify the operator clearly so they can update `.env.local`.

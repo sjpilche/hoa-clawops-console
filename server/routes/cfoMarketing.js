@@ -346,22 +346,27 @@ router.put('/outreach/:id', async (req, res, next) => {
         });
       }
       try {
-        const { getTransporter } = require('./email');
-        const transporter = getTransporter();
+        const sg = require('../services/sendgrid');
         const subject = updated.email_subject || email_subject || 'Hello';
-        const body = updated.email_body || email_body || '';
-        const info = await transporter.sendMail({
-          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        const bodyText = updated.email_body || email_body || '';
+        const html = sg.wrapInBrandedShell(
+          bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join('')
+        );
+        const result = await sg.send({
           to: lead.contact_email,
           subject,
-          text: body,
+          html,
+          text: bodyText,
         });
-        console.log(`[CfoMarketing] Email sent to ${lead.contact_email} (${lead.company_name})`);
-        // Update delivery tracking
-        run("UPDATE cfo_outreach_sequences SET delivery_status = 'delivered', delivery_error = NULL WHERE id = ?", [id]);
-        // Auto-progress lead status
-        run("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [lead.id]);
-        updated.email_sent = true;
+        if (result.success) {
+          console.log(`[CfoMarketing] Email sent to ${lead.contact_email} (${lead.company_name}) msgId=${result.messageId}`);
+          run("UPDATE cfo_outreach_sequences SET delivery_status = 'delivered', delivery_error = NULL WHERE id = ?", [id]);
+          run("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [lead.id]);
+          updated.email_sent = true;
+          updated.messageId = result.messageId;
+        } else {
+          throw new Error(result.error || result.reason || 'SendGrid send failed');
+        }
       } catch (emailErr) {
         console.error(`[CfoMarketing] Email send failed:`, emailErr.message);
         run("UPDATE cfo_outreach_sequences SET delivery_status = 'failed', delivery_error = ? WHERE id = ?", [emailErr.message, id]);
@@ -499,31 +504,36 @@ router.post('/outreach/bulk-send', async (req, res, next) => {
     let failed = 0;
     const details = [];
 
-    let transporter;
-    try {
-      const { getTransporter } = require('./email');
-      transporter = getTransporter();
-    } catch (smtpErr) {
-      return res.status(500).json({ error: 'SMTP not configured: ' + smtpErr.message });
+    const sg = require('../services/sendgrid');
+    const sgStatus = sg.status();
+    if (!sgStatus.configured) {
+      return res.status(500).json({ error: 'SendGrid not configured — set SENDGRID_API_KEY in .env.local' });
     }
 
     for (const seq of sequences) {
       try {
-        await transporter.sendMail({
-          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        const bodyText = seq.email_body || '';
+        const html = sg.wrapInBrandedShell(
+          bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join('')
+        );
+        const result = await sg.send({
           to: seq.contact_email,
           subject: seq.email_subject || 'Hello',
-          text: seq.email_body || '',
+          html,
+          text: bodyText,
         });
 
-        run("UPDATE cfo_outreach_sequences SET status = 'sent', sent_at = datetime('now'), delivery_status = 'delivered' WHERE id = ?", [seq.id]);
-        run("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [seq.lead_id]);
+        if (result.success) {
+          run("UPDATE cfo_outreach_sequences SET status = 'sent', sent_at = datetime('now'), delivery_status = 'delivered' WHERE id = ?", [seq.id]);
+          run("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [seq.lead_id]);
+          sent++;
+          details.push({ id: seq.id, company: seq.company_name, email: seq.contact_email, status: 'sent' });
+          console.log(`[BulkSend] Sent to ${seq.contact_email} (${seq.company_name})`);
+        } else {
+          throw new Error(result.error || result.reason || 'SendGrid send failed');
+        }
 
-        sent++;
-        details.push({ id: seq.id, company: seq.company_name, email: seq.contact_email, status: 'sent' });
-        console.log(`[BulkSend] Sent to ${seq.contact_email} (${seq.company_name})`);
-
-        // 2s stagger between emails
+        // 2s stagger between emails to avoid rate limits
         if (sequences.indexOf(seq) < sequences.length - 1) {
           await new Promise(r => setTimeout(r, 2000));
         }
@@ -536,6 +546,42 @@ router.post('/outreach/bulk-send', async (req, res, next) => {
     }
 
     res.json({ sent, failed, total: sequences.length, details });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/cfo-marketing/outreach/send-confirmed
+ * Human-gated send — triggers the outreach_sender handler with confirmed=true.
+ * This is the ONLY way to actually send outreach emails.
+ * The scheduled 10 AM run only previews — this endpoint fires the real send.
+ */
+router.post('/outreach/send-confirmed', async (req, res, next) => {
+  try {
+    const { limit = 50, product = 'both' } = req.body || {};
+    const runsRouter = require('./runs');
+    const handler = runsRouter.SPECIAL_HANDLERS.outreach_sender;
+    if (!handler) return res.status(500).json({ error: 'outreach_sender handler not found' });
+
+    const { v4: uuidv4 } = require('uuid');
+    const runId = uuidv4();
+    const message = JSON.stringify({ confirmed: true, limit, product });
+
+    // Get the outreach-sender agent
+    const agent = get("SELECT * FROM agents WHERE name='outreach-sender'");
+    if (!agent) return res.status(404).json({ error: 'outreach-sender agent not found in DB' });
+
+    const agentConfig = agent.config ? JSON.parse(agent.config) : {};
+    const result = await handler({ message, runId, agent, agentConfig });
+
+    res.json({
+      success: true,
+      mode: 'confirmed',
+      ...result.extra,
+      outputText: result.outputText,
+      duration_ms: result.durationMs,
+    });
   } catch (err) {
     next(err);
   }

@@ -12,6 +12,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
+  Crosshair,
   LayoutDashboard,
   Bot,
   Clock,
@@ -36,12 +37,15 @@ import {
   Building2,
   MapPin,
   GitMerge,
+  Radar,
+  Radio,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { NAV_ITEMS } from '@/lib/constants';
 
 /** Map icon names from constants to actual Lucide components */
 const iconMap = {
+  Crosshair,
   LayoutDashboard,
   Bot,
   Clock,
@@ -64,6 +68,8 @@ const iconMap = {
   Building2,
   MapPin,
   GitMerge,
+  Radar,
+  Radio,
 };
 
 export default function Sidebar() {
@@ -91,7 +97,7 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 py-3 px-2 flex flex-col gap-1">
+      <nav className="flex-1 py-3 px-2 flex flex-col gap-1 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
           const Icon = iconMap[item.icon];
           return (

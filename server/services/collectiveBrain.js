@@ -343,6 +343,7 @@ async function getObservations(sessionId, types = [], limit = 50) {
       SELECT TOP (@limit) agent_name, obs_type, subject, content, confidence, metadata, created_at
       FROM shared_observations
       WHERE session_id = @session_id
+        AND created_at > DATEADD(day, -14, GETUTCDATE())
     `;
 
     if (types.length > 0) {
@@ -655,6 +656,19 @@ async function addToKnowledgeBase({ sourceAgent, contentType, title, content, qu
                 (source_agent,content_type,title,content,quality_score,market,erp_context,tags,source_id)
               VALUES
                 (@source_agent,@content_type,@title,@content,@quality_score,@market,@erp_context,@tags,@source_id)`);
+
+    // Flag new KB entry for Steve's weekly review (tracked in local audit_log)
+    try {
+      const { run: dbRun } = require('../db/connection');
+      dbRun(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'kb_entry_pending_review', ?, ?, 'success')`,
+        [
+          `kb:${sourceId || 'unknown'}`,
+          JSON.stringify({ source_agent: sourceAgent, content_type: contentType, title: title || 'Untitled', quality_score: qualityScore, review_status: 'pending' }),
+        ]
+      );
+    } catch {}
+
     return { inserted: true };
   } catch (err) {
     console.warn('[CollectiveBrain] addToKnowledgeBase error:', err.message);
@@ -952,7 +966,39 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
   const blocks = [obsBlock, feedbackBlock, episodesBlock, knowledgeBlock].filter(b => b.trim());
   if (blocks.length === 0) return '';
 
-  return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + blocks.join('') + '━━━ END CONTEXT ━━━\n\n';
+  // Enforce hard token budget — ~2000 tokens ≈ 8000 chars
+  // Priority: KB (most refined) > episodes > feedback > observations (most raw)
+  const MAX_CONTEXT_CHARS = 8000;
+  let assembled = '';
+  const priorityOrder = [knowledgeBlock, episodesBlock, feedbackBlock, obsBlock].filter(b => b.trim());
+  for (const block of priorityOrder) {
+    if (assembled.length + block.length <= MAX_CONTEXT_CHARS) {
+      assembled += block;
+    } else {
+      // Truncate this block to fit remaining budget
+      const remaining = MAX_CONTEXT_CHARS - assembled.length;
+      if (remaining > 200) { // Only include if meaningful amount fits
+        assembled += block.slice(0, remaining - 50) + '\n[... truncated — context budget reached ...]\n';
+      }
+      break; // No more blocks
+    }
+  }
+
+  if (!assembled.trim()) return '';
+
+  // ── Dream Team: Inject active learned patterns ──
+  let learnedBlock = '';
+  try {
+    const { getActivePatterns } = require('./dreamTeamNightly');
+    const patterns = getActivePatterns(agentName);
+    if (patterns.length > 0) {
+      learnedBlock = '\n━━━ LEARNED PATTERNS (updated nightly) ━━━\n' +
+        patterns.map(p => `[${p.category}] ${p.pattern_text} (confidence: ${p.confidence.toFixed(2)})`).join('\n') +
+        '\n━━━ END LEARNED PATTERNS ━━━\n';
+    }
+  } catch {} // Non-fatal if Dream Team tables don't exist yet
+
+  return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + assembled + learnedBlock + '━━━ END CONTEXT ━━━\n\n';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

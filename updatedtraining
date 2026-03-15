@@ -1,0 +1,408 @@
+My recommendation
+
+Build a two-layer training system:
+
+Layer 1: heartbeat-based light training
+Use heartbeat to decide whether the agent should do nothing, do a tiny maintenance action, or queue a training job. Heartbeat is best for batched periodic checks, not heavy work. The docs explicitly frame heartbeat for routine monitoring and cron for exact timing or isolated work.
+
+Layer 2: isolated cron-based deep training
+Use cron for the real training jobs: YouTube review, skill-candidate generation, sandbox drills, eval runs, and benchmark comparisons. That keeps production context clean and lets you use different models or tighter tool permissions.
+
+That’s the balanced setup. It gives you autonomy without letting your agents turn into unsupervised interns watching productivity porn all night.
+
+Where your premise is weak
+
+“Idle = training” is incomplete.
+
+Idle time should split into:
+
+maintenance: memory cleanup, doc indexing, backlog grooming
+
+training: learn new patterns
+
+reflection: review past failures
+
+benchmarking: compare before/after
+
+rest/no-op: do nothing if the expected value is low
+
+Sometimes the best training decision is don’t train.
+
+How YouTube Vision should fit
+
+A GitHub discussion for an OpenClaw YouTube Vision skill shows it can search videos, watch a video for metadata plus transcript, fetch comments, auto-extract subtitles, fall back to Whisper when subtitles are missing, support time ranges, and auto-truncate long videos.
+
+That means your agent pipeline should be:
+
+watch → summarize → extract tactics → convert to checklist/SOP → test in sandbox → score → promote or reject
+
+Not:
+
+watch → instantly add skill to production
+
+That second path is how you end up with an agent that “learned” from a guy with a ring light and 37 subscribers to rewrite your system config at 2:14 AM.
+
+What each key agent should train on
+
+Assuming your core crew is something like Todd / Scout / Charlie / Quill / Ralph:
+
+Todd (chief of staff / orchestrator)
+Train on routing rules, prioritization, escalation logic, and your mission statement. Minimal YouTube. Mostly internal docs and postmortems.
+
+Scout (research)
+This is your best YouTube Vision candidate. Train on research workflows, sourcing quality, extraction patterns, lead qualification, and how to turn long content into structured intel.
+
+Charlie (builder / coder)
+Train on coding walkthroughs, architecture patterns, tool usage, repo-specific conventions, and bug-fix case studies. But all promotions must go through tests.
+
+Quill (content / messaging)
+Train on hooks, structure, positioning, thumbnail logic, short-form scripting, CTA variants, and brand voice examples.
+
+Ralph (QA / governance)
+Do not make Ralph a YouTube goblin. Train Ralph on adversarial tests, regression checks, approval gates, prompt-injection patterns, and policy enforcement.
+
+The real operating model
+
+Create a simple rule:
+
+No new skill reaches production until it passes Ralph.
+
+Promotion path:
+
+Candidate idea created
+
+Stored in skills/candidates/
+
+Tested in sandbox
+
+Benchmarked against current behavior
+
+Approved by QA gate
+
+Moved to skills/approved/
+
+Enabled for the relevant agent only
+
+That matters because OpenClaw’s tooling supports allow/deny controls and tool profiles, so you should give training sessions a narrower tool surface than production sessions.
+
+Three ways to build it
+Option 1: Cheap and fast
+
+Use heartbeat only.
+
+How it works:
+
+heartbeat checks for urgent work
+
+if quiet and headroom exists, agent does one tiny training item
+
+no deep YouTube runs, no skill installs, no code changes
+
+Trade-offs:
+
+fastest to implement
+
+lowest risk
+
+weakest learning depth
+
+best ROI in week 1
+
+Use this if you want something running immediately.
+
+Option 2: Best overall
+
+Heartbeat decides. Cron trains.
+
+How it works:
+
+heartbeat does triage
+
+cron runs isolated nightly training jobs for approved curriculum items
+
+Ralph benchmarks outcomes each morning
+
+only successful patterns get promoted
+
+Trade-offs:
+
+medium complexity
+
+much better quality control
+
+avoids contaminating main session context
+
+best long-term design
+
+This is what I’d build.
+
+Option 3: Aggressive
+
+Dedicated training agents per department.
+
+How it works:
+
+each production agent has a shadow trainer
+
+trainer watches videos, reads docs, creates candidate skills/prompts
+
+production agent never trains directly
+
+Ralph and Todd decide promotions
+
+Trade-offs:
+
+best structure
+
+highest compute use
+
+most overhead
+
+strongest separation of duties
+
+This is the right design once the system is already making you money.
+
+The files I’d add
+
+Start with this structure:
+
+/agent-workspace
+  /HEARTBEAT.md
+  /TRAINING.md
+  /curriculum/
+    todd.md
+    scout.md
+    charlie.md
+    quill.md
+    ralph.md
+  /training_queue/
+    queue.jsonl
+  /training_runs/
+    2026-03-13.jsonl
+  /evals/
+    scout/
+    charlie/
+    quill/
+  /skills/
+    candidates/
+    approved/
+    rejected/
+  /postmortems/
+What goes in each file
+
+HEARTBEAT.md
+
+urgent work checks
+
+quiet-hours rules
+
+training eligibility rules
+
+what to do if capacity exists
+
+what to never do during heartbeat
+
+TRAINING.md
+
+your training philosophy
+
+approved sources
+
+forbidden actions
+
+promotion rules
+
+benchmarks required before production
+
+curriculum/scout.md
+
+approved topics
+
+target channels or source types
+
+output format
+
+eval rubric
+
+Same idea for Charlie, Quill, Ralph, Todd.
+
+The gating rules I’d use on day one
+
+Training allowed only if:
+
+work queue = 0
+
+no overdue human follow-up
+
+last user message handled
+
+RAM pressure below your chosen threshold
+
+training budget remaining
+
+current time is within allowed training window
+
+source is approved
+
+task size fits the window
+
+Promotion allowed only if:
+
+summary quality passes
+
+extracted tactic is concrete
+
+candidate improves benchmark
+
+no security or scope violations
+
+Ralph approves
+
+Sample heartbeat logic
+
+Use heartbeat for the decision, not the heavy work.
+
+A HEARTBEAT.md concept like this is the right shape. OpenClaw docs note that HEARTBEAT.md can be empty to skip heartbeat API calls, or contain periodic tasks to check.
+
+# HEARTBEAT
+
+1. Check for urgent user, inbox, calendar, or system tasks.
+2. If urgent work exists, do not train.
+3. If no urgent work exists:
+   - check queue depth
+   - check system headroom
+   - check training quota
+4. If all gates pass:
+   - enqueue one training task from TRAINING.md or curriculum/*
+   - prefer reflection/postmortem before external content
+5. Never during heartbeat:
+   - install a new skill
+   - modify production configs
+   - enable new tools
+   - spend cloud budget beyond quota
+6. If nothing needs attention, reply HEARTBEAT_OK.
+Sample cron pattern
+
+Use cron for isolated heavy training:
+
+nightly Scout research training
+
+nightly Charlie coding-pattern training
+
+weekly Quill content teardown
+
+weekly Ralph red-team review
+
+The docs’ guidance is straightforward: heartbeat for batched periodic checks; cron for exact schedules, one-shot reminders, or isolated runs.
+
+Conceptually:
+
+openclaw cron add --name "Scout nightly training" --cron "0 1 * * *" --session isolated --message "Run one approved training item from curriculum/scout.md. Use YouTube Vision if needed. Produce summary, extracted tactics, candidate checklist, and eval notes. Do not change production." --announce
+The training curriculum order
+
+This is the order I’d use:
+
+Reflection first
+
+review failures
+
+inspect bad outputs
+
+improve prompts/checklists
+
+Internal corpus second
+
+your docs
+
+your transcripts
+
+your past runs
+
+your approved patterns
+
+External text/web third
+
+articles
+
+docs
+
+changelogs
+
+discussions
+
+YouTube fourth
+
+only for topics where video adds real value
+
+That order is important. Most agents do not need more “content.” They need better memory, better routing, and fewer stupid mistakes.
+
+The visual / fun layer
+
+You wanted funny and useful. Good. Do both.
+
+In the 2D world, training states can be obvious and lightweight:
+
+Scout in a “research library”
+
+Charlie in a “dojo”
+
+Quill in a “writer’s room”
+
+Ralph in a “test chamber”
+
+Todd in a “war room”
+
+Tiny overlays:
+
+book icon = internal doc study
+
+TV icon = YouTube training
+
+wrench icon = skill candidate being built
+
+shield icon = Ralph evaluating
+
+trophy/trash icons = promoted or rejected
+
+That makes the system legible without wasting real compute on a giant game engine.
+
+What not to do
+
+Don’t let agents:
+
+auto-install skills from what they watched
+
+edit openclaw.json during training
+
+change tool permissions during training
+
+browse production credentials while “learning”
+
+treat every watched video as ground truth
+
+use the same model for training, grading, and promotion
+
+That last one matters. Self-grading is how bullshit becomes policy.
+
+Best next step
+
+Build Option 2.
+
+In order:
+
+Add HEARTBEAT.md and TRAINING.md
+
+Create per-agent curriculum files
+
+Add a training_queue
+
+Add isolated nightly cron jobs for Scout and Charlie
+
+Add Ralph eval + promotion gate
+
+Add 2D training-state visuals after the logic works
+
+Confidence: about 85% this is the right architecture for you. What would raise it to 95% is seeing your actual repo layout, current agent definitions, and how you’re already handling heartbeats, cron, and tool permissions.
+
+Better Prompt:
+“Turn this Idle Training Lane design into a Claude Code implementation plan for my OpenClaw repo with exact files to create, exact markdown templates for HEARTBEAT.md and TRAINING.md, cron examples for Scout/Charlie/Quill, a candidate-skill promotion workflow for Ralph, and a lightweight 2D training-status UI spec.”

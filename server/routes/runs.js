@@ -30,9 +30,16 @@ function markRunCompleted(runId, agentId, durationMs, resultData, costUsd = 0, t
     `UPDATE runs SET status='completed', completed_at=datetime('now'), duration_ms=?, tokens_used=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?`,
     [durationMs, tokensUsed, costUsd, typeof resultData === 'string' ? resultData : JSON.stringify(resultData), runId]
   );
+  // Update total_runs and compute success_rate from actual run history
   run(
-    `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
-    [agentId]
+    `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'),
+     success_rate = (
+       SELECT CASE WHEN COUNT(*) = 0 THEN 0.0
+         ELSE CAST(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
+       END FROM runs WHERE agent_id = ?
+     ),
+     updated_at=datetime('now') WHERE id=?`,
+    [agentId, agentId]
   );
 }
 
@@ -41,9 +48,16 @@ function markRunFailed(runId, agentId, errorMsg) {
     `UPDATE runs SET status='failed', error_msg=?, completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
     [errorMsg, runId]
   );
+  // Recompute success_rate on failure too so it stays accurate
   run(
-    `UPDATE agents SET status='idle', updated_at=datetime('now') WHERE id=?`,
-    [agentId]
+    `UPDATE agents SET status='idle',
+     success_rate = (
+       SELECT CASE WHEN COUNT(*) = 0 THEN 0.0
+         ELSE CAST(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
+       END FROM runs WHERE agent_id = ?
+     ),
+     updated_at=datetime('now') WHERE id=?`,
+    [agentId, agentId]
   );
 }
 
@@ -54,9 +68,63 @@ function buildResultData(runId, message, outputText, extra = {}) {
 function parseMessageParams(message) {
   try {
     return JSON.parse(message);
-  } catch {
+  } catch (err) {
+    // Log non-trivial parse failures so malformed messages don't silently disappear
+    if (message && message.trim().startsWith('{')) {
+      console.warn(`[parseMessageParams] Failed to parse JSON-like message: "${message.slice(0, 200)}..." — ${err.message}`);
+    }
     return {};
   }
+}
+
+// ── Lead validation — prevents LLM hallucinations from reaching DB ──
+function validateLead(lead) {
+  const errors = [];
+
+  // Required fields
+  if (!lead.company_name || typeof lead.company_name !== 'string') errors.push('missing company_name');
+  if (!lead.contact_name || typeof lead.contact_name !== 'string') errors.push('missing contact_name');
+
+  // String length caps — LLM can hallucinate essays into fields
+  if (lead.company_name && lead.company_name.length > 200) errors.push('company_name too long');
+  if (lead.contact_name && lead.contact_name.length > 150) errors.push('contact_name too long');
+  if (lead.contact_title && lead.contact_title.length > 150) errors.push('contact_title too long');
+  if (lead.website && lead.website.length > 500) errors.push('website too long');
+  if (lead.notes && lead.notes.length > 2000) errors.push('notes too long');
+
+  // Score sanity — must be 0-100 integer
+  const score = lead.qualification_score;
+  if (score !== undefined && score !== null) {
+    const numScore = Number(score);
+    if (isNaN(numScore) || numScore < 0 || numScore > 100) errors.push(`invalid score: ${score}`);
+  }
+
+  // Email format — basic check to reject obvious hallucinations
+  if (lead.contact_email && typeof lead.contact_email === 'string') {
+    const email = lead.contact_email.trim();
+    if (email !== 'unknown' && email !== 'null' && email !== '') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push(`invalid email format: ${email}`);
+      if (email.length > 254) errors.push('email too long');
+    }
+  }
+
+  // LinkedIn — must contain linkedin.com if present
+  if (lead.contact_linkedin && typeof lead.contact_linkedin === 'string') {
+    if (lead.contact_linkedin !== 'null' && !lead.contact_linkedin.includes('linkedin.com')) {
+      errors.push(`invalid linkedin: ${lead.contact_linkedin}`);
+    }
+  }
+
+  // Reject SQL injection attempts in string fields
+  const sqlPatterns = /(\b(DROP|DELETE|INSERT|UPDATE|ALTER|EXEC|UNION)\b.*\b(TABLE|FROM|INTO|SET)\b)/i;
+  const fieldsToCheck = [lead.company_name, lead.contact_name, lead.contact_title, lead.notes];
+  for (const field of fieldsToCheck) {
+    if (field && typeof field === 'string' && sqlPatterns.test(field)) {
+      errors.push(`suspicious SQL pattern in field: "${field.slice(0, 50)}"`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 function parseTextParams(message, patterns) {
@@ -75,7 +143,32 @@ function parseTextParams(message, patterns) {
 const SPECIAL_HANDLERS = {
   github_publisher: async ({ message, runId, agent }) => {
     const { publishPost } = require('../services/githubPublisher');
+    const { checkContent } = require('../services/contentGuard');
     const startTime = Date.now();
+
+    // Content guard + Ralph QA before pushing to GitHub (goes live on Netlify)
+    const guard = checkContent(message, '');
+    if (!guard.safe) {
+      const flagSummary = guard.flags.map(f => `${f.type}:${f.match}`).join(', ');
+      console.warn(`[GitHubPublisher] Content flagged — blocking push: ${flagSummary}`);
+      return {
+        outputText: `GitHub publish BLOCKED by content guard: ${flagSummary}. Fix content and retry.`,
+        durationMs: Date.now() - startTime,
+      };
+    }
+
+    // Ralph QA score check — warn but don't block (content is already human-approved at this point)
+    try {
+      const ralphQA = require('../services/ralphQA');
+      const wordCount = message.split(/\s+/).filter(Boolean).length;
+      let qaScore = 70;
+      if (wordCount >= 300 && wordCount <= 2000) qaScore += 10;
+      if (message.includes('#')) qaScore += 10;
+      if (/\b(construction|contractor|HOA|CFO|controller)\b/i.test(message)) qaScore += 10;
+      for (const flag of guard.flags) { qaScore -= (flag.severity === 'medium' ? 5 : 2); }
+      console.log(`[GitHubPublisher] Pre-push QA score: ${qaScore}/100`);
+    } catch {}
+
     const summary = await publishPost(message);
     return { outputText: summary, durationMs: Date.now() - startTime };
   },
@@ -98,6 +191,30 @@ const SPECIAL_HANDLERS = {
     const result = await searchHOAContacts(searchParams);
     const durationMs = Date.now() - startTime;
     const outputText = `HOA Contact Search: ${result.results.total_found} found, ${result.results.new_contacts} new (${searchParams.city}, ${searchParams.state || 'US'}) in ${(durationMs / 1000).toFixed(1)}s`;
+
+    // Brain Layer 1: contact search observation
+    try {
+      const brain = require('../services/collectiveBrain');
+      brain.observe(
+        `hoa-contacts-${new Date().toISOString().slice(0, 10)}`,
+        'hoa-contact-finder', 'contact_found',
+        {
+          subject: `${searchParams.city}, ${searchParams.state || 'US'}`,
+          content: `HOA Contact Search: ${result.results.total_found} found, ${result.results.new_contacts} new in ${searchParams.city}.`,
+          confidence: 1.0,
+          metadata: { city: searchParams.city, state: searchParams.state, total_found: result.results.total_found, new_contacts: result.results.new_contacts },
+        }
+      );
+    } catch {}
+
+    // Audit log for contact finder trending
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'contact_finder_quality', ?, ?, ?)`,
+        ['agent:hoa-contact-finder', JSON.stringify({ run_id: runId, city: searchParams.city, state: searchParams.state, found: result.results.total_found, new: result.results.new_contacts }), result.results.new_contacts > 0 ? 'success' : 'failure']
+      );
+    } catch {}
+
     return { outputText, durationMs, extra: { searchResult: result } };
   },
 
@@ -126,6 +243,30 @@ const SPECIAL_HANDLERS = {
     const topTarget = result.geo_target || (result.results && result.results[0]?.geo_target) || 'Unknown';
     const totalNew = result.new_communities || result.total_new_communities || 0;
     const outputText = `HOA Discovery: ${topTarget} — ${totalNew} new communities, ${result.queries_run || 0} queries in ${(durationMs / 1000).toFixed(1)}s`;
+
+    // Brain Layer 1: market_insight observation (matching jake-construction-discovery pattern)
+    try {
+      const brain = require('../services/collectiveBrain');
+      brain.observe(
+        `hoa-discovery-${new Date().toISOString().slice(0, 10)}`,
+        'hoa-discovery', 'market_insight',
+        {
+          subject: topTarget,
+          content: `HOA Discovery: ${totalNew} new communities in ${topTarget}. Queries: ${result.queries_run || 0}.`,
+          confidence: 1.0,
+          metadata: { geo_target: topTarget, new_communities: totalNew, queries: result.queries_run || 0 },
+        }
+      );
+    } catch {}
+
+    // Audit log for discovery trending
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'discovery_quality', ?, ?, ?)`,
+        ['agent:hoa-discovery', JSON.stringify({ run_id: runId, geo_target: topTarget, new_communities: totalNew, queries: result.queries_run || 0 }), totalNew > 0 ? 'success' : 'failure']
+      );
+    } catch {}
+
     return { outputText, durationMs, extra: { discoveryResult: result } };
   },
 
@@ -178,7 +319,24 @@ const SPECIAL_HANDLERS = {
     const result = await enrichMultipleLeads(enrichParams);
     const durationMs = Date.now() - startTime;
     const outputText = `Contact Enrichment: ${result.success_count}/${result.enriched_count} enriched (${enrichParams.tier || 'all tiers'}) in ${(durationMs / 1000).toFixed(1)}s`;
-    return { outputText, durationMs, extra: { enrichResult: result } };
+
+    // ── HOA Enrichment quality trending ──
+    const hoaHitRate = result.enriched_count > 0 ? Math.round((result.success_count / result.enriched_count) * 100) : 0;
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'enricher_quality', ?, ?, ?)`,
+        ['agent:hoa-contact-enricher', JSON.stringify({ run_id: runId, total: result.enriched_count, enriched: result.success_count, hit_rate: hoaHitRate, tier: enrichParams.tier }), hoaHitRate >= 50 ? 'success' : 'failure']
+      );
+    } catch {}
+
+    if (result.enriched_count >= 5 && hoaHitRate < 50) {
+      try {
+        const discord = require('../services/discordNotifier');
+        discord.sendEmbed({ title: 'HOA Enricher Quality Alert', description: `HOA enricher hit rate: ${hoaHitRate}% (${result.success_count}/${result.enriched_count}). Below 50% threshold.`, color: 0xff9500, footer: { text: 'hoa-contact-enricher' } });
+      } catch {}
+    }
+
+    return { outputText, durationMs, extra: { enrichResult: result, hitRate: hoaHitRate } };
   },
 
   hoa_outreach_drafter: async ({ message, runId, agent, agentConfig }) => {
@@ -295,7 +453,34 @@ const SPECIAL_HANDLERS = {
       `CFO Lead Scout: ${result.stats.inserted} new, ${result.stats.skipped} dupes in ${(durationMs / 1000).toFixed(1)}s`,
       ...result.leads.slice(0, 5).map(l => `  ${l.company_name} (${l.erp_type}) — Score: ${l.pilot_fit_score}`),
     ].join('\n');
-    return { outputText, durationMs, extra: { stats: result.stats } };
+
+    // ── CFO Lead Scout quality trending (matching jake-lead-scout pattern) ──
+    const avgScore = result.leads.length > 0
+      ? Math.round(result.leads.reduce((s, l) => s + (l.pilot_fit_score || 0), 0) / result.leads.length)
+      : 0;
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'lead_scout_quality', ?, ?, ?)`,
+        ['agent:cfo-lead-scout', JSON.stringify({ run_id: runId, inserted: result.stats.inserted, skipped: result.stats.skipped, avg_score: avgScore, total_leads: result.leads.length }), result.stats.inserted > 0 ? 'success' : 'failure']
+      );
+    } catch {}
+
+    // Brain observation
+    try {
+      const brain = require('../services/collectiveBrain');
+      brain.observe(
+        `cfo-scout-${new Date().toISOString().slice(0, 10)}`,
+        'cfo-lead-scout', 'lead_signal',
+        {
+          subject: 'CFO Lead Scout',
+          content: `CFO Scout: ${result.stats.inserted} new leads, ${result.stats.skipped} dupes. Avg score: ${avgScore}.`,
+          confidence: 1.0,
+          metadata: { inserted: result.stats.inserted, skipped: result.stats.skipped, avg_score: avgScore },
+        }
+      );
+    } catch {}
+
+    return { outputText, durationMs, extra: { stats: result.stats, avgScore } };
   },
 
   jake_lead_scout: async ({ message, runId, agent }) => {
@@ -372,9 +557,10 @@ const SPECIAL_HANDLERS = {
     console.log(`[jake_lead_scout] Parsed ${leads.length} leads from agent output`);
 
     for (const lead of leads) {
-      // Must have company name + contact name at minimum
-      if (!lead.company_name || !lead.contact_name) {
-        console.log(`[jake_lead_scout] Skipping lead — missing company or contact name`);
+      // ── Schema validation — reject LLM hallucinations before DB ──
+      const validation = validateLead(lead);
+      if (!validation.valid) {
+        console.warn(`[jake_lead_scout] Validation failed for lead: ${validation.errors.join(', ')}. Data: ${JSON.stringify(lead).slice(0, 200)}`);
         leadsSkipped++;
         continue;
       }
@@ -460,13 +646,64 @@ const SPECIAL_HANDLERS = {
     // Mark market as scouted in rotation tracker
     if (marketIndex !== undefined) markMarketScouted(marketIndex);
 
+    // ── Lead quality trending — track degradation over time ──
+    const totalAttempted = leads.length;
+    const validationFailureRate = totalAttempted > 0 ? Math.round((leadsSkipped / totalAttempted) * 100) : 0;
+    const avgScore = leads.length > 0
+      ? Math.round(leads.reduce((sum, l) => sum + (l.qualification_score || 0), 0) / leads.length)
+      : 0;
+
+    // Log quality metrics to audit_log
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'lead_scout_quality', ?, ?, ?)`,
+        [
+          `agent:jake-lead-scout`,
+          JSON.stringify({ run_id: runId, region: runMsg.region, leads_attempted: totalAttempted, leads_inserted: leadsInserted, leads_skipped: leadsSkipped, validation_failure_rate: validationFailureRate, avg_score: avgScore }),
+          leadsInserted > 0 ? 'success' : 'failure',
+        ]
+      );
+    } catch {}
+
+    // Brain observation for rejected leads — track WHY leads are being skipped
+    if (leadsSkipped > 0) {
+      try {
+        const brain = require('../services/collectiveBrain');
+        brain.observe(
+          `jake-scout-${new Date().toISOString().slice(0,10)}`,
+          'jake-lead-scout', 'lead_quality_alert',
+          {
+            subject: runMsg.region,
+            content: `Lead Scout ${runMsg.region}: ${leadsSkipped}/${totalAttempted} leads rejected (${validationFailureRate}% failure rate). Avg score: ${avgScore}. Inserted: ${leadsInserted}.`,
+            confidence: 1.0,
+            metadata: { region: runMsg.region, failure_rate: validationFailureRate, avg_score: avgScore, inserted: leadsInserted, skipped: leadsSkipped },
+          }
+        );
+      } catch {}
+    }
+
+    // Discord alert on quality degradation
+    if (validationFailureRate > 30 || (totalAttempted >= 3 && leadsInserted < 3)) {
+      try {
+        const discord = require('../services/discordNotifier');
+        discord.sendEmbed({
+          title: 'Lead Scout Quality Alert',
+          description: `Region: ${runMsg.region}\nInserted: ${leadsInserted}/${totalAttempted} (${validationFailureRate}% rejected)\nAvg score: ${avgScore}\n\nPossible causes: market exhaustion, LLM degradation, or overly strict validation.`,
+          color: 0xff9500,
+          timestamp: new Date().toISOString(),
+          footer: { text: 'jake-lead-scout' },
+        });
+      } catch {}
+    }
+
     const outputText = [
       `Jake Lead Scout: ${leadsInserted} new leads inserted, ${leadsSkipped} skipped (${runMsg.region})`,
       `  Market: ${runMsg.region} | Duration: ${(durationMs/1000).toFixed(1)}s | Cost: $${(parsed.costUsd||0).toFixed(4)}`,
+      `  Quality: avg_score=${avgScore}, failure_rate=${validationFailureRate}%`,
       leadsInserted > 0 ? `  Leads need enrichment: run jake-contact-enricher next` : `  No new leads this run — market will rotate next time`,
     ].join('\n');
 
-    return { outputText, durationMs, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0, extra: { leadsInserted, leadsSkipped, region: runMsg.region } };
+    return { outputText, durationMs, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0, extra: { leadsInserted, leadsSkipped, region: runMsg.region, avgScore, validationFailureRate } };
   },
 
   jake_contact_enricher: async ({ message, runId, agent }) => {
@@ -505,7 +742,27 @@ const SPECIAL_HANDLERS = {
       }
     }
 
-    return { outputText, durationMs, extra: { enrichResult: result } };
+    // ── Enrichment quality trending ──
+    const hitRate = result.total > 0 ? Math.round((result.enriched / result.total) * 100) : 0;
+    const methodDist = {};
+    for (const r of result.results) { methodDist[r.method || 'failed'] = (methodDist[r.method || 'failed'] || 0) + 1; }
+
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'enricher_quality', ?, ?, ?)`,
+        ['agent:jake-contact-enricher', JSON.stringify({ run_id: runId, total: result.total, enriched: result.enriched, hit_rate: hitRate, methods: methodDist }), hitRate >= 15 ? 'success' : 'failure']
+      );
+    } catch {}
+
+    // Discord alert if hit rate drops below 15% (below 20% baseline = degraded)
+    if (result.total >= 5 && hitRate < 15) {
+      try {
+        const discord = require('../services/discordNotifier');
+        discord.sendEmbed({ title: 'Enricher Quality Alert', description: `Jake enricher hit rate: ${hitRate}% (${result.enriched}/${result.total}). Below 15% threshold.\nMethods: ${JSON.stringify(methodDist)}`, color: 0xff9500, footer: { text: 'jake-contact-enricher' } });
+      } catch {}
+    }
+
+    return { outputText, durationMs, extra: { enrichResult: result, hitRate, methodDist } };
   },
 
   jake_construction_discovery: async ({ message, runId, agent }) => {
@@ -578,6 +835,24 @@ const SPECIAL_HANDLERS = {
 
     const replyRate = emailsSent > 0 ? Math.round(emailsReplied / emailsSent * 100) : 0;
 
+    // RSE stats for Todd's briefing
+    let rseField = '';
+    try {
+      const rseVideos = dbGet("SELECT COUNT(*) c FROM rse_transcripts WHERE DATE(created_at)=?", [yesterday])?.c || 0;
+      const rseSignals = dbGet("SELECT COUNT(*) c FROM rse_signals WHERE DATE(created_at)=?", [yesterday])?.c || 0;
+      const rseSpecs = dbGet("SELECT COUNT(*) c FROM rse_build_specs WHERE DATE(created_at)=?", [yesterday])?.c || 0;
+      const topIdea = dbGet("SELECT one_liner, composite_score FROM rse_evaluations WHERE status NOT IN ('passed') ORDER BY composite_score DESC LIMIT 1");
+      const totalIdeas = dbGet("SELECT COUNT(*) c FROM rse_evaluations WHERE status NOT IN ('passed')")?.c || 0;
+
+      const parts = [];
+      if (rseVideos > 0) parts.push(`${rseVideos} videos scanned`);
+      if (rseSignals > 0) parts.push(`${rseSignals} signals accepted`);
+      if (rseSpecs > 0) parts.push(`${rseSpecs} specs generated`);
+      parts.push(`${totalIdeas} ideas ranked`);
+      if (topIdea) parts.push(`Top: "${topIdea.one_liner}" (${topIdea.composite_score.toFixed(1)}/10)`);
+      rseField = parts.join(' · ');
+    } catch {}
+
     await discord.postWebhook({
       embeds: [{
         title: `\u2600\ufe0f Morning Digest \u2014 ${yesterday}`,
@@ -586,6 +861,7 @@ const SPECIAL_HANDLERS = {
           { name: '\ud83c\udfaf Pipeline',  value: `${leadsFound} found \u00b7 ${leadsEnriched} enriched \u00b7 ${emailsDrafted} drafted`, inline: false },
           { name: '\ud83d\udce7 Outreach',  value: `${emailsSent} sent \u00b7 ${emailsReplied} replied (${replyRate}% reply rate)`,        inline: false },
           { name: '\u270d\ufe0f Content',   value: `${contentPieces} pieces created`,                                                      inline: false },
+          ...(rseField ? [{ name: '\ud83d\udce1 Signal Engine', value: rseField, inline: false }] : []),
           { name: '\ud83e\udde0 Brain',     value: `${brainStats.observations_7d || 0} obs this week \u00b7 ${brainStats.feedback_approved || 0} \u2705`, inline: false },
           { name: '\ud83d\udcb0 Cost',      value: `$${parseFloat(runCosts).toFixed(4)} yesterday`,                                        inline: false },
         ],
@@ -594,7 +870,18 @@ const SPECIAL_HANDLERS = {
       }]
     });
 
-    const outputText = `Morning digest posted to Discord \u2014 ${yesterday}: ${leadsFound} leads, ${emailsSent} sent, ${replyRate}% reply rate`;
+    // ── Memory Bridge: create daily log + update project memory ──
+    let memoryStatus = '';
+    try {
+      const memBridge = require('../services/memoryBridge');
+      const logResult = memBridge.createDailyLog(yesterday);
+      const projResult = memBridge.updateProjectMemory();
+      memoryStatus = ` | Memory: ${logResult.created ? 'daily log created' : 'log exists'}, ${projResult.updated} project files updated`;
+    } catch (memErr) {
+      console.warn('[MorningDigest] Memory bridge failed (non-fatal):', memErr.message);
+    }
+
+    const outputText = `Morning digest posted to Discord \u2014 ${yesterday}: ${leadsFound} leads, ${emailsSent} sent, ${replyRate}% reply rate${memoryStatus}`;
     return { outputText, durationMs: Date.now() - startTime, costUsd: 0 };
   },
 
@@ -658,14 +945,37 @@ const SPECIAL_HANDLERS = {
         try { data = JSON.parse(parsed.text || result.output || '{}'); } catch {}
         const body = data?.body_text;
         if (body) {
+          const subject = data.subject || `Re: ${lead.email_subject}`;
+          const angleType = data.follow_up_angle || 'general';
+
+          // Content guard — same filter as outreach agents
+          const { checkContent } = require('../services/contentGuard');
+          const guard = checkContent(body, subject);
+          const status = guard.safe ? 'draft' : 'flagged';
+          if (!guard.safe) {
+            console.warn(`[ContentGuard] jake-follow-up flagged for lead ${lead.id}: ${guard.flags.map(f => `${f.type}:${f.match}`).join(', ')}`);
+          }
+
           run(
-            `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, source_agent, status, sequence_position) VALUES (?, 'follow_up', ?, ?, 'jake', 'draft', 2)`,
-            [lead.id, data.subject || `Re: ${lead.email_subject}`, body]
+            `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, source_agent, status, sequence_position, qa_status, angle_type) VALUES (?, 'follow_up', ?, ?, 'jake', ?, 2, 'pending', ?)`,
+            [lead.id, subject, body, status, angleType]
           );
+
+          // Ralph QA auto-review on the follow-up draft
+          try {
+            const ralphQA = require('../services/ralphQA');
+            const inserted = get('SELECT id FROM cfo_outreach_sequences WHERE lead_id = ? AND sequence_position = 2 ORDER BY id DESC LIMIT 1', [lead.id]);
+            if (inserted) {
+              const qaResult = ralphQA.reviewSingleOutreach(inserted.id);
+              console.log(`[RalphQA] Follow-up #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+            }
+          } catch {}
+
           brain.observe(
             `jake-followup-${new Date().toISOString().slice(0,10)}`,
             'jake-follow-up-agent', 'follow_up_queued',
-            { subject: lead.company_name, content: `Follow-up drafted for ${lead.company_name} (${daysSince} days since first touch)`, confidence: 0.9 }
+            { subject: lead.company_name, content: `Follow-up drafted for ${lead.company_name} (${daysSince} days since first touch). Angle: ${angleType}. QA: ${status}.`, confidence: 0.9,
+              metadata: { lead_id: lead.id, angle: angleType, days_since: daysSince } }
           );
           drafted++;
         } else {
@@ -827,17 +1137,36 @@ const SPECIAL_HANDLERS = {
 
     const calendlyUrl = process.env.CALENDLY_URL || '[INSERT CALENDLY LINK]';
     const finalBody = body.replace(/\[CALENDLY_URL\]/g, calendlyUrl);
+    const meetingSubject = data.subject || `Let's talk \u2014 ${lead.company_name}`;
+
+    // Content guard on meeting emails — these reach INTERESTED leads (highest-value contacts)
+    const { checkContent } = require('../services/contentGuard');
+    const guard = checkContent(finalBody, meetingSubject);
+    const meetingStatus = guard.safe ? 'draft' : 'flagged';
+    if (!guard.safe) {
+      console.warn(`[ContentGuard] meeting-booker flagged for lead ${lead_id}: ${guard.flags.map(f => `${f.type}:${f.match}`).join(', ')}`);
+    }
 
     run(
-      `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, source_agent, status, sequence_position) VALUES (?, 'meeting', ?, ?, 'jake', 'draft', 3)`,
-      [lead_id, data.subject || `Let's talk \u2014 ${lead.company_name}`, finalBody]
+      `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, source_agent, status, sequence_position, qa_status) VALUES (?, 'meeting', ?, ?, 'jake', ?, 3, 'pending')`,
+      [lead_id, meetingSubject, finalBody, meetingStatus]
     );
+
+    // Ralph QA auto-review on meeting draft
+    try {
+      const ralphQA = require('../services/ralphQA');
+      const inserted = get('SELECT id FROM cfo_outreach_sequences WHERE lead_id = ? AND sequence_position = 3 ORDER BY id DESC LIMIT 1', [lead_id]);
+      if (inserted) {
+        const qaResult = ralphQA.reviewSingleOutreach(inserted.id);
+        console.log(`[RalphQA] Meeting #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+      }
+    } catch {}
 
     brain.observe(
       `jake-meeting-${new Date().toISOString().slice(0,10)}`,
       'jake-meeting-booker', 'meeting_booked',
-      { subject: lead.company_name, content: `Meeting booking drafted for ${lead.company_name} \u2014 ${lead.contact_name}`, confidence: 1.0,
-        metadata: { lead_id, company: lead.company_name, city: lead.city } }
+      { subject: lead.company_name, content: `Meeting booking drafted for ${lead.company_name} \u2014 ${lead.contact_name}. QA: ${meetingStatus}.`, confidence: 1.0,
+        metadata: { lead_id, company: lead.company_name, city: lead.city, qa_status: meetingStatus } }
     );
 
     // Brain v2 Layer 3: record 'booked' episode — scores 1.0, flows to Layer 4 KB via distillation
@@ -901,6 +1230,174 @@ const SPECIAL_HANDLERS = {
     };
   },
 
+  // ── Outreach Sender — sends all approved outreach emails via SendGrid ────
+  // Runs daily at 10 AM. Finds approved sequences with contact emails,
+  // sends via SendGrid, updates delivery status, progresses lead status.
+  // $0/run (SendGrid free tier: 100 emails/day).
+  // ── Outreach Sender — TWO MODES ──────────────────────────────────────────
+  // DEFAULT (scheduled): Preview-only. Shows what WOULD send, posts to Discord,
+  //   does NOT send. Steve must confirm via UI or pass confirmed=true.
+  // CONFIRMED (manual): Actually sends. Only fires when Steve explicitly triggers
+  //   via /api/runs/:id/confirm or passes { confirmed: true } in message.
+  //
+  // CLAUDE.md HARD STOP: "Send external communications... requires human authorization."
+  // This handler enforces that rule. Scheduled runs are preview-only.
+  outreach_sender: async ({ message, runId, agent }) => {
+    const { all: dbAll, run: dbRun, get: dbGet } = require('../db/connection');
+    const sg = require('../services/sendgrid');
+    const brain = require('../services/collectiveBrain');
+    const discord = require('../services/discordNotifier');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const sgStatus = sg.status();
+    if (!sgStatus.configured) {
+      return { outputText: 'Outreach Sender: SKIPPED — SENDGRID_API_KEY not configured in .env.local', durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    const dailyLimit = parseInt(params.limit) || 50;
+    const product = params.product || 'both';
+    const isConfirmed = params.confirmed === true || params.confirmed === 'true';
+
+    // Find approved sequences with contact emails, ordered by urgency score
+    let query = `
+      SELECT s.id, s.lead_id, s.email_subject, s.email_body, s.sequence_position, s.source_agent,
+             l.contact_email, l.contact_name, l.company_name, l.erp_type, l.city, l.state,
+             l.urgency_score, l.pilot_fit_score
+      FROM cfo_outreach_sequences s
+      JOIN cfo_leads l ON l.id = s.lead_id
+      WHERE s.status = 'approved'
+        AND l.contact_email IS NOT NULL AND l.contact_email != ''
+        AND l.status NOT IN ('unsubscribed', 'bounced', 'closed_lost')
+    `;
+    if (product === 'jake') query += " AND s.source_agent = 'jake'";
+    else if (product === 'cfo') query += " AND s.source_agent = 'cfo'";
+    query += ` ORDER BY COALESCE(l.urgency_score, 0) DESC, s.created_at ASC LIMIT ?`;
+
+    const sequences = dbAll(query, [dailyLimit]);
+
+    if (sequences.length === 0) {
+      return { outputText: 'Outreach Sender: No approved sequences with contact emails ready to send', durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    // ── PREVIEW MODE (default for scheduled runs) ─────────────────────────
+    // Shows what would send, posts to Discord, does NOT send anything.
+    if (!isConfirmed) {
+      const preview = sequences.slice(0, 10).map((s, i) =>
+        `${i + 1}. ${s.company_name} — ${s.contact_name || 'contact'} (${s.contact_email})\n   Subject: "${(s.email_subject || '').slice(0, 60)}"`
+      ).join('\n');
+
+      // Post preview to Discord so Steve sees it
+      try {
+        await discord.sendEmbed({
+          title: `\ud83d\udce8 Outreach Ready — ${sequences.length} emails awaiting your GO`,
+          color: 0xffa500, // orange = needs confirmation
+          description: `**${sequences.length} approved emails** are ready to send.\nConfirm in the Console to fire, or they stay queued.\n\n${preview}${sequences.length > 10 ? `\n... and ${sequences.length - 10} more` : ''}`,
+          fields: [
+            { name: 'How to send', value: 'Console → Runs → outreach-sender → Confirm\nOr: POST /api/cfo-marketing/outreach/send-confirmed', inline: false },
+          ],
+          timestamp: new Date().toISOString(),
+          footer: { text: 'Outreach Sender — PREVIEW ONLY (no emails sent)' },
+        });
+      } catch {}
+
+      const durationMs = Date.now() - startTime;
+      const outputText = [
+        `Outreach Sender: PREVIEW — ${sequences.length} emails ready (NOT sent, awaiting confirmation)`,
+        ...sequences.slice(0, 5).map(s => `  ${s.company_name} → ${s.contact_email}`),
+        sequences.length > 5 ? `  ... and ${sequences.length - 5} more` : null,
+        `  Confirm in Console or POST with {"confirmed":true} to send.`,
+      ].filter(Boolean).join('\n');
+      return { outputText, durationMs, costUsd: 0, extra: { mode: 'preview', ready_count: sequences.length, preview: sequences.slice(0, 10).map(s => ({ company: s.company_name, email: s.contact_email, subject: s.email_subject })) } };
+    }
+
+    // ── CONFIRMED MODE (manual trigger only) ──────────────────────────────
+    // Steve explicitly confirmed — actually send the emails.
+    console.log(`[OutreachSender] CONFIRMED — sending ${sequences.length} emails`);
+
+    // SendGrid daily send cap — safety net
+    const todaySent = dbGet("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(sent_at)=DATE('now') AND status='sent'")?.c || 0;
+    const dailySendCap = 100; // SendGrid free tier
+    if (todaySent + sequences.length > dailySendCap) {
+      const allowed = Math.max(0, dailySendCap - todaySent);
+      if (allowed === 0) {
+        return { outputText: `Outreach Sender: BLOCKED — daily send cap reached (${todaySent}/${dailySendCap} today)`, durationMs: Date.now() - startTime, costUsd: 0 };
+      }
+      sequences.length = allowed; // truncate to remaining capacity
+      console.log(`[OutreachSender] Capped to ${allowed} emails (${todaySent} already sent today, cap=${dailySendCap})`);
+    }
+
+    let sent = 0;
+    let failed = 0;
+    const results = [];
+
+    for (const seq of sequences) {
+      try {
+        const bodyText = seq.email_body || '';
+        const html = sg.wrapInBrandedShell(
+          bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join(''),
+          { preheader: seq.email_subject }
+        );
+        const result = await sg.send({
+          to: seq.contact_email,
+          subject: seq.email_subject || 'Quick question',
+          html,
+          text: bodyText,
+        });
+
+        if (result.success) {
+          dbRun("UPDATE cfo_outreach_sequences SET status = 'sent', sent_at = datetime('now'), delivery_status = 'delivered' WHERE id = ?", [seq.id]);
+          dbRun("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [seq.lead_id]);
+          sent++;
+          results.push({ company: seq.company_name, email: seq.contact_email, status: 'sent' });
+          console.log(`[OutreachSender] Sent to ${seq.contact_email} (${seq.company_name})`);
+
+          const market = [seq.city, seq.state].filter(Boolean).join(', ');
+          brain.observe(
+            `outreach-send-${new Date().toISOString().slice(0, 10)}`,
+            'outreach-sender', 'email_sent',
+            { subject: seq.company_name, content: `Email sent to ${seq.contact_name || 'contact'} at ${seq.company_name} (${market})`, confidence: 1.0,
+              metadata: { lead_id: seq.lead_id, seq_id: seq.id, position: seq.sequence_position } }
+          );
+        } else {
+          throw new Error(result.error || result.reason || 'SendGrid failed');
+        }
+
+        // 2s stagger between emails
+        if (sent + failed < sequences.length - 1) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } catch (err) {
+        failed++;
+        dbRun("UPDATE cfo_outreach_sequences SET delivery_status = 'failed', delivery_error = ? WHERE id = ?", [err.message, seq.id]);
+        results.push({ company: seq.company_name, email: seq.contact_email, status: 'failed', error: err.message });
+        console.error(`[OutreachSender] Failed for ${seq.contact_email}: ${err.message}`);
+      }
+    }
+
+    // Discord confirmation summary
+    if (sent > 0) {
+      try {
+        discord.postWebhook({
+          embeds: [{
+            title: `\ud83d\udce7 Outreach Sent — ${sent} emails delivered`,
+            color: 0x22c55e,
+            fields: [
+              { name: 'Sent', value: String(sent), inline: true },
+              { name: 'Failed', value: String(failed), inline: true },
+              { name: 'Recipients', value: results.filter(r => r.status === 'sent').slice(0, 5).map(r => r.company).join(', ') || 'None', inline: false },
+            ],
+            timestamp: new Date().toISOString(),
+          }],
+        });
+      } catch {}
+    }
+
+    const durationMs = Date.now() - startTime;
+    const outputText = `Outreach Sender: ${sent} sent, ${failed} failed (of ${sequences.length} confirmed) in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, costUsd: 0, extra: { mode: 'confirmed', sent, failed, results } };
+  },
+
   brain_distillation: async ({ message, runId, agent }) => {
     // Nightly job — distills approved outputs into Azure knowledge base (Layer 4).
     // Runs at 2 AM daily. Zero LLM cost — pure DB read + Azure write.
@@ -908,41 +1405,136 @@ const SPECIAL_HANDLERS = {
     const startTime = Date.now();
     const result = await brain.runDistillation();
     const stats = await brain.getStats();
+
+    // ── Memory hygiene: purge old audit log + stale fallback observations ──
+    let auditPurged = 0;
+    let obsPurged = 0;
+    try {
+      // Purge audit_log entries older than 90 days (keeps table performant)
+      const retentionDays = parseInt((get("SELECT value FROM settings WHERE key='data_retention_days'") || {}).value || '90');
+      const auditResult = run(
+        `DELETE FROM audit_log WHERE timestamp < datetime('now', '-${retentionDays} days')`
+      );
+      auditPurged = auditResult?.changes || 0;
+      if (auditPurged > 0) console.log(`[BrainDistillation] Purged ${auditPurged} audit_log entries (>${retentionDays} days old)`);
+    } catch {}
+
+    try {
+      // Purge synced fallback observations older than 90 days
+      const obsResult = run(
+        `DELETE FROM brain_fallback_observations WHERE synced = 1 AND created_at < datetime('now', '-90 days')`
+      );
+      obsPurged = obsResult?.changes || 0;
+
+      // Purge synced fallback feedback older than 90 days
+      run(`DELETE FROM brain_fallback_feedback WHERE synced = 1 AND created_at < datetime('now', '-90 days')`);
+      // Purge synced fallback episodes older than 90 days
+      run(`DELETE FROM brain_fallback_episodes WHERE synced = 1 AND created_at < datetime('now', '-90 days')`);
+
+      if (obsPurged > 0) console.log(`[BrainDistillation] Purged ${obsPurged} synced fallback observations (>90 days old)`);
+    } catch {}
+
     const durationMs = Date.now() - startTime;
-    const outputText = [
+    const outputLines = [
       `Brain Distillation: ${result.inserted} new entries, ${result.skipped} already in KB`,
       `  Knowledge Base total: ${stats.kb_total || 0} entries (${stats.kb_total_uses || 0} total retrievals)`,
       `  Feedback signals: ${stats.feedback_total || 0} (${stats.feedback_approved || 0} ✅  ${stats.feedback_rejected || 0} ❌)`,
       `  Episodes: ${stats.episodes_total || 0} (avg score: ${stats.episodes_avg_score ? (stats.episodes_avg_score * 100).toFixed(0) + '%' : 'n/a'})`,
       `  Observations: ${stats.observations_total || 0} (${stats.observations_7d || 0} this week)`,
-    ].join('\n');
-    return { outputText, durationMs, costUsd: 0, extra: { distillResult: result, brainStats: stats } };
+      auditPurged > 0 || obsPurged > 0 ? `  Hygiene: ${auditPurged} audit entries + ${obsPurged} stale observations purged` : null,
+    ];
+
+    // ── Memory Bridge: weekly compression of daily logs ──
+    try {
+      const memBridge = require('../services/memoryBridge');
+      const compResult = memBridge.compressWeeklyLogs();
+      if (compResult.compressed > 0) {
+        outputLines.push(`  Memory: ${compResult.compressed} weekly summaries created, ${compResult.archived} daily logs archived`);
+      }
+    } catch (memErr) {
+      console.warn('[BrainDistillation] Memory compression failed (non-fatal):', memErr.message);
+    }
+
+    const outputText = outputLines.filter(Boolean).join('\n');
+    return { outputText, durationMs, costUsd: 0, extra: { distillResult: result, brainStats: stats, auditPurged, obsPurged } };
   },
 
   daily_debrief: async ({ message, runId, agent }) => {
     const { collectDebrief } = require('../services/debriefCollector');
     const startTime = Date.now();
 
-    // Collect all operational data ($0, <200ms)
     const params = parseMessageParams(message);
     const data = await collectDebrief(params.date || undefined);
 
-    // Send collected data to the LLM for assessment (~$0.01)
-    const openclawBridge = require('../services/openclawBridge');
-    const prompt = `Here is today's operational data. Write the Daily Debrief report following your SOUL.md format exactly.\n\n${JSON.stringify(data, null, 2)}`;
+    // ── Compact summary for LLM — avoids Windows 8191 char command-line limit ──
+    // Previously: JSON.stringify(data, null, 2) → 10-20K chars → CLI overflow.
+    // Now: human-readable compact summary < 3000 chars.
+    const r = data.runs;
+    const failedList = r.runs.filter(x => x.status === 'failed').map(x => `${x.agent}: ${(x.error || '').slice(0, 60)}`);
+    const topCostAgents = data.costs.byAgent.filter(a => a.cost > 0).slice(0, 5).map(a => `${a.agent}: $${a.cost.toFixed(4)} (${a.runs} runs)`);
 
-    const result = await openclawBridge.runAgent('daily-debrief', {
-      openclawId: 'daily-debrief',
-      message: prompt,
-      sessionId: `debrief-${data.date}-${runId}`,
-    });
+    const summary = [
+      `Date: ${data.date}`,
+      ``,
+      `RUNS: ${r.total} total | ${r.completed} completed | ${r.failed} failed | ${r.pending} pending`,
+      `Cost today: $${r.totalCost.toFixed(4)} | Yesterday: $${r.yesterday.cost.toFixed(4)}`,
+      `Duration: ${(r.totalDurationMs / 1000).toFixed(0)}s total`,
+      failedList.length > 0 ? `Failed: ${failedList.join('; ')}` : 'No failures',
+      topCostAgents.length > 0 ? `Top cost: ${topCostAgents.join(', ')}` : 'All runs $0',
+      ``,
+      `AGENTS: ${data.agentUtilization.total} total | ${data.agentUtilization.usedToday} active today | ${data.agentUtilization.idle.length} idle`,
+      ``,
+      `LEADS: HOA ${data.leads.hoa.total} total (+${data.leads.hoa.newToday} today) | CFO ${data.leads.cfo.total} total (+${data.leads.cfo.newToday} today)`,
+      `Cost/lead: ${data.leads.costPerLead}`,
+      ``,
+      `CONTENT: ${data.content.queueDepth} pending in queue`,
+      ``,
+      `TRADING: ${data.trading.status}${data.trading.status === 'online' ? ` | ${data.trading.positions} positions | $${data.trading.totalValue.toFixed(2)} value | P&L: $${data.trading.unrealizedPnl.toFixed(2)}` : ''}`,
+      ``,
+      `COSTS: Today $${data.costs.today.toFixed(4)} | Week $${data.costs.thisWeek.toFixed(4)} | All-time $${data.costs.allTime.toFixed(4)} | Avg daily $${data.costs.avgDaily.toFixed(4)} | Projected monthly $${data.costs.projectedMonthly.toFixed(2)}`,
+    ].join('\n');
 
-    const parsed = openclawBridge.constructor.parseOutput(result.output);
-    const durationMs = Date.now() - startTime;
-    const outputText = parsed.text || result.output || 'Debrief generation failed';
-    const costUsd = parsed.costUsd || 0;
+    // ── Deterministic report — $0, instant, never fails ──
+    // LLM was wasting $0.04/run to produce "give me the JSON" responses.
+    // CLAUDE.md Rule 1: "Value over novelty." Numbers don't need personality.
+    const outputText = [
+      `### DAILY DEBRIEF — ${data.date}`,
+      ``,
+      `**AGENT OPS:** ${r.completed}/${r.total} runs completed | ${r.failed} failed | $${r.totalCost.toFixed(4)} spent`,
+      r.failed > 0 ? `**FAILURES:** ${failedList.join('; ')}` : null,
+      topCostAgents.length > 0 ? `**TOP COST:** ${topCostAgents.join(' | ')}` : null,
+      `**UTILIZATION:** ${data.agentUtilization.usedToday}/${data.agentUtilization.total} agents active`,
+      ``,
+      `**LEADS:** HOA ${data.leads.hoa.total} (+${data.leads.hoa.newToday}) | CFO ${data.leads.cfo.total} (+${data.leads.cfo.newToday}) | Cost/lead: ${data.leads.costPerLead}`,
+      `**CONTENT:** ${data.content.queueDepth} pending`,
+      data.trading.status === 'online'
+        ? `**TRADING:** ${data.trading.positions} positions | $${data.trading.totalValue.toFixed(2)} value | P&L: $${data.trading.unrealizedPnl.toFixed(2)}`
+        : `**TRADING:** offline`,
+      ``,
+      `**COSTS:** Today $${data.costs.today.toFixed(4)} | Week $${data.costs.thisWeek.toFixed(4)} | All-time $${data.costs.allTime.toFixed(4)} | Projected monthly $${data.costs.projectedMonthly.toFixed(2)}`,
+      ``,
+      r.failed > 0 ? `**STATUS: ISSUES** — ${r.failed} failure(s) need attention` : `**STATUS: GREEN** — all systems nominal`,
+    ].filter(Boolean).join('\n');
 
-    return { outputText, durationMs, costUsd, tokensUsed: parsed.tokensUsed || 0 };
+    // Post to Discord
+    try {
+      const discord = require('../services/discordNotifier');
+      const newLeads = data.leads.hoa.newToday + data.leads.cfo.newToday;
+      await discord.sendEmbed({
+        title: `Daily Debrief — ${data.date}`,
+        color: r.failed > 0 ? 0xff4444 : newLeads > 0 ? 0x22c55e : 0x5865f2,
+        description: outputText,
+        fields: [
+          { name: 'Runs', value: `${r.completed}/${r.total} | $${r.totalCost.toFixed(4)}`, inline: true },
+          { name: 'Leads', value: `+${newLeads} new`, inline: true },
+          { name: 'Trading', value: data.trading.status === 'online' ? `$${data.trading.unrealizedPnl.toFixed(2)} P&L` : 'offline', inline: true },
+        ],
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Deterministic debrief — $0' },
+      });
+    } catch {}
+
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, tokensUsed: 0 };
   },
 
   // ── Jake CRM Sync — pushes replied/meeting_booked leads to Google Sheets (or CSV fallback) ──
@@ -1185,6 +1777,54 @@ const SPECIAL_HANDLERS = {
     const startTime = Date.now();
     const result = await runDirectorCycle();
     const durationMs = Date.now() - startTime;
+
+    // ── Dispatch audit trail — log every decision the director makes ──
+    try {
+      run(
+        `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'pipeline_dispatch', ?, ?, ?)`,
+        [
+          'agent:pipeline-director',
+          JSON.stringify({
+            run_id: runId,
+            plan: result.plan,
+            total_stalled: result.stateResult?.total_stalled || 0,
+            actions_dispatched: result.plan?.length || 0,
+          }),
+          (result.plan?.length || 0) > 0 ? 'success' : 'failure',
+        ]
+      );
+    } catch {}
+
+    // Brain Layer 1: pipeline_dispatched observation
+    const actionsCount = result.plan?.length || 0;
+    try {
+      const brain = require('../services/collectiveBrain');
+      brain.observe(
+        `pipeline-${new Date().toISOString().slice(0, 10)}`,
+        'pipeline-director', 'pipeline_dispatched',
+        {
+          subject: 'Pipeline Director Cycle',
+          content: `Dispatched ${actionsCount} actions. Stalled: ${result.stateResult?.total_stalled || 0}. ${result.outputText?.slice(0, 200)}`,
+          confidence: 1.0,
+          metadata: { actions: actionsCount, stalled: result.stateResult?.total_stalled || 0 },
+        }
+      );
+    } catch {}
+
+    // Dispatch sanity check — warn if unusually high action count (possible runloop)
+    if (actionsCount > 15) {
+      console.warn(`[PipelineDirector] Sanity check: ${actionsCount} actions dispatched in one cycle (threshold: 15)`);
+      try {
+        const discord = require('../services/discordNotifier');
+        discord.sendEmbed({
+          title: 'Pipeline Director: High Dispatch Volume',
+          description: `Dispatched ${actionsCount} actions in one cycle (normal max ~20, warning at 15).\nThis may indicate a dispatch loop or unusual pipeline state.\n\nStalled: ${result.stateResult?.total_stalled || 0}`,
+          color: 0xff9500,
+          footer: { text: 'pipeline-director' },
+        });
+      } catch {}
+    }
+
     return {
       outputText: result.outputText,
       durationMs,
@@ -1193,6 +1833,752 @@ const SPECIAL_HANDLERS = {
         plan: result.plan,
         total_stalled: result.stateResult?.total_stalled || 0,
       },
+    };
+  },
+
+  // ── Opportunity Engine — Tier 1: Signal Scanner ─────────────────────────
+  // Cycles through enabled scanners (Reddit, HN, PH, etc.), ingests signals,
+  // classifies via Ollama ($0), clusters via semantic fingerprints.
+  opportunity_scanner: async ({ message, runId, agent }) => {
+    const ingest = require('../services/signalIngest');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    // Load all enabled scanners
+    const { all: dbAll } = require('../db/connection');
+    const enabledScanners = dbAll("SELECT scanner_name, last_cursor FROM opp_scanner_state WHERE enabled = 1");
+
+    const scannerModules = {
+      reddit:         () => require('../services/scanners/redditScanner'),
+      hn:             () => require('../services/scanners/hnScanner'),
+      ph:             () => require('../services/scanners/phScanner'),
+      github:         () => require('../services/scanners/githubScanner'),
+      twitter:        () => require('../services/scanners/twitterScanner'),
+      forum:          () => require('../services/scanners/forumScanner'),
+      trends:         () => require('../services/scanners/trendsScanner'),
+      stackoverflow:  () => require('../services/scanners/stackoverflowScanner'),
+      indeed:         () => require('../services/scanners/indeedScanner'),
+      indiehackers:   () => require('../services/scanners/indieHackersScanner'),
+    };
+
+    let totalNew = 0;
+    let totalSkipped = 0;
+    let totalErrors = 0;
+    const scannerResults = [];
+
+    // Run specific scanner if requested, otherwise all enabled
+    const targetScanners = params.scanner
+      ? enabledScanners.filter(s => s.scanner_name === params.scanner)
+      : enabledScanners;
+
+    for (const scanner of targetScanners) {
+      const loader = scannerModules[scanner.scanner_name];
+      if (!loader) {
+        console.log(`[OppScanner] No module for scanner: ${scanner.scanner_name}`);
+        continue;
+      }
+
+      try {
+        const mod = loader();
+        const state = ingest.getScannerState(scanner.scanner_name);
+        const result = await mod.scan(state.last_cursor);
+
+        let inserted = 0;
+        let skipped = 0;
+        for (const signal of result.signals) {
+          const r = ingest.ingestSignal(scanner.scanner_name, signal);
+          if (r) inserted++;
+          else skipped++;
+        }
+
+        ingest.updateScannerState(scanner.scanner_name, result.nextCursor, inserted, result.errors);
+        totalNew += inserted;
+        totalSkipped += skipped;
+        totalErrors += result.errors;
+
+        scannerResults.push({ scanner: scanner.scanner_name, found: result.signals.length, inserted, skipped, errors: result.errors });
+      } catch (err) {
+        console.error(`[OppScanner] ${scanner.scanner_name} failed:`, err.message);
+        totalErrors++;
+        scannerResults.push({ scanner: scanner.scanner_name, error: err.message });
+      }
+    }
+
+    // Classify new signals via Ollama ($0)
+    const classifyResult = await ingest.classifyBatch(params.classify_limit || 50);
+
+    const durationMs = Date.now() - startTime;
+    const stats = ingest.getStats();
+
+    const outputText = [
+      `Opportunity Scanner: ${totalNew} new signals, ${totalSkipped} dupes, ${totalErrors} errors in ${(durationMs / 1000).toFixed(1)}s`,
+      `  Classified: ${classifyResult.classified} valid, ${classifyResult.noise} noise, ${classifyResult.errors} errors`,
+      `  Totals: ${stats.signals_total} signals, ${stats.clusters_total} clusters, ${stats.clusters_hot} hot (score≥75)`,
+      ...scannerResults.map(r => r.error
+        ? `  ❌ ${r.scanner}: ${r.error}`
+        : `  ✅ ${r.scanner}: ${r.found} found, ${r.inserted} new`
+      ),
+    ].join('\n');
+
+    return { outputText, durationMs, costUsd: 0, extra: { totalNew, totalSkipped, classifyResult, stats } };
+  },
+
+  // ── Opportunity Engine — Tier 1: Cluster Scorer ─────────────────────────
+  // Scores clusters with signal_count >= 3 using ICE+RPS+ALS via GPT-4o.
+  // Falls back to Ollama if budget cap reached. ~$0.01/cluster.
+  opportunity_scorer: async ({ message, runId, agent }) => {
+    const { scoreBatch } = require('../services/opportunityScorer');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const result = await scoreBatch({
+      limit: parseInt(params.limit) || 10,
+      useLLM: params.use_ollama !== 'true',
+      budget_cap_usd: parseFloat(params.budget_cap) || 0.50,
+    });
+
+    const durationMs = Date.now() - startTime;
+    const outputText = [
+      `Opportunity Scorer: ${result.scored}/${result.clusters_checked} clusters scored in ${(durationMs / 1000).toFixed(1)}s`,
+      `  Cost: $${result.total_cost.toFixed(4)} | Skipped: ${result.skipped}`,
+      result.top_cluster
+        ? `  🔥 Top: "${result.top_cluster.pain_summary}" — ${result.top_cluster.composite}/100 (${result.top_cluster.template || 'TBD'})`
+        : `  No clusters qualified for scoring (need signal_count >= 3)`,
+    ].join('\n');
+
+    return { outputText, durationMs, costUsd: result.total_cost, extra: result };
+  },
+
+  // ── Opportunity Engine — Tier 2: Software Factory ───────────────────────
+  // Picks top scored cluster (composite >= 75), scaffolds prototype via
+  // DeepSeek Coder V2 ($0) or GPT-4o fallback (~$0.10), runs basic QA,
+  // writes launch copy, saves files to data/prototypes/{name}/.
+  // Message params: { cluster_id } for single build, or omit for batch (top 1).
+  software_factory: async ({ message, runId, agent }) => {
+    const { buildPrototype, runFactoryBatch } = require('../services/softwareFactory');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    let result;
+    if (params.cluster_id) {
+      // Single cluster build
+      result = await buildPrototype(parseInt(params.cluster_id));
+    } else {
+      // Batch mode — picks top unbuilt scored cluster
+      result = await runFactoryBatch();
+    }
+
+    const durationMs = Date.now() - startTime;
+
+    if (!result.built) {
+      return {
+        outputText: result.summary || 'Software Factory: No clusters ready for prototyping (need composite >= 75 and status = scored)',
+        durationMs,
+        costUsd: 0,
+      };
+    }
+
+    const outputText = [
+      result.summary,
+      `  Template: ${result.template} | Product: ${result.product_name}`,
+      `  Files: ${result.files_count} | QA: ${result.qa_passed ? 'PASSED' : 'ISSUES FOUND'}`,
+      `  Path: ${result.output_dir}`,
+      `  Cost: $${(result.cost_usd || 0).toFixed(4)} | Duration: ${(durationMs / 1000).toFixed(1)}s`,
+      result.qa_passed ? '  Status: BUILT — ready for Ralph deep QA' : '  Status: BUILT — QA issues flagged, review needed',
+    ].join('\n');
+
+    return {
+      outputText,
+      durationMs,
+      costUsd: result.cost_usd || 0,
+      extra: {
+        cluster_id: result.cluster_id,
+        prototype_id: result.prototype_id,
+        product_name: result.product_name,
+        template: result.template,
+        files_count: result.files_count,
+        qa_passed: result.qa_passed,
+      },
+    };
+  },
+
+  // ── Opportunity Engine — Tier 3: Traction Monitor ───────────────────────
+  // Checks deployed prototypes daily: page views, stars, signups, revenue.
+  // 14-day kill gate: auto-kill if traction_score < threshold at day 14.
+  // Alerts Steve if traction_score > threshold for scale decision.
+  // $0/run — reads from opp_prototypes + opp_traction tables.
+  traction_monitor: async ({ message, runId, agent }) => {
+    const { get: dbGet, all: dbAll, run: dbRun } = require('../db/connection');
+    const discord = require('../services/discordNotifier');
+    const startTime = Date.now();
+
+    // Find all deployed/monitoring prototypes
+    const prototypes = dbAll(
+      "SELECT p.*, c.pain_summary FROM opp_prototypes p JOIN opp_clusters c ON p.cluster_id = c.id WHERE p.status IN ('deployed', 'monitoring')"
+    );
+
+    if (!prototypes || prototypes.length === 0) {
+      return {
+        outputText: 'Traction Monitor: No deployed prototypes to monitor',
+        durationMs: Date.now() - startTime,
+        costUsd: 0,
+      };
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    let monitored = 0;
+    let killed = 0;
+    let alertedSteve = 0;
+    const results = [];
+
+    for (const proto of prototypes) {
+      // Check if we already have today's traction entry
+      const existing = dbGet(
+        "SELECT id FROM opp_traction WHERE prototype_id = ? AND date = ?",
+        [proto.id, today]
+      );
+
+      if (!existing) {
+        // Insert placeholder traction entry (real metrics filled by deploy integrations)
+        const tractionScore = 0; // Will be computed when real data comes in
+        dbRun(
+          `INSERT INTO opp_traction (prototype_id, date, page_views, signups, github_stars, mentions, revenue_cents, traction_score)
+           VALUES (?, ?, 0, 0, 0, 0, 0, ?)`,
+          [proto.id, today, tractionScore]
+        );
+      }
+
+      // Get latest traction score
+      const latestTraction = dbGet(
+        "SELECT traction_score, revenue_cents FROM opp_traction WHERE prototype_id = ? ORDER BY date DESC LIMIT 1",
+        [proto.id]
+      );
+
+      // Calculate days since deploy
+      const deployedAt = proto.deployed_at ? new Date(proto.deployed_at) : null;
+      const daysSinceDeploy = deployedAt
+        ? Math.floor((Date.now() - deployedAt.getTime()) / 86400000)
+        : null;
+
+      const tractionScore = latestTraction?.traction_score || 0;
+      const revenue = latestTraction?.revenue_cents || 0;
+
+      // Revenue alert — immediate escalation
+      if (revenue > 0) {
+        try {
+          discord.postWebhook({
+            embeds: [{
+              title: '💰 REVENUE DETECTED — Prototype generating money!',
+              color: 0x00ff00,
+              fields: [
+                { name: 'Prototype', value: proto.product_name || proto.id, inline: true },
+                { name: 'Revenue', value: `$${(revenue / 100).toFixed(2)}`, inline: true },
+                { name: 'Pain', value: proto.pain_summary || 'Unknown', inline: false },
+                { name: 'Days Live', value: String(daysSinceDeploy || '?'), inline: true },
+              ],
+              timestamp: new Date().toISOString(),
+            }],
+          });
+        } catch {}
+        alertedSteve++;
+      }
+
+      // 14-day kill gate
+      if (daysSinceDeploy !== null && daysSinceDeploy >= 14 && tractionScore < 20 && revenue === 0) {
+        dbRun("UPDATE opp_prototypes SET status = 'killed', updated_at = datetime('now') WHERE id = ?", [proto.id]);
+        dbRun("UPDATE opp_clusters SET status = 'killed', updated_at = datetime('now') WHERE id = ?", [proto.cluster_id]);
+        killed++;
+        try {
+          discord.postWebhook({
+            embeds: [{
+              title: '💀 Prototype killed — 14-day gate failed',
+              color: 0xff0000,
+              fields: [
+                { name: 'Prototype', value: proto.product_name || proto.id, inline: true },
+                { name: 'Traction Score', value: String(tractionScore), inline: true },
+                { name: 'Pain', value: proto.pain_summary || 'Unknown', inline: false },
+              ],
+            }],
+          });
+        } catch {}
+      }
+
+      // Day 7 early alert if traction is promising
+      if (daysSinceDeploy !== null && daysSinceDeploy >= 7 && daysSinceDeploy < 14 && tractionScore >= 50) {
+        try {
+          discord.postWebhook({
+            embeds: [{
+              title: '🚀 Prototype showing traction at day 7!',
+              color: 0x5865f2,
+              fields: [
+                { name: 'Prototype', value: proto.product_name || proto.id, inline: true },
+                { name: 'Traction Score', value: String(tractionScore), inline: true },
+                { name: 'Pain', value: proto.pain_summary || 'Unknown', inline: false },
+              ],
+            }],
+          });
+        } catch {}
+        alertedSteve++;
+      }
+
+      // Day 7 early kill if zero traction
+      if (daysSinceDeploy !== null && daysSinceDeploy >= 7 && tractionScore === 0 && revenue === 0) {
+        dbRun("UPDATE opp_prototypes SET status = 'killed', updated_at = datetime('now') WHERE id = ?", [proto.id]);
+        dbRun("UPDATE opp_clusters SET status = 'killed', updated_at = datetime('now') WHERE id = ?", [proto.cluster_id]);
+        killed++;
+      }
+
+      results.push({
+        name: proto.product_name || proto.id,
+        days: daysSinceDeploy,
+        traction: tractionScore,
+        revenue,
+      });
+      monitored++;
+    }
+
+    const durationMs = Date.now() - startTime;
+    const outputText = [
+      `Traction Monitor: ${monitored} prototypes checked, ${killed} killed, ${alertedSteve} alerts sent`,
+      ...results.map(r => `  ${r.name}: day ${r.days || '?'}, traction=${r.traction}, revenue=$${((r.revenue || 0) / 100).toFixed(2)}`),
+    ].join('\n');
+
+    return {
+      outputText,
+      durationMs,
+      costUsd: 0,
+      extra: { monitored, killed, alertedSteve, results },
+    };
+  },
+
+  // ── Idle Training v2 — Two-layer architecture with QA gate ──────────────
+  // Layer 1: Heartbeat triage decides activity type (reflection > corpus > YouTube)
+  // Layer 2: Deep training via queue → skill candidates → QA grading → promotion
+  // Modes: { mode: 'train' } (default), { mode: 'promote' }, { mode: 'stats' }
+  //        { agent_id } for specific agent, { max_agents } for batch (default 3)
+  idle_training: async ({ message, runId, agent }) => {
+    const trainer = require('../services/idleTrainer');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const mode = params.mode || (params.stats ? 'stats' : params.agent_id ? 'single' : 'train');
+
+    // ── Stats mode ──
+    if (mode === 'stats') {
+      const stats = trainer.getTrainingStats();
+      const capacity = trainer.getSystemCapacity();
+      const gates = trainer.checkTrainingGates();
+      const durationMs = Date.now() - startTime;
+      const outputText = [
+        `Training Stats (v2):`,
+        `  Sessions: ${stats.totalSessions} | Skills: ${stats.totalSkills} | Agents: ${stats.uniqueAgents} | Max level: ${stats.maxLevel}`,
+        `  Candidates: ${stats.candidates.pending} pending, ${stats.candidates.approved} approved, ${stats.candidates.rejected} rejected (avg QA: ${stats.candidates.avgScore})`,
+        `  Queue depth: ${stats.queueDepth} | By activity: ${stats.byActivity.map(a => `${a.activity_type}:${a.count}`).join(', ') || 'none yet'}`,
+        `  System: CPU ${capacity.cpuPercent}%, RAM ${capacity.ramPercent}% | Gates: ${gates.allowed ? 'OPEN' : gates.reason}`,
+        stats.recentQuip ? `  Latest quip: ${stats.recentQuip}` : null,
+        stats.topSkilled.length > 0 ? `  Top agents: ${stats.topSkilled.map(a => `${a.agent_name}(${a.total_levels}pts)`).join(', ')}` : null,
+      ].filter(Boolean).join('\n');
+      return { outputText, durationMs, costUsd: 0, extra: { ...stats, capacity, gates } };
+    }
+
+    // ── Promote mode — just run QA grading + promotion ──
+    if (mode === 'promote') {
+      const qa = require('../services/trainingQA');
+      const qaResult = await qa.runQACycle(parseInt(params.limit) || 10);
+      const durationMs = Date.now() - startTime;
+      const outputText = [
+        `QA Promotion Cycle: ${qaResult.graded} graded → ${qaResult.promoted} promoted, ${qaResult.rejected} rejected, ${qaResult.skipped} pending re-eval`,
+      ].join('\n');
+      return { outputText, durationMs, costUsd: 0, extra: qaResult };
+    }
+
+    // ── Single agent mode ──
+    if (mode === 'single' || params.agent_id) {
+      const result = await trainer.runTrainingSession(params.agent_id);
+      const durationMs = Date.now() - startTime;
+      if (result.skipped) {
+        return { outputText: `Idle Training: Skipped — ${result.reason}`, durationMs, costUsd: 0 };
+      }
+      const outputText = [
+        `${result.activityType === 'reflection' ? '\ud83d\udcad' : result.activityType === 'internal_corpus' ? '\ud83c\udfc6' : '\ud83c\udfac'} ${result.agent} — ${result.activityType} training`,
+        `  Topic: "${result.topic}"`,
+        result.video ? `  Video: ${result.video.title}` : null,
+        `  Skill candidate: ${result.skillName || 'none'} (pending QA) | Duration: ${(result.durationMs / 1000).toFixed(1)}s`,
+        `  \ud83d\udca1 ${result.quip}`,
+      ].filter(Boolean).join('\n');
+      return { outputText, durationMs, costUsd: 0, extra: result };
+    }
+
+    // ── Full training cycle (default) — queue + train + QA ──
+    const maxAgents = parseInt(params.max_agents) || 3;
+    const result = await trainer.runTrainingCycle(maxAgents);
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: result.summary,
+      durationMs,
+      costUsd: 0,
+      extra: { trained: result.trained, skipped: result.skipped, queued: result.queued, qa: result.qa },
+    };
+  },
+
+  // ── Revenue Signal Engine ─────────────────────────────────────────────────
+
+  rse_channel_monitor: async ({ message, runId, agent }) => {
+    const { discoverNewVideos } = require('../services/rseTranscriptService');
+    const startTime = Date.now();
+    const result = await discoverNewVideos();
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `RSE Channel Monitor: checked ${result.sourcesChecked} sources, found ${result.totalNew} new videos`,
+      durationMs,
+      costUsd: 0,
+      extra: result,
+    };
+  },
+
+  rse_transcript_extractor: async ({ message, runId, agent }) => {
+    const { extractPendingTranscripts } = require('../services/rseTranscriptService');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const limit = parseInt(params.limit) || 15;
+    const result = await extractPendingTranscripts(limit);
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `RSE Transcript Extractor: ${result.extracted} extracted, ${result.failed} failed, ${result.skipped} too short (${result.total} total)`,
+      durationMs,
+      costUsd: 0,
+      extra: result,
+    };
+  },
+
+  rse_signal_scorer: async ({ message, runId, agent }) => {
+    const { scoreBatch } = require('../services/rseSignalScorer');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const limit = parseInt(params.limit) || 10;
+    const result = await scoreBatch(limit);
+    const durationMs = Date.now() - startTime;
+
+    // Brain observation for accepted signals
+    try {
+      const brain = require('../services/collectiveBrain');
+      for (const r of result.results) {
+        if (r.accepted > 0) {
+          brain.observe(runId, 'rse-signal-scorer', 'market_insight', {
+            subject: r.title,
+            content: `New signals from "${r.title}": ${r.accepted} accepted, ${r.rejected} rejected`,
+            confidence: 0.8,
+            metadata: { transcript_id: r.id, accepted: r.accepted },
+          });
+        }
+      }
+    } catch {}
+
+    // Discord notification for new signals
+    if (result.accepted > 0) {
+      try {
+        const discord = require('../services/discordNotifier');
+        const { all: dbAll } = require('../db/connection');
+        const recentSignals = dbAll(
+          `SELECT sig.title, sig.composite_score, sig.signal_type, s.name AS source_name
+           FROM rse_signals sig JOIN rse_sources s ON s.id = sig.source_id
+           ORDER BY sig.created_at DESC LIMIT ?`, [result.accepted]
+        );
+        const signalList = recentSignals.map(s =>
+          `• **${s.title}** (${s.composite_score.toFixed(1)}/5) — ${s.source_name}`
+        ).join('\n');
+
+        await discord.sendEmbed({
+          title: `🎯 RSE: ${result.accepted} New Signal${result.accepted > 1 ? 's' : ''} Accepted`,
+          description: `Scored ${result.scored} transcripts.\n\n${signalList}`,
+          color: 0x9b59b6,
+          footer: { text: `${result.rejected} rejected | Signal Engine` },
+        });
+      } catch {}
+    }
+
+    return {
+      outputText: `RSE Signal Scorer: ${result.scored} transcripts scored, ${result.accepted} signals accepted, ${result.rejected} rejected`,
+      durationMs,
+      costUsd: 0,
+      extra: result,
+    };
+  },
+
+  rse_expert_librarian: async ({ message, runId, agent }) => {
+    const { extractBatch, getLibraryStats } = require('../services/rseExpertLibrary');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const limit = parseInt(params.limit) || 10;
+    const minScore = parseFloat(params.min_score) || 4.0;
+    const result = await extractBatch(limit, minScore);
+    const stats = getLibraryStats();
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `RSE Expert Librarian: ${result.extracted} patterns extracted, ${result.duplicatesSkipped} duplicates skipped. Library: ${stats.total} total (${stats.verified} verified)`,
+      durationMs,
+      costUsd: 0,
+      extra: { ...result, libraryStats: stats },
+    };
+  },
+
+  rse_code_builder: async ({ message, runId, agent }) => {
+    const params = parseMessageParams(message);
+    const startTime = Date.now();
+
+    // Evaluate mode (default for scheduled runs)
+    if (params.action === 'evaluate') {
+      const { evaluateBatch } = require('../services/rseEvaluator');
+      const limit = parseInt(params.limit) || 10;
+      const result = await evaluateBatch(limit);
+      const durationMs = Date.now() - startTime;
+      return {
+        outputText: `RSE Evaluator: ${result.evaluated} ideas evaluated, ${result.failed} failed`,
+        durationMs,
+        costUsd: result.evaluated * 0.003,
+        extra: result,
+      };
+    }
+
+    // Build mode (manual trigger only)
+    const { buildFromSpec, buildBatch } = require('../services/rseCodeBuilder');
+    let result;
+    if (params.spec_id) {
+      const buildResult = await buildFromSpec(parseInt(params.spec_id));
+      result = { built: 1, failed: 0, total: 1, results: [{ specId: params.spec_id, ...buildResult }] };
+    } else {
+      const limit = parseInt(params.limit) || 3;
+      result = await buildBatch(limit);
+    }
+
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `RSE Code Builder: ${result.built} built, ${result.failed} failed (${result.total} attempted)`,
+      durationMs,
+      costUsd: result.results.reduce((sum, r) => sum + (r.costUsd || 0), 0),
+      extra: result,
+    };
+  },
+
+  rse_feedback_loop: async ({ message, runId, agent }) => {
+    const { all: dbAll, run: dbRun, get: dbGet } = require('../db/connection');
+    const { pruneStalePatterns } = require('../services/rseExpertLibrary');
+    const startTime = Date.now();
+
+    // 1. Update source trust scores based on acceptance rates
+    const sources = dbAll('SELECT * FROM rse_sources WHERE enabled = 1 AND total_videos_scanned >= 5');
+    let sourcesUpdated = 0, sourcesDisabled = 0;
+
+    for (const source of sources) {
+      const rate = source.total_videos_scanned > 0
+        ? source.total_signals_accepted / source.total_videos_scanned
+        : 0;
+      // Trust score moves toward acceptance rate, with decay toward 0.5
+      const newTrust = Math.max(0.1, Math.min(0.95, (source.trust_score * 0.7) + (rate * 0.3)));
+      dbRun('UPDATE rse_sources SET trust_score = ? WHERE id = ?', [newTrust, source.id]);
+
+      // Auto-disable sources with very low trust after enough data
+      if (newTrust < 0.2 && source.total_videos_scanned >= 20) {
+        dbRun('UPDATE rse_sources SET enabled = 0 WHERE id = ?', [source.id]);
+        sourcesDisabled++;
+        console.log(`[RSE-Feedback] Disabled low-trust source: ${source.name} (trust: ${newTrust.toFixed(2)})`);
+      }
+      sourcesUpdated++;
+    }
+
+    // 2. Track campaign outcomes back to signals
+    const campaigns = dbAll(
+      `SELECT c.*, sig.source_id FROM rse_campaigns c
+       JOIN rse_signals sig ON sig.id = c.signal_id
+       WHERE c.status = 'completed' AND c.leads_generated > 0`
+    );
+
+    for (const campaign of campaigns) {
+      try {
+        const brain = require('../services/collectiveBrain');
+        brain.observe(runId, 'rse-feedback-loop', 'campaign_outcome', {
+          subject: campaign.title,
+          content: `Campaign "${campaign.title}" generated ${campaign.leads_generated} leads, $${(campaign.revenue_attributed_cents / 100).toFixed(2)} revenue`,
+          confidence: 0.9,
+          metadata: { campaign_id: campaign.id, leads: campaign.leads_generated, revenue_cents: campaign.revenue_attributed_cents },
+        });
+      } catch {}
+    }
+
+    // 3. Prune stale expert library patterns
+    const pruneResult = pruneStalePatterns();
+
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `RSE Feedback Loop: ${sourcesUpdated} sources updated, ${sourcesDisabled} disabled, ${pruneResult.pruned} stale patterns pruned, ${campaigns.length} campaign outcomes tracked`,
+      durationMs,
+      costUsd: 0,
+      extra: { sourcesUpdated, sourcesDisabled, pruned: pruneResult.pruned, campaignsTracked: campaigns.length },
+    };
+  },
+
+  // ── Dream Team Nightly Cycle ────────────────────────────────────────────
+
+  dream_team_nightly: async ({ message, runId, agent }) => {
+    const dt = require('../services/dreamTeamNightly');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    let result;
+    if (params.phase === 'collect') {
+      result = dt.collectDailyData();
+      return { outputText: `Dream Team: Data collected for ${result.date}`, durationMs: Date.now() - startTime, costUsd: 0, extra: { phase: 'collect' } };
+    } else if (params.phase === 'score') {
+      const snapshot = dt.collectDailyData();
+      const scorecards = await dt.scoreAgents(snapshot);
+      return { outputText: `Dream Team: ${scorecards.length} agents scored`, durationMs: Date.now() - startTime, costUsd: 0.015, extra: { phase: 'score', scorecards: scorecards.length } };
+    } else if (params.phase === 'report') {
+      const report = await dt.buildMorningReport();
+      return { outputText: `Dream Team: Morning report generated`, durationMs: Date.now() - startTime, costUsd: 0.006, extra: { phase: 'report' } };
+    } else {
+      // Full cycle (default for scheduled runs)
+      result = await dt.runFullCycle();
+      return {
+        outputText: `Dream Team Nightly: ${result.scorecards} scored, ${result.proposals} proposed, ${result.approved} approved, ${result.rejected} rejected, ${result.actions} actions taken`,
+        durationMs: result.durationMs,
+        costUsd: 0.07,
+        extra: result,
+      };
+    }
+  },
+
+  // ── Database Backup — daily SQLite backup with 7-day retention ──────────
+  database_backup: async ({ message, runId, agent }) => {
+    const { execSync } = require('child_process');
+    const path = require('path');
+    const startTime = Date.now();
+    try {
+      const scriptPath = path.join(__dirname, '../../scripts/backup-database.js');
+      const output = execSync(`node "${scriptPath}"`, { encoding: 'utf8', timeout: 30000 });
+      const durationMs = Date.now() - startTime;
+      return { outputText: output.trim(), durationMs, costUsd: 0 };
+    } catch (err) {
+      return { outputText: `Backup failed: ${err.message}`, durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+  },
+
+  // ── Ralph QA Gate — reviews outreach drafts and content pieces ──────────
+  // Deterministic scoring: subject, personalization, structure, safety, tone.
+  // $0/run. Modes:
+  //   { mode: 'outreach' }           — review pending outreach drafts (default)
+  //   { mode: 'content' }            — review pending content pieces
+  //   { mode: 'both' }               — review all pending
+  //   { mode: 'stats' }              — return QA queue stats
+  //   { sequence_id: 123 }           — review single outreach sequence
+  ralph_qa: async ({ message, runId, agent }) => {
+    const ralph = require('../services/ralphQA');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const mode = params.mode || (params.sequence_id ? 'single' : 'outreach');
+
+    if (mode === 'stats') {
+      const stats = ralph.getQAStats();
+      const durationMs = Date.now() - startTime;
+      return {
+        outputText: [
+          `Ralph QA Stats:`,
+          `  Outreach: ${stats.outreach.pending || 0} pending, ${stats.outreach.passed || 0} passed, ${stats.outreach.failed || 0} failed (avg: ${stats.outreach.avg_score ? Math.round(stats.outreach.avg_score) : 'N/A'})`,
+          `  Content:  ${stats.content.pending || 0} pending, ${stats.content.passed || 0} passed, ${stats.content.failed || 0} failed (avg: ${stats.content.avg_score ? Math.round(stats.content.avg_score) : 'N/A'})`,
+        ].join('\n'),
+        durationMs,
+        costUsd: 0,
+        extra: stats,
+      };
+    }
+
+    if (mode === 'single' && params.sequence_id) {
+      const result = ralph.reviewSingleOutreach(parseInt(params.sequence_id));
+      const durationMs = Date.now() - startTime;
+      return {
+        outputText: `Ralph QA: Sequence #${params.sequence_id} — ${result.passed ? 'PASSED' : 'FAILED'} (${result.score}/100). ${result.notes}`,
+        durationMs,
+        costUsd: 0,
+        extra: result,
+      };
+    }
+
+    const limit = parseInt(params.limit) || 20;
+    let outreachResult = { reviewed: 0, passed: 0, failed: 0, summary: '' };
+    let contentResult = { reviewed: 0, passed: 0, failed: 0, summary: '' };
+
+    if (mode === 'outreach' || mode === 'both') {
+      outreachResult = ralph.reviewOutreachBatch(limit);
+    }
+    if (mode === 'content' || mode === 'both') {
+      contentResult = ralph.reviewContentBatch(limit);
+    }
+
+    const durationMs = Date.now() - startTime;
+    const totalReviewed = outreachResult.reviewed + contentResult.reviewed;
+    const totalPassed = outreachResult.passed + contentResult.passed;
+    const totalFailed = outreachResult.failed + contentResult.failed;
+
+    return {
+      outputText: [
+        `Ralph QA Review: ${totalReviewed} items reviewed — ${totalPassed} passed, ${totalFailed} failed in ${(durationMs / 1000).toFixed(1)}s`,
+        outreachResult.reviewed > 0 ? `  Outreach: ${outreachResult.summary}` : null,
+        contentResult.reviewed > 0 ? `  Content: ${contentResult.summary}` : null,
+        totalReviewed === 0 ? '  No pending items in QA queue' : null,
+      ].filter(Boolean).join('\n'),
+      durationMs,
+      costUsd: 0,
+      extra: { outreach: outreachResult, content: contentResult },
+    };
+  },
+
+  // ── Weekly Portfolio Review — generates scorecard + posts to Discord ─────
+  // Runs Friday 5PM. Computes 5-dimension scores for all active agents,
+  // generates ranked report, posts summary to Discord, saves full report to file.
+  // $0/run — pure DB reads + file write.
+  weekly_portfolio_review: async ({ message, runId, agent }) => {
+    const { computeScorecard, generateWeeklyReport } = require('../services/portfolioScorecard');
+    const fs = require('fs');
+    const path = require('path');
+    const startTime = Date.now();
+
+    const { agents: scored, summary } = computeScorecard();
+    const report = generateWeeklyReport();
+
+    // Save to file
+    const today = new Date().toISOString().slice(0, 10);
+    const reportDir = path.join(process.cwd(), 'memory', 'daily_logs', 'weekly');
+    if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir, { recursive: true });
+    const reportPath = path.join(reportDir, `scorecard-${today}.md`);
+    fs.writeFileSync(reportPath, report, 'utf8');
+
+    // Post summary to Discord
+    try {
+      const discord = require('../services/discordNotifier');
+      const topPerformers = scored.filter(a => a.composite >= 80).slice(0, 5);
+      const watchList = scored.filter(a => a.composite >= 60 && a.composite < 80);
+      const actionRequired = scored.filter(a => a.composite < 60);
+
+      await discord.sendEmbed({
+        title: `Portfolio Scorecard — ${today}`,
+        color: actionRequired.length > 0 ? 0xff4444 : watchList.length > 0 ? 0xff9500 : 0x57f287,
+        fields: [
+          { name: 'Fleet', value: `${summary.total} scored | ${summary.continue_count} GO | ${summary.harden_count} HARDEN | ${summary.freeze_count} FREEZE`, inline: false },
+          { name: 'Cost', value: `$${summary.total_cost_7d.toFixed(4)} / ${summary.total_runs_7d} runs`, inline: true },
+          { name: 'Avg Score', value: `${summary.avg_composite}/100`, inline: true },
+          { name: 'Top 5', value: topPerformers.map(a => `${a.name}: ${a.composite}`).join('\n') || 'None', inline: false },
+          ...(watchList.length > 0 ? [{ name: `Watch (${watchList.length})`, value: watchList.slice(0, 5).map(a => `${a.name}: ${a.composite}`).join('\n'), inline: false }] : []),
+          ...(actionRequired.length > 0 ? [{ name: `ACTION (${actionRequired.length})`, value: actionRequired.map(a => `${a.name}: ${a.composite} → ${a.action}`).join('\n'), inline: false }] : []),
+        ],
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Weekly Portfolio Review' },
+      });
+    } catch {}
+
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `Portfolio Review: ${summary.total} agents — ${summary.continue_count} GO, ${summary.harden_count} HARDEN, ${summary.freeze_count} FREEZE | Avg: ${summary.avg_composite}/100 | $${summary.total_cost_7d.toFixed(4)}`,
+      durationMs,
+      costUsd: 0,
+      extra: summary,
     };
   },
 };
@@ -1263,6 +2649,21 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
     const runId = req.validated.params.id;
     const userId = req.user.id;
 
+    // 0. Daily cost cap — circuit breaker to prevent runaway GPT-4o spend
+    const dailyCostCap = parseFloat(
+      (get("SELECT value FROM settings WHERE key='daily_cost_cap'") || {}).value || '5.00'
+    );
+    const todayCost = get(
+      "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM runs WHERE DATE(created_at) = DATE('now') AND status = 'completed'"
+    );
+    if (todayCost && todayCost.total >= dailyCostCap) {
+      console.warn(`[Runs] Daily cost cap reached: $${todayCost.total.toFixed(4)} >= $${dailyCostCap}`);
+      throw new AppError(
+        `Daily cost cap reached ($${todayCost.total.toFixed(2)} / $${dailyCostCap}). Wait until tomorrow or increase 'daily_cost_cap' in Settings.`,
+        'DAILY_COST_CAP_REACHED', 429
+      );
+    }
+
     // 1. Fetch pending run
     const runData = get('SELECT * FROM runs WHERE id = ?', [runId]);
     if (!runData) throw new AppError(`Run not found.`, 'RUN_NOT_FOUND', 404);
@@ -1330,9 +2731,15 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
       }
     }
 
-    // ── OPENCLAW AGENT EXECUTION ──────────────────────────────────────────
+    // ── OPENCLAW / OLLAMA AGENT EXECUTION ────────────────────────────────
     const openclawId = agentConfig.openclaw_id;
-    if (!openclawId) {
+
+    // Route to Ollama if: global ollama_enabled=true AND agent has use_ollama:true
+    const ollamaEnabled = get("SELECT value FROM settings WHERE key='ollama_enabled'")?.value === 'true';
+    const useOllama = ollamaEnabled && (agentConfig.use_ollama === true);
+    const ollamaModel = get("SELECT value FROM settings WHERE key='ollama_model'")?.value || 'llama3.2:3b';
+
+    if (!useOllama && !openclawId) {
       markRunFailed(runId, agent.id, 'Agent not registered with OpenClaw');
       throw new AppError(`Agent "${agent.name}" has no openclaw_id configured.`, 'AGENT_NOT_REGISTERED', 400);
     }
@@ -1342,27 +2749,34 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
       Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`Agent timed out after ${ms / 1000}s`)), ms))]);
 
     try {
-      emitLog(`Starting OpenClaw agent "${agent.name}" (${openclawId})...`);
+      if (useOllama) {
+        emitLog(`Starting Ollama agent "${agent.name}" (${ollamaModel} — free local inference)...`);
+      } else {
+        emitLog(`Starting OpenClaw agent "${agent.name}" (${openclawId})...`);
+      }
 
-      const openclawBridge = require('../services/openclawBridge');
+      const activeBridge = useOllama
+        ? require('../services/ollamaBridge')
+        : require('../services/openclawBridge');
+
       const runResult = await withTimeout(
-        openclawBridge.runAgent(agent.id, { openclawId, message, sessionId }),
+        activeBridge.runAgent(useOllama ? agent.name : agent.id, { openclawId, message, sessionId, ollamaModel }),
         RUN_TIMEOUT_MS
       );
 
       emitLog(`Agent "${agent.name}" completed.`);
 
-      // Parse OpenClaw output
+      // Parse output (same format for both OpenClaw and Ollama bridges)
       let durationMs = null, tokensUsed = 0, costUsd = 0, outputText = '';
       try {
         const parsed = JSON.parse(runResult.output || '{}');
         if (parsed.payloads?.[0]?.text) {
-          // Native OpenClaw format: { payloads: [{ text }], meta: { durationMs, agentMeta: { usage } } }
+          // Native OpenClaw / Ollama bridge format
           outputText = parsed.payloads[0].text;
           durationMs = parsed.meta?.durationMs || null;
           const usage = parsed.meta?.agentMeta?.usage || {};
           tokensUsed = usage.total || ((usage.input || 0) + (usage.output || 0));
-          costUsd = (usage.input || 0) * 0.0000025 + (usage.output || 0) * 0.00001;
+          costUsd = useOllama ? 0 : ((usage.input || 0) * 0.0000025 + (usage.output || 0) * 0.00001);
         } else if (parsed.type === 'result') {
           // Legacy bridge format
           outputText = parsed.result || '';
@@ -1389,6 +2803,13 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
         `UPDATE agents SET status='idle', total_runs=total_runs+1, last_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
         [agent.id]
       );
+
+      // Validate LLM output against expected schema
+      const { validateAgentOutput, recordOutputQuality } = require('../services/outputValidator');
+      let parsedOutput = null;
+      try { parsedOutput = JSON.parse(outputText); } catch {}
+      const validation = validateAgentOutput(agent.name, parsedOutput, outputText);
+      recordOutputQuality(agent.name, runId, validation.score, validation.errors.length, validation.warnings.length);
 
       // Post-process LLM output into unified marketing pipeline
       const { postProcessLLMOutput } = require('../services/postProcessor');

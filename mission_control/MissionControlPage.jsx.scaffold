@@ -1,0 +1,1184 @@
+/**
+ * @file MissionControlPage.jsx.scaffold
+ * @description SCAFFOLD — rename to MissionControlPage.jsx and move to src/pages/ when ready to build.
+ *
+ * Mission Control — Steve's live business instrument panel.
+ * One screen. 30 seconds. Is the machine moving?
+ *
+ * LAYOUT (12-column grid):
+ *   Row 1: Header bar (col-span-12)
+ *   Row 2: Jake Panel | HOA Panel | Content Panel | Opportunities Panel (3 cols each)
+ *   Row 3: Activity Feed (cols 1-7) | Right column: Top 3 Today + Memory Pulse (cols 8-12)
+ *
+ * PHASES:
+ *   Phase 1 — Static layout with MOCK_DATA (rename file, plug in mocks, verify layout)
+ *   Phase 2 — Wire useDashboardData() to GET /api/dashboard/summary + GET /api/runs
+ *   Phase 3 — Socket.io real-time events + brain panel live
+ *   Phase 4 — Top 3 Today from Todd's debrief + [Run Now] buttons
+ *
+ * See mission_control/dashboard_spec.md for full spec.
+ * See mission_control/dashboard_api_spec.md for API contracts.
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  // Header icons
+  Crosshair, DollarSign, Bot, Clock, Zap, Plus, Wifi, WifiOff, HardDrive,
+  // Pipeline panel icons
+  Users, Mail, MessageSquare, Calendar, Flame, MapPin,
+  // Content panel icons
+  FileText, Send, CheckCircle, Rss,
+  // Activity feed icons
+  Activity, AlertCircle, Loader, CheckCircle2, XCircle, Timer,
+  // Opportunities icons
+  TrendingUp, Star, Lightbulb,
+  // Memory pulse icons
+  Brain, Database, ThumbsUp, ThumbsDown, Cpu,
+  // Top 3 icons
+  BarChart3, PlayCircle, ArrowRight,
+  // KPI icons
+  Target,
+} from 'lucide-react';
+import { api } from '@/lib/api';
+// import { io } from 'socket.io-client';  // Phase 3: uncomment when wiring Socket.io
+
+// ============================================================================
+// MOCK DATA — Phase 1 only. Remove when useDashboardData() is wired.
+// These numbers reflect real pipeline state as of 2026-03-13.
+// ============================================================================
+
+const MOCK_DATA = {
+  meta: {
+    generated_at: new Date().toISOString(),
+    cost_today_usd: 0.12,
+    cost_this_week_usd: 0.89,
+    agents_running: 2,
+    agents_total: 53,
+    schedules_active: 41,
+    agent_success_rate: 0.92,
+    reply_rate: 0.0,
+    days_since_revenue: 22,     // KPI #10 — the most important number
+  },
+  jake: {
+    total: 54,
+    with_email: 13,
+    email_pct: 24.07,
+    in_outreach: 4,
+    replied: 0,
+    hot: 3,
+    meetings: 0,
+    nurture: 0,
+    unsubscribed: 0,
+    bounced: 0,
+    last_lead_at: new Date(Date.now() - 19 * 3600000).toISOString(),
+    last_lead_hours_ago: 19.6,
+    funnel: { discovered: 54, enriched: 13, outreach: 4, replied: 0, meeting: 0 },
+  },
+  hoa: {
+    total: 568,
+    hot: 12,
+    warm: 47,
+    watch: 189,
+    cold: 320,
+    posted: 8,
+    pending_review: 23,
+    approved: 5,
+    rejected: 2,
+    last_discovery_at: new Date(Date.now() - 53 * 3600000).toISOString(),
+    last_discovery_hours_ago: 53.2,
+    geo_targets_active: 19,
+    funnel: { discovered: 568, hot_warm: 59, outreach_drafted: 28, posted: 8, engaged: 0 },
+  },
+  content: {
+    this_week: 4,
+    published: 2,
+    drafted: 2,
+    scheduled: 1,
+    social_posts_week: 6,
+    last_published_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    last_published_title: 'Why Construction CFOs Lose Sleep Over Month-End Close',
+    channels_active: ['blog', 'linkedin', 'facebook'],
+  },
+  opportunities: {
+    active: 2,
+    evaluating: 3,
+    converted: 0,
+    killed: 0,
+    top_opportunity: { id: 3, name: 'ClawOps as SaaS', ice_score: 63, status: 'evaluating' },
+    days_since_new_idea: 2,
+    ideas_above_60: 2,
+  },
+  brain: {
+    observations_7d: 47,
+    observations_total: 203,
+    kb_total: 18,
+    kb_total_uses: 94,
+    feedback_approved: 12,
+    feedback_rejected: 3,
+    feedback_total: 15,
+    episodes_total: 31,
+    episodes_avg_score: 0.41,
+    last_distillation_at: new Date(Date.now() - 11 * 3600000).toISOString(),
+    health: 'STABLE',
+  },
+  top_tasks: [
+    {
+      rank: 1,
+      priority: 'EXECUTE NOW',
+      title: 'Send outreach to 13 enriched Jake leads',
+      agent: 'jake-outreach-agent',
+      agent_slug: 'jake-outreach-agent',
+      estimated_cost_usd: 0.03,
+      revenue_impact: 'Direct path to first paid engagement — $5K+ per close',
+      score: 87,
+      message: '{"limit": 13, "status_filter": "enriched"}',
+    },
+    {
+      rank: 2,
+      priority: 'THIS WEEK',
+      title: 'Run HOA discovery on Phoenix geo-target',
+      agent: 'hoa-discovery',
+      agent_slug: 'hoa-discovery',
+      estimated_cost_usd: 0.0,
+      revenue_impact: 'Expand HOA funnel — 50-150 new communities expected',
+      score: 64,
+      message: '{"geo_target_id": "phoenix-az"}',
+    },
+    {
+      rank: 3,
+      priority: 'THIS WEEK',
+      title: 'Distill brain knowledge base (7-day backlog)',
+      agent: 'brain-distillation',
+      agent_slug: 'brain-distillation',
+      estimated_cost_usd: 0.0,
+      revenue_impact: 'Keeps outreach quality sharp — better emails = better reply rate',
+      score: 58,
+      message: '{}',
+    },
+  ],
+};
+
+// ============================================================================
+// PROJECT START DATE — for "Day X of building" counter
+// ============================================================================
+
+const PROJECT_START = new Date('2026-02-20T00:00:00.000Z');
+
+function getDayNumber() {
+  return Math.floor((Date.now() - PROJECT_START.getTime()) / 86400000) + 1;
+}
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Format a timestamp as "X min ago" / "X hrs ago" / "X days ago"
+ * @param {string|null} isoString
+ * @returns {string}
+ */
+function timeAgo(isoString) {
+  if (!isoString) return 'never';
+  const ms = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+/**
+ * Format a dollar amount with appropriate precision
+ * @param {number} amount
+ * @returns {string}
+ */
+function formatCost(amount) {
+  if (amount === 0) return '$0.00';
+  if (amount < 0.01) return `$${amount.toFixed(4)}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+/**
+ * Compute KPI traffic light color
+ * @param {number} value
+ * @param {number} greenThreshold
+ * @param {number} yellowThreshold
+ * @param {boolean} higherIsBetter
+ * @returns {'green'|'yellow'|'red'}
+ */
+function kpiColor(value, greenThreshold, yellowThreshold, higherIsBetter = true) {
+  if (higherIsBetter) {
+    if (value >= greenThreshold) return 'green';
+    if (value >= yellowThreshold) return 'yellow';
+    return 'red';
+  } else {
+    // Lower is better (e.g., "days since X")
+    if (value <= greenThreshold) return 'green';
+    if (value <= yellowThreshold) return 'yellow';
+    return 'red';
+  }
+}
+
+const KPI_COLOR_CLASSES = {
+  green:  'text-green-400 bg-green-400/10',
+  yellow: 'text-yellow-400 bg-yellow-400/10',
+  red:    'text-red-400 bg-red-400/10',
+};
+
+// ============================================================================
+// HOOK: useDashboardData
+// ============================================================================
+/**
+ * Aggregates all API calls for Mission Control.
+ *
+ * Phase 1: returns MOCK_DATA immediately.
+ * Phase 2: fetch from GET /api/dashboard/summary, poll every 30s.
+ * Phase 3: add Socket.io real-time updates.
+ *
+ * @returns {{ data: object, loading: boolean, error: string|null, refresh: () => void }}
+ */
+function useDashboardData() {
+  const [data, setData] = useState(MOCK_DATA);       // Phase 1: start with mock
+  const [loading, setLoading] = useState(false);     // Phase 2: set true on fetch
+  const [error, setError] = useState(null);          // Phase 2: set on fetch failure
+  const pollRef = useRef(null);
+
+  const refresh = useCallback(async () => {
+    // ── Phase 2: uncomment and implement ──────────────────────────────────
+    // setLoading(true);
+    // try {
+    //   const result = await api.get('/dashboard/summary');
+    //   setData(result);
+    //   setError(null);
+    // } catch (err) {
+    //   console.error('[useDashboardData] Fetch failed:', err);
+    //   setError(err.message);
+    //   // Keep stale data — don't blank the dashboard on a failed refresh
+    // } finally {
+    //   setLoading(false);
+    // }
+  }, []);
+
+  useEffect(() => {
+    // Phase 2: initial fetch + 30s polling
+    // refresh();
+    // pollRef.current = setInterval(refresh, 30000);
+    // return () => clearInterval(pollRef.current);
+  }, [refresh]);
+
+  return { data, loading, error, refresh };
+}
+
+// ============================================================================
+// HOOK: useActivityFeed
+// ============================================================================
+/**
+ * Manages the live activity feed.
+ *
+ * Phase 2: load initial runs from GET /api/runs?limit=25
+ * Phase 3: subscribe to Socket.io run:completed, run:log, run:failed
+ *
+ * @returns {{ runs: Array, connected: boolean }}
+ */
+function useActivityFeed() {
+  const [runs, setRuns] = useState([]);         // Array of run objects
+  const [connected, setConnected] = useState(false);
+  // const socketRef = useRef(null);            // Phase 3: Socket.io instance
+
+  useEffect(() => {
+    // ── Phase 2: load initial runs ─────────────────────────────────────────
+    // async function loadRuns() {
+    //   try {
+    //     const result = await api.get('/runs?limit=25');
+    //     setRuns(result.runs || []);
+    //   } catch (err) {
+    //     console.error('[useActivityFeed] Failed to load runs:', err);
+    //   }
+    // }
+    // loadRuns();
+
+    // ── Phase 3: Socket.io real-time updates ──────────────────────────────
+    // const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    // const socket = io(API_BASE);
+    // socketRef.current = socket;
+    //
+    // socket.on('connect', () => setConnected(true));
+    // socket.on('disconnect', () => setConnected(false));
+    //
+    // socket.on('run:completed', (data) => {
+    //   setRuns(prev => prev.map(r => r.id === data.runId
+    //     ? { ...r, status: 'completed', cost_usd: data.cost, duration_ms: data.duration }
+    //     : r
+    //   ));
+    // });
+    //
+    // socket.on('run:log', (data) => {
+    //   setRuns(prev => prev.map(r => r.id === data.runId
+    //     ? { ...r, _liveLog: data.line }
+    //     : r
+    //   ));
+    // });
+    //
+    // socket.on('run:failed', (data) => {
+    //   setRuns(prev => prev.map(r => r.id === data.runId
+    //     ? { ...r, status: 'failed', error_msg: data.error }
+    //     : r
+    //   ));
+    // });
+    //
+    // return () => socket.disconnect();
+  }, []);
+
+  return { runs, connected };
+}
+
+// ============================================================================
+// COMPONENT: KPIBadge
+// ============================================================================
+/**
+ * Single KPI chip with traffic-light coloring.
+ *
+ * @param {{ label: string, value: number|string, unit?: string, color?: 'green'|'yellow'|'red' }} props
+ */
+function KPIBadge({ label, value, unit = '', color = 'green' }) {
+  return (
+    <div className={`flex flex-col items-center px-3 py-1 rounded-md text-xs font-mono ${KPI_COLOR_CLASSES[color]}`}>
+      <span className="text-base font-bold leading-tight">{value}{unit}</span>
+      <span className="text-[10px] opacity-70 uppercase tracking-wider">{label}</span>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: FunnelBar
+// ============================================================================
+/**
+ * Horizontal proportional funnel visualization.
+ * Each stage width = stage.count / max_count * 100%.
+ * Minimum rendered width: 4px per segment (so zero-count stages show as a sliver).
+ *
+ * @param {{ stages: Array<{label: string, count: number, color: string}> }} props
+ */
+function FunnelBar({ stages }) {
+  const maxCount = Math.max(...stages.map(s => s.count), 1);
+  return (
+    <div className="flex items-end gap-0.5 h-6 w-full mt-2" title="Pipeline funnel">
+      {stages.map((stage) => {
+        const pct = Math.max((stage.count / maxCount) * 100, 2);
+        return (
+          <div
+            key={stage.label}
+            className={`${stage.color} rounded-sm transition-all duration-500 flex-shrink-0`}
+            style={{ width: `${pct}%`, height: '100%', minWidth: '4px' }}
+            title={`${stage.label}: ${stage.count}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: MissionHeader
+// ============================================================================
+/**
+ * Header bar — founder identity strip + live metric chips + quick actions.
+ *
+ * @param {{ meta: object, ollamaOk: boolean, backupOk: boolean, socketConnected: boolean, onRunTodd: () => void, onRunScout: () => void, onAddIdea: () => void }} props
+ */
+function MissionHeader({ meta, ollamaOk, backupOk, socketConnected, onRunTodd, onRunScout, onAddIdea }) {
+  const dayNumber = getDayNumber();
+  const revenueColor = meta.days_since_revenue == null ? 'yellow'
+    : kpiColor(meta.days_since_revenue, 7, 30, false);  // higherIsBetter=false
+
+  return (
+    <div className="col-span-12 flex items-center justify-between px-4 h-14 bg-bg-surface border border-border-subtle rounded-lg">
+      {/* Left — Founder identity */}
+      <div className="flex items-center gap-3">
+        <Crosshair size={18} className="text-accent-primary" />
+        <span className="text-sm font-semibold text-text-primary">Mission Control</span>
+        <span className="text-xs text-text-muted">Day {dayNumber} of building</span>
+        <span className="text-border-subtle">|</span>
+        {/* Socket connection indicator */}
+        {socketConnected
+          ? <Wifi size={12} className="text-green-400" title="Real-time connected" />
+          : <WifiOff size={12} className="text-text-muted" title="Polling mode" />
+        }
+      </div>
+
+      {/* Center — Live metric strip */}
+      <div className="flex items-center gap-2">
+        <KPIBadge
+          label="cost today"
+          value={formatCost(meta.cost_today_usd)}
+          color={kpiColor(meta.cost_today_usd, 1.0, 3.0, false)}
+        />
+        <KPIBadge
+          label="running"
+          value={meta.agents_running}
+          unit=" agents"
+          color={meta.agents_running > 0 ? 'green' : 'yellow'}
+        />
+        <KPIBadge
+          label="schedules"
+          value={meta.schedules_active}
+          unit=" active"
+          color="green"
+        />
+        <KPIBadge
+          label="success rate"
+          value={`${Math.round(meta.agent_success_rate * 100)}%`}
+          color={kpiColor(meta.agent_success_rate, 0.9, 0.75)}
+        />
+        {/* KPI #10 — days since revenue. Most important. */}
+        <KPIBadge
+          label="days since $"
+          value={meta.days_since_revenue ?? '—'}
+          color={revenueColor}
+        />
+        {/* Status indicators */}
+        <div className="flex items-center gap-1.5 ml-1">
+          <div
+            className={`w-2 h-2 rounded-full ${ollamaOk ? 'bg-green-400' : 'bg-red-400'}`}
+            title={`Ollama: ${ollamaOk ? 'available' : 'offline'}`}
+          />
+          <span className="text-[10px] text-text-muted">Ollama</span>
+          <div
+            className={`w-2 h-2 rounded-full ml-2 ${backupOk ? 'bg-green-400' : 'bg-yellow-400'}`}
+            title={`Backup: ${backupOk ? 'recent' : 'stale'}`}
+          />
+          <HardDrive size={10} className="text-text-muted" />
+        </div>
+      </div>
+
+      {/* Right — Quick actions */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onRunTodd}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary border border-accent-primary/20 transition-colors"
+          title="Run daily debrief (Todd)"
+        >
+          <Bot size={12} />
+          Run Todd
+        </button>
+        <button
+          onClick={onRunScout}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-bg-elevated hover:bg-bg-surface-hover text-text-secondary border border-border-subtle transition-colors"
+          title="Run Jake construction discovery"
+        >
+          <MapPin size={12} />
+          Run Scout
+        </button>
+        <button
+          onClick={onAddIdea}
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md bg-bg-elevated hover:bg-bg-surface-hover text-text-muted border border-border-subtle transition-colors"
+          title="Add new opportunity idea"
+        >
+          <Plus size={12} />
+          Idea
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: PipelinePanel
+// ============================================================================
+/**
+ * Reusable pipeline panel — used for both Jake and HOA.
+ *
+ * @param {{
+ *   title: string,
+ *   icon: React.ElementType,
+ *   accentColor: string,
+ *   metrics: Array<{label: string, value: string|number, badge?: string, badgeColor?: string}>,
+ *   funnelStages: Array<{label: string, count: number, color: string}>,
+ *   lastRunAt: string|null,
+ *   lastRunLabel: string
+ * }} props
+ */
+function PipelinePanel({ title, icon: Icon, accentColor, metrics, funnelStages, lastRunAt, lastRunLabel }) {
+  const staleness = lastRunAt ? (Date.now() - new Date(lastRunAt).getTime()) / 3600000 : Infinity;
+  const stalenessColor = staleness < 2 ? 'bg-green-400' : staleness < 8 ? 'bg-yellow-400' : 'bg-red-400';
+
+  return (
+    <div className="col-span-3 bg-bg-surface border border-border-subtle rounded-lg p-3 flex flex-col h-48">
+      {/* Panel header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Icon size={14} className={accentColor} />
+          <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">{title}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full ${stalenessColor}`} title={`Last run: ${timeAgo(lastRunAt)}`} />
+          <span className="text-[10px] text-text-muted">{lastRunLabel}</span>
+        </div>
+      </div>
+
+      {/* Metrics grid — 2 columns */}
+      <div className="grid grid-cols-2 gap-x-2 gap-y-1 flex-1">
+        {metrics.map(({ label, value, badge, badgeColor }) => (
+          <div key={label} className="flex items-center justify-between">
+            <span className="text-[11px] text-text-muted truncate">{label}</span>
+            <div className="flex items-center gap-1">
+              <span className="text-sm font-bold text-text-primary">{value}</span>
+              {badge && (
+                <span className={`text-[9px] px-1 py-0.5 rounded font-semibold ${badgeColor || 'bg-gray-500/20 text-gray-400'}`}>
+                  {badge}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Mini funnel */}
+      {funnelStages && funnelStages.length > 0 && (
+        <FunnelBar stages={funnelStages} />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: ContentPanel
+// ============================================================================
+/**
+ * Content Engine panel — posts, channels, publish cadence.
+ *
+ * @param {{ data: object }} props — data = summary.content
+ */
+function ContentPanel({ data }) {
+  const CHANNEL_STYLES = {
+    blog:      'bg-blue-500/20 text-blue-400',
+    linkedin:  'bg-sky-600/20 text-sky-300',
+    facebook:  'bg-indigo-500/20 text-indigo-400',
+    email:     'bg-green-500/20 text-green-400',
+    twitter:   'bg-cyan-500/20 text-cyan-400',
+  };
+
+  return (
+    <div className="col-span-3 bg-bg-surface border border-border-subtle rounded-lg p-3 flex flex-col h-48">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-2">
+        <FileText size={14} className="text-accent-info" />
+        <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Content Engine</span>
+      </div>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 gap-x-2 gap-y-1 flex-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">This week</span>
+          <span className="text-sm font-bold text-text-primary">{data.this_week}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Published</span>
+          <span className="text-sm font-bold text-green-400">{data.published}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Drafts</span>
+          <span className="text-sm font-bold text-yellow-400">{data.drafted}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Scheduled</span>
+          <span className="text-sm font-bold text-text-primary">{data.scheduled}</span>
+        </div>
+        <div className="col-span-2 flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Social/week</span>
+          <span className="text-sm font-bold text-text-primary">{data.social_posts_week}</span>
+        </div>
+      </div>
+
+      {/* Last published */}
+      {data.last_published_title && (
+        <div className="text-[10px] text-text-muted truncate mb-1" title={data.last_published_title}>
+          Last: "{data.last_published_title?.slice(0, 32)}..." — {timeAgo(data.last_published_at)}
+        </div>
+      )}
+
+      {/* Channel badges */}
+      <div className="flex flex-wrap gap-1">
+        {(data.channels_active || []).map(ch => (
+          <span key={ch} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold uppercase ${CHANNEL_STYLES[ch] || 'bg-gray-500/20 text-gray-400'}`}>
+            {ch}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: OpportunityPanel
+// ============================================================================
+/**
+ * Revenue Experiments panel — ICE-scored opportunity tracker.
+ *
+ * @param {{ data: object, onAddIdea: () => void }} props — data = summary.opportunities
+ */
+function OpportunityPanel({ data, onAddIdea }) {
+  const iceColor = data.top_opportunity?.ice_score >= 70 ? 'text-green-400 bg-green-400/10'
+    : data.top_opportunity?.ice_score >= 50 ? 'text-yellow-400 bg-yellow-400/10'
+    : 'text-gray-400 bg-gray-400/10';
+  const iceLabel = data.top_opportunity?.ice_score >= 70 ? 'Execute Now'
+    : data.top_opportunity?.ice_score >= 50 ? 'This Week' : 'Backlog';
+
+  return (
+    <div className="col-span-3 bg-bg-surface border border-border-subtle rounded-lg p-3 flex flex-col h-48">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={14} className="text-accent-warning" />
+          <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Experiments</span>
+        </div>
+        <button
+          onClick={onAddIdea}
+          className="text-[10px] text-text-muted hover:text-accent-primary transition-colors flex items-center gap-0.5"
+          title="Add new idea"
+        >
+          <Plus size={10} /> Idea
+        </button>
+      </div>
+
+      {/* Top opportunity */}
+      {data.top_opportunity && (
+        <div className="mb-2 p-2 rounded bg-bg-elevated border border-border-subtle">
+          <div className="flex items-center justify-between mb-0.5">
+            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${iceColor}`}>
+              ICE {data.top_opportunity.ice_score} · {iceLabel}
+            </span>
+          </div>
+          <div className="text-xs text-text-primary font-medium truncate">{data.top_opportunity.name}</div>
+        </div>
+      )}
+
+      {/* Metrics grid */}
+      <div className="grid grid-cols-2 gap-x-2 gap-y-1 flex-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Active</span>
+          <span className="text-sm font-bold text-text-primary">{data.active}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Evaluating</span>
+          <span className="text-sm font-bold text-yellow-400">{data.evaluating}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Converted</span>
+          <span className={`text-sm font-bold ${data.converted > 0 ? 'text-green-400' : 'text-text-muted'}`}>{data.converted}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-text-muted">Score &gt; 60</span>
+          <span className="text-sm font-bold text-text-primary">{data.ideas_above_60}</span>
+        </div>
+      </div>
+
+      <div className="text-[10px] text-text-muted">
+        Last idea: {data.days_since_new_idea === 0 ? 'today' : `${data.days_since_new_idea}d ago`}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: ActivityFeed
+// ============================================================================
+/**
+ * Live agent run stream.
+ *
+ * Phase 1: shows empty state.
+ * Phase 2: hydrated from GET /api/runs?limit=25.
+ * Phase 3: real-time via Socket.io.
+ *
+ * @param {{ runs: Array, connected: boolean }} props
+ */
+function ActivityFeed({ runs, connected }) {
+  const navigate = useNavigate();
+
+  const STATUS_STYLES = {
+    completed: { dot: 'bg-green-400',       row: '',                    icon: CheckCircle2 },
+    failed:    { dot: 'bg-red-400',         row: 'bg-red-400/5',        icon: XCircle },
+    running:   { dot: 'bg-blue-400 animate-pulse', row: 'bg-blue-400/5', icon: Loader },
+    pending:   { dot: 'bg-yellow-400',      row: '',                    icon: Timer },
+    cancelled: { dot: 'bg-gray-400',        row: '',                    icon: XCircle },
+  };
+
+  // Phase 1 mock runs for layout verification
+  const MOCK_RUNS = [
+    { id: '1', agent_name: 'jake-contact-enricher', status: 'completed', result_data: '{"outputText":"23/30 enriched — Tampa Bay, FL"}', cost_usd: 0, created_at: new Date(Date.now() - 2 * 60000).toISOString() },
+    { id: '2', agent_name: 'hoa-discovery',         status: 'completed', result_data: '{"outputText":"South Florida: 568 HOAs, 162 queries"}', cost_usd: 0, created_at: new Date(Date.now() - 53 * 3600000).toISOString() },
+    { id: '3', agent_name: 'daily-debrief',         status: 'running',   result_data: '{"outputText":"Generating debrief..."}',           cost_usd: 0.01, created_at: new Date().toISOString() },
+    { id: '4', agent_name: 'jake-lead-scout',       status: 'failed',    error_msg: 'Agent timed out after 300s',                        cost_usd: 0.02, created_at: new Date(Date.now() - 5 * 60000).toISOString() },
+    { id: '5', agent_name: 'brain-distillation',    status: 'completed', result_data: '{"outputText":"8 new KB entries, 47 observations"}', cost_usd: 0, created_at: new Date(Date.now() - 11 * 3600000).toISOString() },
+  ];
+
+  const displayRuns = runs.length > 0 ? runs : MOCK_RUNS;
+
+  function getSummary(runRow) {
+    if (runRow.error_msg) return runRow.error_msg;
+    try {
+      const rd = JSON.parse(runRow.result_data || '{}');
+      return rd.outputText || rd.output || '—';
+    } catch { return '—'; }
+  }
+
+  return (
+    <div className="col-span-7 bg-bg-surface border border-border-subtle rounded-lg flex flex-col overflow-hidden">
+      {/* Feed header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Activity size={13} className="text-accent-primary" />
+          <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Live Activity</span>
+          {connected && <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" title="Real-time" />}
+        </div>
+        <span className="text-[10px] text-text-muted">Last {displayRuns.length} runs</span>
+      </div>
+
+      {/* Run entries */}
+      <div className="flex-1 overflow-y-auto">
+        {displayRuns.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-text-muted text-xs">
+            No runs yet — agents will appear here when they fire
+          </div>
+        ) : (
+          displayRuns.map((runRow) => {
+            const style  = STATUS_STYLES[runRow.status] || STATUS_STYLES.pending;
+            const Icon   = style.icon;
+            const summary = getSummary(runRow);
+
+            return (
+              <div
+                key={runRow.id}
+                onClick={() => navigate(`/monitor?run=${runRow.id}`)}
+                className={`flex items-center gap-2 px-3 py-2 border-b border-border-subtle cursor-pointer hover:bg-bg-elevated transition-colors ${style.row}`}
+              >
+                {/* Status indicator */}
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
+
+                {/* Agent name */}
+                <span className="text-xs font-medium text-text-secondary w-36 flex-shrink-0 truncate">
+                  {runRow.agent_name}
+                </span>
+
+                {/* Summary */}
+                <span className="text-xs text-text-muted flex-1 truncate">{summary}</span>
+
+                {/* Cost */}
+                <span className={`text-xs flex-shrink-0 w-12 text-right ${runRow.cost_usd > 0.1 ? 'text-accent-warning' : 'text-text-muted'}`}>
+                  {runRow.cost_usd > 0 ? formatCost(runRow.cost_usd) : '—'}
+                </span>
+
+                {/* Time ago */}
+                <span className="text-[10px] text-text-muted flex-shrink-0 w-14 text-right">
+                  {timeAgo(runRow.created_at)}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: TopThreePanel
+// ============================================================================
+/**
+ * Today's top 3 tasks from Todd's reverse prompt engine.
+ *
+ * Phase 1: shows mock tasks.
+ * Phase 4: populated from summary.top_tasks via Todd's daily-debrief run.
+ *
+ * @param {{ tasks: Array, generatedAt: string|null, onRunTask: (task: object) => void }} props
+ */
+function TopThreePanel({ tasks, generatedAt, onRunTask }) {
+  const PRIORITY_STYLES = {
+    'EXECUTE NOW': 'text-green-400 bg-green-400/10 border border-green-400/20',
+    'THIS WEEK':   'text-yellow-400 bg-yellow-400/10 border border-yellow-400/20',
+    'BACKLOG':     'text-gray-400 bg-gray-400/10 border border-gray-400/20',
+  };
+
+  return (
+    <div className="flex-[2] bg-bg-surface border border-border-subtle rounded-lg p-3 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Target size={13} className="text-accent-primary" />
+          <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Today's Priorities</span>
+        </div>
+        {generatedAt && (
+          <span className="text-[10px] text-text-muted">Todd · {timeAgo(generatedAt)}</span>
+        )}
+      </div>
+
+      {/* Task cards */}
+      {tasks.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
+          <Bot size={20} className="text-text-muted" />
+          <p className="text-xs text-text-muted">No priorities yet today.</p>
+          <p className="text-[11px] text-text-muted">Run Todd to generate today's ranked task list.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5 flex-1 overflow-y-auto">
+          {tasks.slice(0, 3).map((task) => (
+            <div
+              key={task.rank}
+              className="p-2 rounded bg-bg-elevated border border-border-subtle flex flex-col gap-1"
+            >
+              <div className="flex items-center justify-between">
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${PRIORITY_STYLES[task.priority] || PRIORITY_STYLES['BACKLOG']}`}>
+                  #{task.rank} {task.priority}
+                </span>
+                <span className="text-[10px] text-text-muted">Score: {task.score}</span>
+              </div>
+              <div className="text-xs text-text-primary font-medium leading-tight truncate">{task.title}</div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-text-muted truncate flex-1">{task.agent} · {task.estimated_cost_usd > 0 ? formatCost(task.estimated_cost_usd) : '$0'}</span>
+                <button
+                  onClick={() => onRunTask(task)}
+                  className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary transition-colors flex-shrink-0 ml-2"
+                >
+                  <PlayCircle size={10} />
+                  Run
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPONENT: MemoryPulse
+// ============================================================================
+/**
+ * Collective Brain health panel.
+ *
+ * @param {{ data: object }} props — data = summary.brain
+ */
+function MemoryPulse({ data }) {
+  const HEALTH_STYLES = {
+    LEARNING: 'text-green-400 bg-green-400/10 border-green-400/30',
+    STABLE:   'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',
+    STALE:    'text-red-400 bg-red-400/10 border-red-400/30',
+  };
+
+  const healthStyle = HEALTH_STYLES[data.health] || HEALTH_STYLES.STALE;
+  const fbTotal = data.feedback_total || 1;
+  const approvedPct = Math.round((data.feedback_approved / fbTotal) * 100);
+
+  return (
+    <div className="flex-[3] bg-bg-surface border border-border-subtle rounded-lg p-3 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Brain size={13} className="text-accent-primary" />
+          <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Memory Pulse</span>
+        </div>
+        <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase ${healthStyle}`}>
+          {data.health}
+        </span>
+      </div>
+
+      {/* Two-column layout */}
+      <div className="grid grid-cols-2 gap-x-3 flex-1 overflow-hidden">
+        {/* Left — brain stats */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-text-muted">Observations / 7d</span>
+            <span className="text-sm font-bold text-text-primary">{data.observations_7d}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-text-muted">KB entries</span>
+            <span className="text-sm font-bold text-text-primary">{data.kb_total}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-text-muted">KB retrievals</span>
+            <span className="text-sm font-bold text-text-primary">{data.kb_total_uses}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-text-muted">Episodes</span>
+            <span className="text-sm font-bold text-text-primary">{data.episodes_total}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-text-muted">Avg outcome</span>
+            <span className={`text-sm font-bold ${(data.episodes_avg_score ?? 0) > 0.6 ? 'text-green-400' : (data.episodes_avg_score ?? 0) > 0.4 ? 'text-yellow-400' : 'text-red-400'}`}>
+              {data.episodes_avg_score != null ? `${Math.round(data.episodes_avg_score * 100)}%` : '—'}
+            </span>
+          </div>
+        </div>
+
+        {/* Right — feedback signals */}
+        <div className="flex flex-col gap-1.5">
+          <div className="text-[10px] text-text-muted mb-0.5">Feedback signals</div>
+          <div className="flex items-center gap-1.5">
+            <ThumbsUp size={11} className="text-green-400 flex-shrink-0" />
+            <div className="flex-1 h-1.5 bg-bg-elevated rounded-full overflow-hidden">
+              <div className="h-full bg-green-400 rounded-full transition-all" style={{ width: `${approvedPct}%` }} />
+            </div>
+            <span className="text-[10px] text-green-400 w-6 text-right">{data.feedback_approved}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ThumbsDown size={11} className="text-red-400 flex-shrink-0" />
+            <div className="flex-1 h-1.5 bg-bg-elevated rounded-full overflow-hidden">
+              <div className="h-full bg-red-400 rounded-full transition-all" style={{ width: `${100 - approvedPct}%` }} />
+            </div>
+            <span className="text-[10px] text-red-400 w-6 text-right">{data.feedback_rejected}</span>
+          </div>
+
+          <div className="mt-1 pt-1 border-t border-border-subtle">
+            <div className="text-[10px] text-text-muted">Last distillation</div>
+            <div className="text-xs text-text-secondary">{timeAgo(data.last_distillation_at)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// PAGE: MissionControlPage
+// ============================================================================
+/**
+ * Mission Control — main page component.
+ *
+ * Render order:
+ * 1. useDashboardData() — aggregates all API data
+ * 2. useActivityFeed() — manages run stream + Socket.io
+ * 3. Passes data down to panel components via props
+ * 4. No business logic in JSX — all logic in hooks and utility functions
+ */
+export default function MissionControlPage() {
+  const navigate = useNavigate();
+
+  // ── Data hooks ──────────────────────────────────────────────────────────
+  const { data, loading, error, refresh } = useDashboardData();
+  const { runs, connected } = useActivityFeed();
+
+  // ── Local state ──────────────────────────────────────────────────────────
+  const [ollamaOk, setOllamaOk] = useState(true);     // bool — from /api/openclaw/ollama/status
+  const [backupOk, setBackupOk] = useState(true);      // bool — from /api/openclaw/backup/status
+  const [showIdeaModal, setShowIdeaModal] = useState(false);  // Phase 2: idea input modal
+
+  // ── Status checks (on-load only) ─────────────────────────────────────────
+  useEffect(() => {
+    async function checkStatus() {
+      // Phase 2: uncomment these
+      // try {
+      //   const ollama = await api.get('/openclaw/ollama/status').catch(() => ({ available: false }));
+      //   setOllamaOk(ollama.available ?? false);
+      //   const backup = await api.get('/openclaw/backup/status').catch(() => ({ last_backup_at: null }));
+      //   const backupAge = backup.last_backup_at ? (Date.now() - new Date(backup.last_backup_at).getTime()) / 3600000 : Infinity;
+      //   setBackupOk(backupAge < 48);
+      // } catch { /* non-fatal */ }
+    }
+    checkStatus();
+  }, []);
+
+  // ── Quick action handlers ────────────────────────────────────────────────
+
+  const handleRunTodd = async () => {
+    // Phase 2: POST to create a pending run for daily-debrief
+    // try {
+    //   const agent = await api.get('/agents').then(r => r.agents.find(a => a.name === 'daily-debrief'));
+    //   if (agent) await api.post('/runs', { agent_id: agent.id, message: 'Run daily debrief', trigger: 'manual' });
+    //   refresh();
+    // } catch (err) { console.error('[MissionControl] Run Todd failed:', err); }
+    console.log('[MissionControl] Run Todd clicked — wire in Phase 2');
+  };
+
+  const handleRunScout = async () => {
+    // Phase 2: POST to create a pending run for jake-construction-discovery
+    console.log('[MissionControl] Run Scout clicked — wire in Phase 2');
+  };
+
+  const handleAddIdea = () => {
+    setShowIdeaModal(true);  // Phase 2: implement modal
+    console.log('[MissionControl] Add Idea clicked — wire modal in Phase 2');
+  };
+
+  const handleRunTask = async (task) => {
+    // Phase 4: POST to create a pending run for task.agent with task.message
+    // try {
+    //   const agent = await api.get('/agents').then(r => r.agents.find(a => a.name === task.agent_slug));
+    //   if (agent) await api.post('/runs', { agent_id: agent.id, message: task.message, trigger: 'manual' });
+    //   refresh();
+    // } catch (err) { console.error('[MissionControl] Run task failed:', err); }
+    console.log('[MissionControl] Run task:', task.title, '— wire in Phase 4');
+  };
+
+  // ── Jake pipeline panel config ───────────────────────────────────────────
+  const jakeMetrics = [
+    { label: 'Total leads',   value: data.jake.total },
+    { label: 'With email',    value: data.jake.with_email,  badge: `${data.jake.email_pct?.toFixed(0)}%`, badgeColor: data.jake.email_pct > 25 ? 'bg-green-400/20 text-green-400' : 'bg-yellow-400/20 text-yellow-400' },
+    { label: 'In outreach',   value: data.jake.in_outreach },
+    { label: 'Replied',       value: data.jake.replied },
+    { label: 'HOT leads',     value: data.jake.hot,        badge: data.jake.hot > 0 ? 'HOT' : null, badgeColor: 'bg-orange-400/20 text-orange-400' },
+    { label: 'Meetings',      value: data.jake.meetings,   badge: data.jake.meetings > 0 ? 'BOOKED' : null, badgeColor: 'bg-green-400/20 text-green-400' },
+  ];
+  const jakeFunnel = [
+    { label: 'Discovered', count: data.jake.funnel.discovered, color: 'bg-accent-info' },
+    { label: 'Enriched',   count: data.jake.funnel.enriched,   color: 'bg-accent-primary' },
+    { label: 'Outreach',   count: data.jake.funnel.outreach,   color: 'bg-accent-warning' },
+    { label: 'Replied',    count: data.jake.funnel.replied,    color: 'bg-accent-success' },
+    { label: 'Meeting',    count: data.jake.funnel.meeting,    color: 'bg-green-400' },
+  ];
+
+  // ── HOA pipeline panel config ────────────────────────────────────────────
+  const hoaMetrics = [
+    { label: 'Discovered',     value: data.hoa.total },
+    { label: 'HOT tier',       value: data.hoa.hot,         badge: data.hoa.hot > 0 ? 'HOT' : null,  badgeColor: 'bg-red-400/20 text-red-400' },
+    { label: 'WARM tier',      value: data.hoa.warm,        badge: data.hoa.warm > 0 ? 'WARM' : null, badgeColor: 'bg-orange-400/20 text-orange-400' },
+    { label: 'Posted',         value: data.hoa.posted },
+    { label: 'Pending review', value: data.hoa.pending_review, badge: data.hoa.pending_review > 10 ? '!' : null, badgeColor: 'bg-yellow-400/20 text-yellow-400' },
+    { label: 'Geo-targets',    value: data.hoa.geo_targets_active },
+  ];
+  const hoaFunnel = [
+    { label: 'Discovered',  count: data.hoa.funnel.discovered,     color: 'bg-accent-info' },
+    { label: 'Hot + Warm',  count: data.hoa.funnel.hot_warm,       color: 'bg-orange-400' },
+    { label: 'Drafted',     count: data.hoa.funnel.outreach_drafted, color: 'bg-accent-warning' },
+    { label: 'Posted',      count: data.hoa.funnel.posted,         color: 'bg-accent-success' },
+    { label: 'Engaged',     count: data.hoa.funnel.engaged,        color: 'bg-green-400' },
+  ];
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  return (
+    <div className="grid grid-cols-12 gap-3 p-4 h-full" style={{ gridTemplateRows: 'auto auto 1fr' }}>
+
+      {/* ROW 1 — HEADER BAR */}
+      {/* See MissionHeader component above */}
+      <MissionHeader
+        meta={data.meta}
+        ollamaOk={ollamaOk}
+        backupOk={backupOk}
+        socketConnected={connected}
+        onRunTodd={handleRunTodd}
+        onRunScout={handleRunScout}
+        onAddIdea={handleAddIdea}
+      />
+
+      {/* ROW 2 — FOUR PIPELINE PANELS */}
+
+      {/* JAKE PIPELINE PANEL — cols 1-3 */}
+      {/* Data: summary.jake | Refresh: 30s | See Section 3 of dashboard_spec.md */}
+      <PipelinePanel
+        title="Jake Pipeline"
+        icon={Users}
+        accentColor="text-accent-primary"
+        metrics={jakeMetrics}
+        funnelStages={jakeFunnel}
+        lastRunAt={data.jake.last_lead_at}
+        lastRunLabel={data.jake.last_lead_hours_ago != null ? `${data.jake.last_lead_hours_ago.toFixed(0)}h ago` : 'never'}
+      />
+
+      {/* HOA PIPELINE PANEL — cols 4-6 */}
+      {/* Data: summary.hoa | Refresh: 30s | See Section 3 of dashboard_spec.md */}
+      <PipelinePanel
+        title="HOA Pipeline"
+        icon={MapPin}
+        accentColor="text-accent-warning"
+        metrics={hoaMetrics}
+        funnelStages={hoaFunnel}
+        lastRunAt={data.hoa.last_discovery_at}
+        lastRunLabel={data.hoa.last_discovery_hours_ago != null ? `${data.hoa.last_discovery_hours_ago.toFixed(0)}h ago` : 'never'}
+      />
+
+      {/* CONTENT ENGINE PANEL — cols 7-9 */}
+      {/* Data: summary.content | Refresh: 30s | See Section 3 of dashboard_spec.md */}
+      <ContentPanel data={data.content} />
+
+      {/* REVENUE EXPERIMENTS PANEL — cols 10-12 */}
+      {/* Data: summary.opportunities | Refresh: on-load | See Section 3 of dashboard_spec.md */}
+      <OpportunityPanel data={data.opportunities} onAddIdea={handleAddIdea} />
+
+      {/* ROW 3 — ACTIVITY FEED (left) + RIGHT COLUMN (right) */}
+
+      {/* AGENT ACTIVITY FEED — cols 1-7 */}
+      {/* Data: GET /api/runs?limit=25 + Socket.io | See Section 3 of dashboard_spec.md */}
+      <ActivityFeed runs={runs} connected={connected} />
+
+      {/* RIGHT COLUMN — cols 8-12 */}
+      {/* Stacks Top 3 Today (flex-2) over Memory Pulse (flex-3) */}
+      <div className="col-span-5 flex flex-col gap-3">
+
+        {/* TOP 3 TODAY PANEL */}
+        {/* Data: summary.top_tasks (from Todd's daily-debrief run) | See Section 3 */}
+        <TopThreePanel
+          tasks={data.top_tasks || []}
+          generatedAt={null}  /* Phase 4: pull from Todd's run completed_at */
+          onRunTask={handleRunTask}
+        />
+
+        {/* MEMORY PULSE PANEL */}
+        {/* Data: summary.brain | Refresh: 5min | See Section 3 of dashboard_spec.md */}
+        <MemoryPulse data={data.brain} />
+
+      </div>
+
+      {/* TODO Phase 2: AddOpportunityModal */}
+      {/* {showIdeaModal && (
+        <AddOpportunityModal
+          onClose={() => setShowIdeaModal(false)}
+          onSave={async (idea) => {
+            await api.post('/opportunities', idea);
+            setShowIdeaModal(false);
+            refresh();
+          }}
+        />
+      )} */}
+
+    </div>
+  );
+}
+
+/*
+ * ============================================================================
+ * CHECKLIST — Steps to activate this scaffold
+ * ============================================================================
+ *
+ * PHASE 1 (layout verification — do this first):
+ *   [ ] Rename file: MissionControlPage.jsx.scaffold → MissionControlPage.jsx
+ *   [ ] Move to: src/pages/MissionControlPage.jsx
+ *   [ ] Add route to src/App.jsx:
+ *         import MissionControlPage from '@/pages/MissionControlPage';
+ *         <Route path="/mission-control" element={<MissionControlPage />} />
+ *   [ ] Add nav item to src/lib/constants.js:
+ *         { path: '/mission-control', label: 'Mission Control', icon: 'Crosshair' },
+ *   [ ] Add Crosshair to icon import in the sidebar component
+ *   [ ] Load the page — verify layout at 1440px with mock data
+ *   [ ] Verify panels stack on mobile (< 768px)
+ *
+ * PHASE 2 (real data):
+ *   [ ] Build server/routes/dashboard.js (template in dashboard_api_spec.md)
+ *   [ ] Build server/routes/opportunities.js (template in dashboard_api_spec.md)
+ *   [ ] Register both routes in server/index.js
+ *   [ ] Run migration: server/db/migrations/033_opportunities.sql
+ *   [ ] Uncomment useDashboardData() fetch logic (search "Phase 2: uncomment")
+ *   [ ] Uncomment useActivityFeed() initial load (search "Phase 2")
+ *   [ ] Uncomment handleRunTodd() and handleRunScout() API calls
+ *   [ ] Uncomment status checks (ollamaOk, backupOk)
+ *   [ ] Test with real data — remove MOCK_RUNS fallback in ActivityFeed
+ *
+ * PHASE 3 (real-time):
+ *   [ ] Uncomment Socket.io import at top of file
+ *   [ ] Uncomment socket setup in useActivityFeed() (search "Phase 3")
+ *   [ ] Uncomment socket event handlers in useActivityFeed()
+ *   [ ] Test: run an agent and watch ActivityFeed update live
+ *   [ ] Wire Memory Pulse to real brain stats
+ *   [ ] Implement pulsing red border on header if days_since_revenue > 30
+ *
+ * PHASE 4 (Todd integration):
+ *   [ ] Confirm Todd writes structured top_tasks JSON to result_data
+ *   [ ] Wire generatedAt from Todd's run.completed_at
+ *   [ ] Uncomment handleRunTask() API call
+ *   [ ] Implement AddOpportunityModal component
+ *   [ ] Wire setShowIdeaModal to modal component
+ *
+ * ============================================================================
+ */

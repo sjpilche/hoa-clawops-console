@@ -1,4 +1,5 @@
-import { Pool } from 'pg';
+import { getExecStore } from '../../singletons';
+import { ExecStore } from '../../db/exec-store';
 import { IBrokerAdapter } from '../execution/broker/types';
 import { AlpacaAdapter } from '../execution/broker/alpaca';
 import { config } from '../../config';
@@ -25,12 +26,9 @@ export interface PositionReconciliation {
 }
 
 export class PositionManager {
-  private pool: Pool;
   private broker: IBrokerAdapter;
 
-  constructor(pool?: Pool, broker?: IBrokerAdapter) {
-    this.pool = pool || new Pool({ connectionString: config.dbUrl });
-
+  constructor(broker?: IBrokerAdapter) {
     if (broker) {
       this.broker = broker;
     } else if (config.brokerApiKey && config.brokerApiSecret) {
@@ -40,258 +38,116 @@ export class PositionManager {
         baseUrl: config.brokerBaseUrl,
       });
     } else {
-      // No broker credentials configured — paper/dev mode (no live connection)
       this.broker = null as unknown as IBrokerAdapter;
     }
   }
 
-  /**
-   * Get all current positions (latest snapshot)
-   */
+  private get exec(): ExecStore | null {
+    return getExecStore();
+  }
+
   async getCurrentPositions(): Promise<Position[]> {
-    const result = await this.pool.query(`
-      SELECT DISTINCT ON (symbol)
-        symbol,
-        qty,
-        avg_price,
-        market_price,
-        unrealized_pnl,
-        ts
-      FROM trd_position_snapshot
-      WHERE qty != 0
-      ORDER BY symbol, ts DESC
-    `);
-
-    return result.rows.map((row) => this.mapPosition(row));
-  }
-
-  /**
-   * Get position for specific symbol
-   */
-  async getPosition(symbol: string): Promise<Position | null> {
-    const result = await this.pool.query(
-      `SELECT * FROM trd_position_snapshot
-       WHERE symbol = $1
-       ORDER BY ts DESC
-       LIMIT 1`,
-      [symbol]
-    );
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
-    return this.mapPosition(result.rows[0]);
-  }
-
-  /**
-   * Get position history for a symbol
-   */
-  async getPositionHistory(symbol: string, limit: number = 100): Promise<Position[]> {
-    const result = await this.pool.query(
-      `SELECT * FROM trd_position_snapshot
-       WHERE symbol = $1
-       ORDER BY ts DESC
-       LIMIT $2`,
-      [symbol, limit]
-    );
-
-    return result.rows.map((row) => this.mapPosition(row));
-  }
-
-  /**
-   * Get total portfolio value
-   */
-  async getPortfolioValue(): Promise<{
-    totalValue: number;
-    cash: number;
-    longValue: number;
-    shortValue: number;
-    unrealizedPnl: number;
-  }> {
-    const positions = await this.getCurrentPositions();
-
-    const longValue = positions
-      .filter((p) => p.side === 'long')
-      .reduce((sum, p) => sum + p.marketValue, 0);
-
-    const shortValue = positions
-      .filter((p) => p.side === 'short')
-      .reduce((sum, p) => sum + Math.abs(p.marketValue), 0);
-
-    const unrealizedPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
-
-    // Get cash from broker
-    await this.broker.connect();
-    const account = await this.broker.getAccount();
-
-    return {
-      totalValue: account.portfolioValue,
-      cash: account.cash,
-      longValue,
-      shortValue,
-      unrealizedPnl,
-    };
-  }
-
-  /**
-   * Reconcile internal positions vs broker positions
-   */
-  async reconcilePositions(): Promise<{
-    matched: boolean;
-    mismatches: PositionReconciliation[];
-    summary: {
-      totalPositions: number;
-      matched: number;
-      mismatched: number;
-    };
-  }> {
-    console.log('🔍 Starting position reconciliation...');
-
-    // Get internal positions
-    const internalPositions = await this.getCurrentPositions();
-    const internalMap = new Map<string, number>();
-    internalPositions.forEach((p) => internalMap.set(p.symbol, p.qty));
-
-    // Get broker positions
-    await this.broker.connect();
-    const brokerPositions = await this.broker.getPositions();
-    const brokerMap = new Map<string, number>();
-    brokerPositions.forEach((p) => brokerMap.set(p.symbol, p.qty));
-
-    // Get all unique symbols
-    const allSymbols = new Set([...internalMap.keys(), ...brokerMap.keys()]);
-
-    const mismatches: PositionReconciliation[] = [];
-    let matchedCount = 0;
-
-    for (const symbol of allSymbols) {
-      const internalQty = internalMap.get(symbol) || 0;
-      const brokerQty = brokerMap.get(symbol) || 0;
-      const difference = internalQty - brokerQty;
-      const matched = Math.abs(difference) < 0.000001; // Float comparison tolerance
-
-      if (!matched) {
-        mismatches.push({
-          symbol,
-          internalQty,
-          brokerQty,
-          difference,
-          matched: false,
-        });
-
-        console.log(`⚠️  MISMATCH: ${symbol}`);
-        console.log(`   Internal: ${internalQty} | Broker: ${brokerQty} | Diff: ${difference}`);
-      } else {
-        matchedCount++;
+    // Try broker first for real-time data
+    if (this.broker) {
+      try {
+        await this.broker.connect();
+        const brokerPositions = await this.broker.getPositions();
+        return brokerPositions.map((p: any) => ({
+          symbol: p.symbol,
+          qty: parseFloat(p.qty),
+          avgPrice: parseFloat(p.avg_entry_price || p.avgPrice || 0),
+          marketPrice: parseFloat(p.current_price || p.marketPrice || 0),
+          marketValue: parseFloat(p.market_value || p.marketValue || 0),
+          costBasis: parseFloat(p.cost_basis || p.costBasis || 0),
+          unrealizedPnl: parseFloat(p.unrealized_pl || p.unrealizedPnl || 0),
+          unrealizedPnlPct: parseFloat(p.unrealized_plpc || p.unrealizedPnlPct || 0),
+          side: parseFloat(p.qty) > 0 ? 'long' as const : parseFloat(p.qty) < 0 ? 'short' as const : 'flat' as const,
+          lastUpdated: new Date(),
+        }));
+      } catch (err: any) {
+        console.warn('⚠️  Broker positions unavailable, falling back to SQLite:', err.message);
       }
     }
 
-    const allMatched = mismatches.length === 0;
-
-    if (allMatched) {
-      console.log('✓ Position reconciliation: ALL MATCHED');
-    } else {
-      console.log(`⚠️  Position reconciliation: ${mismatches.length} MISMATCHES`);
-    }
-
-    return {
-      matched: allMatched,
-      mismatches,
-      summary: {
-        totalPositions: allSymbols.size,
-        matched: matchedCount,
-        mismatched: mismatches.length,
-      },
-    };
+    // Fallback to SQLite
+    if (!this.exec) return [];
+    return this.exec.getAllCurrentPositions().map((row: any) => this.mapRow(row));
   }
 
-  /**
-   * Update positions from broker (force sync)
-   */
-  async syncFromBroker(): Promise<void> {
-    console.log('🔄 Syncing positions from broker...');
-
-    await this.broker.connect();
-    const brokerPositions = await this.broker.getPositions();
-
-    for (const brokerPos of brokerPositions) {
-      // Get current market price
-      const quote = await this.broker.getQuote(brokerPos.symbol);
-      const marketPrice = quote.last || brokerPos.currentPrice;
-
-      // Insert position snapshot
-      await this.pool.query(
-        `INSERT INTO trd_position_snapshot (symbol, qty, avg_price, market_price, unrealized_pnl)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [
-          brokerPos.symbol,
-          brokerPos.qty,
-          brokerPos.avgEntryPrice,
-          marketPrice,
-          brokerPos.unrealizedPl,
-        ]
-      );
-
-      console.log(`✓ Synced position: ${brokerPos.symbol} (${brokerPos.qty} shares)`);
-    }
-
-    console.log(`✓ Synced ${brokerPositions.length} positions from broker`);
+  async getPosition(symbol: string): Promise<Position | null> {
+    if (!this.exec) return null;
+    const row = this.exec.getLatestPosition(symbol);
+    return row ? this.mapRow(row) : null;
   }
 
-  /**
-   * Calculate exposure
-   */
-  async getExposure(): Promise<{
-    grossExposure: number;
-    netExposure: number;
-    longExposure: number;
-    shortExposure: number;
-  }> {
+  async getPortfolioValue(): Promise<{ totalValue: number; cash: number; positions: Position[] }> {
+    if (this.broker) {
+      try {
+        await this.broker.connect();
+        const account = await this.broker.getAccount();
+        const positions = await this.getCurrentPositions();
+        return {
+          totalValue: parseFloat(account.portfolio_value || account.equity || 0),
+          cash: parseFloat(account.cash || 0),
+          positions,
+        };
+      } catch {}
+    }
     const positions = await this.getCurrentPositions();
-
-    const longExposure = positions
-      .filter((p) => p.side === 'long')
-      .reduce((sum, p) => sum + Math.abs(p.marketValue), 0);
-
-    const shortExposure = positions
-      .filter((p) => p.side === 'short')
-      .reduce((sum, p) => sum + Math.abs(p.marketValue), 0);
-
-    const grossExposure = longExposure + shortExposure;
-    const netExposure = longExposure - shortExposure;
-
-    return {
-      grossExposure,
-      netExposure,
-      longExposure,
-      shortExposure,
-    };
+    const totalValue = positions.reduce((s, p) => s + p.marketValue, 0);
+    return { totalValue, cash: 0, positions };
   }
 
-  /**
-   * Map database row to Position object
-   */
-  private mapPosition(row: any): Position {
-    const qty = parseFloat(row.qty);
-    const avgPrice = parseFloat(row.avg_price);
-    const marketPrice = parseFloat(row.market_price);
-    const costBasis = qty * avgPrice;
-    const marketValue = qty * marketPrice;
-    const unrealizedPnl = parseFloat(row.unrealized_pnl);
-    const unrealizedPnlPct = costBasis !== 0 ? (unrealizedPnl / costBasis) * 100 : 0;
+  async syncFromBroker(): Promise<void> {
+    if (!this.broker || !this.exec) return;
+    try {
+      await this.broker.connect();
+      const brokerPositions = await this.broker.getPositions();
+      for (const p of brokerPositions) {
+        this.exec.insertPositionSnapshot(
+          p.symbol,
+          parseFloat(p.qty),
+          parseFloat(p.avg_entry_price || 0),
+          parseFloat(p.current_price || 0),
+          parseFloat(p.unrealized_pl || 0)
+        );
+      }
+    } catch (err: any) {
+      console.warn('⚠️  Position sync failed:', err.message);
+    }
+  }
 
+  async reconcile(): Promise<PositionReconciliation[]> {
+    const internal = await this.getCurrentPositions();
+    if (!this.broker) return internal.map(p => ({ symbol: p.symbol, internalQty: p.qty, brokerQty: 0, difference: p.qty, matched: false }));
+
+    try {
+      await this.broker.connect();
+      const brokerPositions = await this.broker.getPositions();
+      const brokerMap = new Map(brokerPositions.map((p: any) => [p.symbol, parseFloat(p.qty)]));
+
+      return internal.map(p => {
+        const brokerQty = brokerMap.get(p.symbol) || 0;
+        return { symbol: p.symbol, internalQty: p.qty, brokerQty, difference: Math.abs(p.qty - brokerQty), matched: p.qty === brokerQty };
+      });
+    } catch { return []; }
+  }
+
+  private mapRow(row: any): Position {
+    const qty = row.qty || 0;
+    const avgPrice = row.avg_price || 0;
+    const marketPrice = row.market_price || 0;
     return {
       symbol: row.symbol,
       qty,
       avgPrice,
       marketPrice,
-      marketValue,
-      costBasis,
-      unrealizedPnl,
-      unrealizedPnlPct,
+      marketValue: qty * marketPrice,
+      costBasis: qty * avgPrice,
+      unrealizedPnl: row.unrealized_pnl || 0,
+      unrealizedPnlPct: avgPrice > 0 ? ((marketPrice - avgPrice) / avgPrice) * 100 : 0,
       side: qty > 0 ? 'long' : qty < 0 ? 'short' : 'flat',
-      lastUpdated: row.ts,
+      lastUpdated: new Date(row.ts || Date.now()),
     };
   }
 }
