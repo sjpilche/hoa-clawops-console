@@ -3309,6 +3309,22 @@ const SPECIAL_HANDLERS = {
       extra: scan,
     };
   },
+
+  // ── Lead Auto-Warmup — bridges enrichment → cadence ────────────────────
+  // Finds enriched leads with email that aren't in cadence yet, activates them.
+  // Also reactivates stale contacted leads whose cadence went dormant (>7d).
+  // $0/run — no LLM, pure SQL.
+  lead_auto_warmup: async ({ message, runId, agent }) => {
+    const { runWarmupCycle } = require('../services/leadAutoWarmup');
+    const startTime = Date.now();
+    const result = await runWarmupCycle();
+    return {
+      outputText: `Auto-Warmup: ${result.activated} new leads activated, ${result.reactivated} stale leads reactivated`,
+      durationMs: Date.now() - startTime,
+      costUsd: 0,
+      extra: result,
+    };
+  },
 };
 
 // ════════════════════════════════════════════════════════════════════════════

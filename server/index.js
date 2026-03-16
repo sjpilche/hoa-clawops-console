@@ -68,6 +68,8 @@ const sendgridWebhookRoutes = require('./routes/sendgridWebhook');
 const revenueRoutes          = require('./routes/revenue');
 const leadCaptureRoutes      = require('./routes/leadCapture');
 const dataAuditRoutes        = require('./routes/dataAudit');
+const stripeWebhookRoutes    = require('./routes/stripeWebhook');
+const commandCenterRoutes    = require('./routes/commandCenter');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -171,6 +173,9 @@ async function startServer() {
     );
 
     // --- Request Parsing Middleware ---
+    // Stripe webhook needs raw body BEFORE express.json() parses it
+    app.use('/api/stripe', express.raw({ type: 'application/json', limit: '1mb' }));
+
     // SECURITY: Different size limits for different route types
     app.use('/api/chat', express.json({ limit: '1mb' })); // Chat messages: 1MB
     app.use('/api/agents', express.json({ limit: '500kb' })); // Agent configs: 500KB
@@ -184,6 +189,11 @@ async function startServer() {
     // Data Audit intake landing page
     app.get('/audit', (_req, res) => {
       res.sendFile(path.join(__dirname, 'public', 'data-audit.html'));
+    });
+
+    // Jake CFO construction landing page
+    app.get('/jake', (_req, res) => {
+      res.sendFile(path.join(__dirname, 'public', 'jake-cfo.html'));
     });
 
     // Public audit submission endpoint (no auth — landing page form)
@@ -202,6 +212,31 @@ async function startServer() {
       } catch (error) {
         console.error('[data-audit/public] Error:', error.message);
         res.status(500).json({ error: 'Audit request failed. Please try again.' });
+      }
+    });
+
+    // Jake CFO public intake endpoint (no auth — landing page form)
+    app.post('/api/jake/public-intake', async (req, res) => {
+      try {
+        const { companyName, contactName, contactEmail, phone, annualRevenue, erpSystem, biggestPain } = req.body;
+        if (!companyName || !contactEmail) {
+          return res.status(400).json({ error: 'Company name and email are required' });
+        }
+        const { run } = require('./db/connection');
+        // Insert as a new lead into cfo_leads
+        run(`INSERT INTO cfo_leads (company_name, contact_name, contact_email, phone, erp_type, revenue_range, source_agent, source, status, enrichment_status, notes, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'jake', 'landing_page', 'new', 'enriched', ?, datetime('now'), datetime('now'))`,
+          [companyName, contactName || null, contactEmail, phone || null, erpSystem || null, annualRevenue || null, `Pain: ${biggestPain || 'none'}`]);
+        // Auto-activate cadence since we already have their email
+        const lead = require('./db/connection').get('SELECT id FROM cfo_leads WHERE contact_email = ? ORDER BY created_at DESC LIMIT 1', [contactEmail]);
+        if (lead) {
+          run("UPDATE cfo_leads SET cadence_active = 1, next_touch_due = datetime('now'), last_touch_number = 0, enrichment_status = 'enriched', updated_at = datetime('now') WHERE id = ?", [lead.id]);
+        }
+        console.log(`[jake/public-intake] New lead: ${companyName} (${contactEmail}) from landing page`);
+        res.json({ success: true, message: 'Thank you! We\'ll be in touch within 24 hours.' });
+      } catch (error) {
+        console.error('[jake/public-intake] Error:', error.message);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
       }
     });
 
@@ -251,6 +286,8 @@ async function startServer() {
     app.use('/api/revenue', revenueRoutes);
     app.use('/api/capture', leadCaptureRoutes);
     app.use('/api/data-audit', dataAuditRoutes);
+    app.use('/api/stripe', stripeWebhookRoutes);
+    app.use('/api/command-center', commandCenterRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {

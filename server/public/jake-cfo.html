@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stop Losing Money to Messy Construction Data | Jake CFO Services</title>
+  <meta name="description" content="Construction CFO services that fix your QuickBooks chaos, recover lost AR, and give you real job costing numbers. Free data health check for GCs and subcontractors.">
+  <meta property="og:title" content="Your Construction Data Is Costing You Money | Jake CFO">
+  <meta property="og:description" content="We were construction CFOs drowning in the same QuickBooks mess. We fixed it — now we'll fix yours. Free data health check.">
+  <meta property="og:type" content="website">
+  <link rel="canonical" href="https://clawops.com/jake-cfo">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; }
+
+    /* Hero */
+    .hero { max-width: 800px; margin: 0 auto; padding: 4rem 2rem 3rem; text-align: center; }
+    .hero h1 { font-size: 2.75rem; font-weight: 800; margin-bottom: 1.5rem; background: linear-gradient(135deg, #f59e0b, #ef4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero .subtitle { font-size: 1.25rem; color: #94a3b8; margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto; }
+    .hero .credibility { font-size: 0.95rem; color: #64748b; font-style: italic; }
+
+    /* Stats bar */
+    .stats { display: flex; justify-content: center; gap: 3rem; margin-bottom: 3rem; flex-wrap: wrap; padding: 0 1rem; }
+    .stat { text-align: center; }
+    .stat .number { font-size: 2rem; font-weight: 700; color: #f59e0b; }
+    .stat .label { font-size: 0.875rem; color: #64748b; }
+
+    /* Pain points */
+    .pain { max-width: 700px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .pain h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .pain-list { list-style: none; display: grid; gap: 1rem; }
+    .pain-list li { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem 1.25rem; background: #1e293b; border-radius: 0.75rem; border-left: 3px solid #ef4444; }
+    .pain-list li .icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 0.1rem; }
+    .pain-list li .text { font-size: 0.95rem; }
+
+    /* Deliverables */
+    .deliverable { max-width: 700px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .deliverable h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .deliverable-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; }
+    .deliverable-card { padding: 1.25rem; background: #1e293b; border-radius: 0.75rem; text-align: center; }
+    .deliverable-card .d-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+    .deliverable-card h3 { font-size: 1rem; margin-bottom: 0.5rem; color: #f8fafc; }
+    .deliverable-card p { font-size: 0.85rem; color: #94a3b8; }
+
+    /* CTA form */
+    .cta { max-width: 600px; margin: 0 auto 3rem; padding: 2.5rem 2rem; background: #1e293b; border-radius: 1rem; border: 1px solid #334155; }
+    .cta h2 { font-size: 1.75rem; text-align: center; margin-bottom: 0.75rem; color: #f8fafc; }
+    .cta .desc { text-align: center; color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: 0.875rem; color: #94a3b8; margin-bottom: 0.375rem; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 1rem; font-family: inherit; }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #f59e0b; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .submit-btn { width: 100%; padding: 1rem; border: none; border-radius: 0.5rem; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; font-size: 1.125rem; font-weight: 700; cursor: pointer; margin-top: 1rem; transition: transform 0.15s; }
+    .submit-btn:hover { transform: translateY(-1px); }
+    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .free-note { text-align: center; margin-top: 0.75rem; font-size: 0.8rem; color: #64748b; }
+
+    /* Success state */
+    .success { display: none; text-align: center; padding: 2rem; }
+    .success h2 { color: #22c55e; margin-bottom: 1rem; }
+    .success p { color: #94a3b8; }
+
+    /* Footer */
+    footer { text-align: center; padding: 2rem; color: #475569; font-size: 0.8rem; border-top: 1px solid #1e293b; }
+    footer .powered { margin-top: 0.5rem; font-size: 0.7rem; color: #334155; }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 2rem; }
+      .stats { gap: 1.5rem; }
+      .form-row { grid-template-columns: 1fr; }
+      .cta { margin: 0 1rem 3rem; }
+      .pain { padding: 0 1rem; }
+      .deliverable { padding: 0 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Your Construction Data Is Costing You Money</h1>
+    <p class="subtitle">Stop losing money to messy QuickBooks and Excel chaos. We were construction CFOs drowning in the same problems — we fixed it for ourselves, and now we'll fix it for you.</p>
+    <p class="credibility">Built by construction finance people who lived through the data nightmare.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="number">45 → 28</div><div class="label">Days AR reduced</div></div>
+    <div class="stat"><div class="number">$127K</div><div class="label">Avg recovered AR</div></div>
+    <div class="stat"><div class="number">92%</div><div class="label">Data accuracy improvement</div></div>
+    <div class="stat"><div class="number">3x</div><div class="label">Faster job costing</div></div>
+  </div>
+
+  <div class="pain">
+    <h2>Sound Familiar?</h2>
+    <ul class="pain-list">
+      <li><span class="icon">&#x1F525;</span><span class="text">QuickBooks data doesn't match your bank statements — and month-end close is a guessing game</span></li>
+      <li><span class="icon">&#x1F4CA;</span><span class="text">Job costing takes days instead of minutes because data lives in 3 different places</span></li>
+      <li><span class="icon">&#x1F4B0;</span><span class="text">AR sitting over 60 days that nobody's chasing — money you've already earned just evaporating</span></li>
+      <li><span class="icon">&#x1F504;</span><span class="text">Manual data entry between QuickBooks, Excel, your PM tool, and your bank — every single week</span></li>
+      <li><span class="icon">&#x1F4C9;</span><span class="text">Can't see profitability by project until it's too late — margins eroding without warning</span></li>
+    </ul>
+  </div>
+
+  <div class="deliverable">
+    <h2>What You'll Get — Free</h2>
+    <div class="deliverable-grid">
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F3E5;</div>
+        <h3>Free Data Health Check</h3>
+        <p>We audit your QuickBooks/ERP data quality and score it across 6 dimensions</p>
+      </div>
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F4B5;</div>
+        <h3>Custom AR Recovery Plan</h3>
+        <p>Identify exactly which receivables to chase first and how much you can recover</p>
+      </div>
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F4CB;</div>
+        <h3>Job Costing Template</h3>
+        <p>Construction-specific template that gives you real margins by project in minutes</p>
+      </div>
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F4DE;</div>
+        <h3>30-Min Strategy Call</h3>
+        <p>Walk through findings with a construction finance specialist — no pitch, just answers</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cta" id="intake-form-container">
+    <h2>Get Your Free Data Health Check</h2>
+    <p class="desc">Takes 2 minutes. No credit card. No obligation.</p>
+
+    <form id="intake-form">
+      <div class="form-group">
+        <label for="companyName">Company Name *</label>
+        <input type="text" id="companyName" name="companyName" required placeholder="Summit Builders LLC">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="contactName">Your Name</label>
+          <input type="text" id="contactName" name="contactName" placeholder="Mike Johnson">
+        </div>
+        <div class="form-group">
+          <label for="contactEmail">Email *</label>
+          <input type="email" id="contactEmail" name="contactEmail" required placeholder="mike@summitbuilders.com">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="phone">Phone</label>
+          <input type="tel" id="phone" name="phone" placeholder="(813) 555-1234">
+        </div>
+        <div class="form-group">
+          <label for="annualRevenue">Annual Revenue</label>
+          <select id="annualRevenue" name="annualRevenue">
+            <option value="">Select...</option>
+            <option value="under_1m">Under $1M</option>
+            <option value="1m_5m">$1M - $5M</option>
+            <option value="5m_10m">$5M - $10M</option>
+            <option value="10m_25m">$10M - $25M</option>
+            <option value="25m_plus">$25M+</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="erpSystem">Current Accounting / ERP System</label>
+        <select id="erpSystem" name="erpSystem">
+          <option value="">Select...</option>
+          <option value="quickbooks_desktop">QuickBooks Desktop</option>
+          <option value="quickbooks_online">QuickBooks Online</option>
+          <option value="sage">Sage</option>
+          <option value="business_central">Business Central</option>
+          <option value="excel_manual">Excel / Manual</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="biggestPain">What's your biggest data headache right now?</label>
+        <textarea id="biggestPain" name="biggestPain" placeholder="E.g., We can't get accurate job costing, AR is out of control, month-end close takes a week..."></textarea>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submit-btn">Get My Free Health Check</button>
+      <p class="free-note">100% free. No sales pitch. Real answers from construction finance people.</p>
+    </form>
+
+    <div class="success" id="success-msg">
+      <h2>Request Received!</h2>
+      <p>We're reviewing your information now. A construction finance specialist will reach out within 24 hours with your data health check and AR recovery plan.</p>
+    </div>
+  </div>
+
+  <footer>
+    <p>&copy; 2026 Pilcher Financial Consulting. Your information is kept confidential and never shared.</p>
+    <p class="powered">Powered by AI-driven analysis</p>
+  </footer>
+
+  <script>
+    const form = document.getElementById('intake-form');
+    const btn = document.getElementById('submit-btn');
+    const successMsg = document.getElementById('success-msg');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+
+      const data = {
+        companyName: document.getElementById('companyName').value,
+        contactName: document.getElementById('contactName').value,
+        contactEmail: document.getElementById('contactEmail').value,
+        phone: document.getElementById('phone').value,
+        annualRevenue: document.getElementById('annualRevenue').value,
+        erpSystem: document.getElementById('erpSystem').value,
+        biggestPain: document.getElementById('biggestPain').value,
+        source: 'jake_cfo_landing',
+      };
+
+      try {
+        const resp = await fetch('/api/jake/public-intake', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+
+        if (resp.ok) {
+          form.style.display = 'none';
+          successMsg.style.display = 'block';
+        } else {
+          const err = await resp.json();
+          alert(err.error || 'Something went wrong. Please try again.');
+          btn.disabled = false;
+          btn.textContent = 'Get My Free Health Check';
+        }
+      } catch {
+        alert('Network error. Please check your connection and try again.');
+        btn.disabled = false;
+        btn.textContent = 'Get My Free Health Check';
+      }
+    });
+  </script>
+</body>
+</html>

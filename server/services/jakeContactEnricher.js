@@ -537,6 +537,21 @@ async function enrichLead(leadId) {
 
       console.log(`[ContactEnricher]   ✅ ${lead.company_name}: email=${email || '—'}, phone=${phone || '—'}, contact=${contactName || '—'}`);
 
+      // Auto-warmup: activate cadence for newly enriched leads with email
+      if (email) {
+        try {
+          run(`UPDATE cfo_leads
+               SET cadence_active = 1,
+                   next_touch_due = datetime('now'),
+                   status = CASE WHEN status IN ('new', 'discovered') OR status IS NULL THEN 'queued' ELSE status END,
+                   updated_at = datetime('now')
+               WHERE id = ? AND (cadence_active IS NULL OR cadence_active = 0)`, [leadId]);
+          console.log(`[ContactEnricher] Auto-warmup: ${lead.company_name} queued for cadence`);
+        } catch (e) {
+          console.warn(`[ContactEnricher] Auto-warmup failed for ${leadId}:`, e.message);
+        }
+      }
+
       return {
         success: true,
         method,
