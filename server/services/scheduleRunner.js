@@ -189,7 +189,18 @@ async function executeSchedule(schedule) {
         contentType,
       });
 
-      // Prepend brain context to the agent's message
+      // Marketing learner: inject writer briefing for content agents
+      let writerBriefing = '';
+      try {
+        const isContentAgent = /content-engine|content-writer|social-scheduler|social-media/i.test(agent.name);
+        if (isContentAgent) {
+          const learner = require('./marketingLearner');
+          writerBriefing = learner.generateWriterBriefing(agent.name);
+          if (writerBriefing) console.log(`[ScheduleRunner] Injected writer briefing for ${agent.name} (${writerBriefing.length} chars)`);
+        }
+      } catch {} // Non-fatal if marketing_learnings table doesn't exist yet
+
+      // Prepend brain context + writer briefing to the agent's message
       // Truncate brain context to avoid Windows 8191 char command-line limit
       // Windows has 8191 char command-line limit for OpenClaw CLI.
       // Reserve ~4000 for agent message + CLI overhead, cap brain at 2000.
@@ -197,7 +208,7 @@ async function executeSchedule(schedule) {
       const truncatedBrain = brainContext && brainContext.length > maxBrainLen
         ? brainContext.slice(0, maxBrainLen) + '\n[... brain context truncated ...]\n'
         : brainContext;
-      let enrichedMessage = truncatedBrain ? truncatedBrain + message : message;
+      let enrichedMessage = (writerBriefing || '') + (truncatedBrain || '') + message;
       // Hard cap total message at 6000 chars to guarantee CLI doesn't overflow
       if (enrichedMessage.length > 6000) {
         console.warn(`[ScheduleRunner] Message too long (${enrichedMessage.length} chars), truncating to 6000`);

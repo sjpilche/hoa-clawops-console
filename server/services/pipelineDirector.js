@@ -258,6 +258,20 @@ async function runDirectorCycle() {
   const startTime = Date.now();
   console.log('[Director] Starting pipeline director cycle...');
 
+  // Load brain insights for smarter prioritization
+  let brainInsights = null;
+  try {
+    const brainReader = require('./brainReader');
+    brainInsights = {
+      jake: brainReader.getWinningAngles('jake'),
+      hoa: brainReader.getWinningAngles('hoa'),
+      timing: brainReader.getBestSendTiming('jake'),
+    };
+    if (brainInsights.jake.totalWins > 0) {
+      console.log(`[Director] Brain: ${brainInsights.jake.totalWins} winning patterns loaded (top ERP: ${brainInsights.jake.topERP}, top market: ${brainInsights.jake.topMarket})`);
+    }
+  } catch {} // Non-fatal
+
   // Step 1: refresh all pipeline states
   let stateResult;
   try {

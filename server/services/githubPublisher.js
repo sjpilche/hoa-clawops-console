@@ -325,6 +325,83 @@ async function publishPost(message) {
 
   console.log(`[GitHubPublisher] ✅ Done: ${slug}`);
 
+  // ── Post-publish hooks (fire-and-forget, non-blocking) ──────────────────
+  const postPublishResults = [];
+
+  // 1. Update sitemap.xml and robots.txt on GitHub
+  try {
+    const seo = require('./seoGenerator');
+    const sitemapXml = seo.generateSitemap();
+    const robotsTxt = seo.generateRobotsTxt();
+    const token = process.env.GITHUB_TOKEN;
+    if (token && sitemapXml) {
+      await pushFileToGitHub('public/sitemap.xml', sitemapXml, `Update sitemap: add ${slug}`, token);
+      await pushFileToGitHub('public/robots.txt', robotsTxt, 'Update robots.txt', token);
+      postPublishResults.push('Sitemap + robots.txt updated');
+      console.log('[GitHubPublisher] Sitemap + robots.txt pushed to GitHub');
+    }
+  } catch (err) {
+    console.warn('[GitHubPublisher] Sitemap push failed (non-fatal):', err.message);
+  }
+
+  // 2. Broadcast to newsletter subscribers
+  try {
+    const newsletter = require('./newsletterBroadcast');
+    const broadcastResult = await newsletter.broadcastNewPost({
+      title, slug, description: postData.meta_description || postData.topic_category,
+    });
+    if (broadcastResult.sent > 0) {
+      postPublishResults.push(`Newsletter broadcast: ${broadcastResult.sent} subscribers`);
+      console.log(`[GitHubPublisher] Newsletter broadcast: ${broadcastResult.sent} subscribers`);
+    }
+  } catch (err) {
+    console.warn('[GitHubPublisher] Newsletter broadcast failed (non-fatal):', err.message);
+  }
+
+  // 3. Queue social amplification (LinkedIn + Twitter + Facebook)
+  try {
+    const { run: dbRun } = require('../db/connection');
+    const seo = require('./seoGenerator');
+    const postUrl = `https://hoaprojectfunding.com/BlogPost?slug=${slug}`;
+
+    // LinkedIn post — schedule for next day
+    const linkedinUrl = seo.generateUTMLink(postUrl, { source: 'linkedin', medium: 'social', campaign: slug });
+    const crypto = require('crypto');
+    dbRun(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+      VALUES (?, 'linkedin', ?, 'hoa-cms-publisher', 'pending', datetime('now', '+1 day', '+2 hours'))`,
+      [crypto.randomUUID(), JSON.stringify({ text: `New article: ${title}\n\n${postData.meta_description || ''}\n\nRead more: ${linkedinUrl}`, url: linkedinUrl, title })]);
+
+    // Twitter post — schedule for 2 days later
+    const twitterUrl = seo.generateUTMLink(postUrl, { source: 'twitter', medium: 'social', campaign: slug });
+    dbRun(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+      VALUES (?, 'twitter', ?, 'hoa-cms-publisher', 'pending', datetime('now', '+2 days'))`,
+      [crypto.randomUUID(), JSON.stringify({ text: `${title}\n\n${twitterUrl}`, url: twitterUrl })]);
+
+    // Facebook post — schedule for 3 days later
+    const fbUrl = seo.generateUTMLink(postUrl, { source: 'facebook', medium: 'social', campaign: slug });
+    dbRun(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+      VALUES (?, 'facebook', ?, 'hoa-cms-publisher', 'pending', datetime('now', '+3 days'))`,
+      [crypto.randomUUID(), JSON.stringify({ text: `${title}\n\n${postData.meta_description || ''}\n\nRead the full article: ${fbUrl}`, url: fbUrl })]);
+
+    postPublishResults.push('Social posts queued (LinkedIn +1d, Twitter +2d, Facebook +3d)');
+    console.log('[GitHubPublisher] Social amplification queued across 3 days');
+  } catch (err) {
+    console.warn('[GitHubPublisher] Social queue failed (non-fatal):', err.message);
+  }
+
+  // 4. Score the content piece for marketing learner
+  try {
+    const { get: dbGet, run: dbRun } = require('../db/connection');
+    const piece = dbGet("SELECT id FROM cfo_content_pieces WHERE title = ? ORDER BY created_at DESC LIMIT 1", [title]);
+    if (piece) {
+      dbRun("UPDATE cfo_content_pieces SET status = 'published', published_at = datetime('now') WHERE id = ?", [piece.id]);
+    }
+  } catch {}
+
+  const hookSummary = postPublishResults.length > 0
+    ? `\n\nPOST-PUBLISH:\n  ${postPublishResults.join('\n  ')}`
+    : '';
+
   return `✅ BLOG POST PUBLISHED
 ==========================================
 Title:    ${title}
@@ -341,6 +418,7 @@ DESTINATIONS:
   2. GitHub / Netlify Blog:
      ${githubStatus}
      📖 Blog post: ${liveUrl}
+${hookSummary}
 
 Source file: ${postFile.name}
 Netlify deploys automatically on GitHub push (~60s).`;

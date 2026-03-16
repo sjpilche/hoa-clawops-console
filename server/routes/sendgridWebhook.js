@@ -37,6 +37,10 @@ const multer = require('multer');
 const { run, get, all } = require('../db/connection');
 const { v4: uuidv4 } = require('uuid');
 
+// Revenue tracking — engagement scoring + event logging
+let revenue;
+try { revenue = require('../services/revenueTracker'); } catch { revenue = null; }
+
 const router = Router();
 // Multer for multipart/form-data from SendGrid Inbound Parse (no file storage needed)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -71,6 +75,12 @@ router.post('/sendgrid', (req, res) => {
             run("UPDATE cfo_outreach_sequences SET status='bounced', delivery_status='bounced', delivery_error=? WHERE id=?",
               [event.reason || event.response || eventType, seq.id]);
             run("UPDATE cfo_leads SET status='bounced', updated_at=datetime('now') WHERE id=?", [seq.lead_id]);
+            if (revenue) {
+              revenue.recordEvent(seq.lead_id, 'deal_lost', {
+                agent: 'sendgrid-webhook', sequenceId: seq.id, channel: 'email',
+                metadata: { reason: event.reason || eventType },
+              });
+            }
             try {
               const cadence = require('../services/tenacityCadenceEngine');
               cadence.deactivateCadence(seq.lead_id, 'jake');
@@ -87,6 +97,12 @@ router.post('/sendgrid', (req, res) => {
           );
           if (seq) {
             run("UPDATE cfo_leads SET status='unsubscribed', updated_at=datetime('now') WHERE id=?", [seq.lead_id]);
+            if (revenue) {
+              revenue.recordEvent(seq.lead_id, 'deal_lost', {
+                agent: 'sendgrid-webhook', sequenceId: seq.id, channel: 'email',
+                metadata: { reason: 'spam_report' },
+              });
+            }
             try {
               const cadence = require('../services/tenacityCadenceEngine');
               cadence.deactivateCadence(seq.lead_id, 'jake');
@@ -98,11 +114,16 @@ router.post('/sendgrid', (req, res) => {
 
         case 'delivered': {
           const seq = get(
-            "SELECT s.id FROM cfo_outreach_sequences s JOIN cfo_leads l ON l.id = s.lead_id WHERE LOWER(l.contact_email)=? AND s.status='sent' ORDER BY s.sent_at DESC LIMIT 1",
+            "SELECT s.id, s.lead_id FROM cfo_outreach_sequences s JOIN cfo_leads l ON l.id = s.lead_id WHERE LOWER(l.contact_email)=? AND s.status='sent' ORDER BY s.sent_at DESC LIMIT 1",
             [email]
           );
           if (seq) {
             run("UPDATE cfo_outreach_sequences SET delivery_status='delivered' WHERE id=?", [seq.id]);
+            if (revenue) {
+              revenue.updateEngagementScore(seq.lead_id, 'delivered', { sequenceId: seq.id });
+              revenue.recordEvent(seq.lead_id, 'contacted', { agent: 'outreach-sender', sequenceId: seq.id, channel: 'email' });
+              revenue.updateVariantOutcome(seq.id, 'delivered', 1);
+            }
             delivered++;
           }
           break;
@@ -110,9 +131,28 @@ router.post('/sendgrid', (req, res) => {
 
         case 'open':
         case 'click': {
-          const lead = get("SELECT id FROM cfo_leads WHERE LOWER(contact_email)=?", [email]);
-          if (lead) {
-            run("UPDATE cfo_leads SET updated_at=datetime('now') WHERE id=?", [lead.id]);
+          const seq2 = get(
+            "SELECT s.id, s.lead_id, s.email_subject FROM cfo_outreach_sequences s JOIN cfo_leads l ON l.id = s.lead_id WHERE LOWER(l.contact_email)=? ORDER BY s.sent_at DESC LIMIT 1",
+            [email]
+          );
+          if (seq2) {
+            run("UPDATE cfo_leads SET updated_at=datetime('now') WHERE id=?", [seq2.lead_id]);
+            if (revenue) {
+              revenue.updateEngagementScore(seq2.lead_id, eventType, {
+                sequenceId: seq2.id,
+                subject: seq2.email_subject,
+                linkUrl: event.url || null,
+              });
+              if (eventType === 'open') {
+                revenue.updateVariantOutcome(seq2.id, 'opened', 1);
+                revenue.updateVariantOutcome(seq2.id, 'open_count', 1);
+                revenue.updateVariantOutcome(seq2.id, 'first_open_at', new Date().toISOString());
+              }
+              if (eventType === 'click') {
+                revenue.updateVariantOutcome(seq2.id, 'clicked', 1);
+                revenue.updateVariantOutcome(seq2.id, 'first_click_at', new Date().toISOString());
+              }
+            }
           }
           break;
         }
@@ -283,6 +323,40 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
       });
     } catch (brainErr) {
       console.warn('[Inbound] Brain update failed (non-fatal):', brainErr.message);
+    }
+
+    // ── Revenue tracking — record reply event + engagement score ──
+    if (revenue) {
+      const replyEventMap = {
+        INTERESTED: 'replied', NOT_NOW: 'replied', WRONG_PERSON: 'replied',
+        UNSUBSCRIBE: 'deal_lost', BOUNCED: 'deal_lost', NEUTRAL: 'replied',
+      };
+      revenue.recordEvent(lead.id, replyEventMap[classification.type], {
+        agent: 'jake-reply-classifier',
+        sequenceId: lastSeq?.id,
+        channel: 'email',
+        metadata: { classification: classification.type, reply_preview: cleanReply.slice(0, 200) },
+      });
+      revenue.updateEngagementScore(lead.id, 'reply', { sequenceId: lastSeq?.id, subject });
+
+      // Update A/B variant with reply outcome
+      if (lastSeq) {
+        revenue.updateVariantOutcome(lastSeq.id, 'replied', 1);
+        revenue.updateVariantOutcome(lastSeq.id, 'reply_sentiment', classification.type);
+        revenue.updateVariantOutcome(lastSeq.id, 'replied_at', new Date().toISOString());
+        if (classification.type === 'INTERESTED') {
+          revenue.updateVariantOutcome(lastSeq.id, 'converted', 1);
+        }
+      }
+
+      // If INTERESTED, advance to 'meeting' stage
+      if (classification.type === 'INTERESTED') {
+        revenue.recordEvent(lead.id, 'meeting_booked', {
+          agent: 'jake-reply-classifier',
+          sequenceId: lastSeq?.id,
+          channel: 'email',
+        });
+      }
     }
 
     // ── Deactivate cadence on terminal outcomes ──

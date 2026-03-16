@@ -103,6 +103,28 @@ function postProcessLLMOutput(agent, outputText, message) {
             }
           }
         } catch {}
+
+        // Auto-queue social amplification for QA-passed blog content
+        try {
+          const inserted = get('SELECT id, title, qa_status, channel FROM cfo_content_pieces WHERE source_agent = ? ORDER BY id DESC LIMIT 1', [source]);
+          if (inserted && inserted.qa_status === 'passed' && inserted.channel === 'blog') {
+            // Queue social derivatives spread across the week
+            const title = inserted.title || 'New post';
+            const crypto = require('crypto');
+            run(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+              VALUES (?, 'linkedin', ?, ?, 'pending', datetime('now', '+1 day'))`,
+              [crypto.randomUUID(), JSON.stringify({ text: `New article: ${title}`, title }), source]);
+            run(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+              VALUES (?, 'twitter', ?, ?, 'pending', datetime('now', '+2 days'))`,
+              [crypto.randomUUID(), JSON.stringify({ text: title }), source]);
+            run(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+              VALUES (?, 'facebook', ?, ?, 'pending', datetime('now', '+3 days'))`,
+              [crypto.randomUUID(), JSON.stringify({ text: title }), source]);
+            console.log(`[PostProcessor] Auto-queued social amplification for "${title}" (LinkedIn +1d, Twitter +2d, Facebook +3d)`);
+          }
+        } catch (ampErr) {
+          console.warn('[PostProcessor] Social amplification queue failed (non-fatal):', ampErr.message);
+        }
       }
     }
 
@@ -176,9 +198,46 @@ function postProcessLLMOutput(agent, outputText, message) {
       const p = parseAgentJSON(outputText);
       if (p?.content_markdown) {
         run(
-          `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, source_agent, status) VALUES (?, ?, ?, ?, ?, 'hoa', 'draft')`,
+          `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, source_agent, status, qa_status) VALUES (?, ?, ?, ?, ?, 'hoa', 'draft', 'pending')`,
           [p.pillar || 'general', p.channel || 'blog', p.title || 'Untitled', p.content_markdown, p.cta || '']
         );
+
+        // Auto-trigger Ralph QA
+        try {
+          const inserted = get("SELECT id FROM cfo_content_pieces WHERE source_agent = 'hoa' ORDER BY id DESC LIMIT 1");
+          if (inserted) {
+            const qaResult = ralphQA.reviewSingleContent(inserted.id);
+            console.log(`[RalphQA] HOA Content #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+
+            // Auto-queue social amplification if QA passed and it's a blog post
+            if (qaResult.passed && (p.channel === 'blog' || !p.channel)) {
+              const title = p.title || 'New HOA article';
+              const crypto = require('crypto');
+              run(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+                VALUES (?, 'linkedin', ?, 'hoa', 'pending', datetime('now', '+1 day'))`,
+                [crypto.randomUUID(), JSON.stringify({ text: `New article: ${title}`, title })]);
+              run(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+                VALUES (?, 'twitter', ?, 'hoa', 'pending', datetime('now', '+2 days'))`,
+                [crypto.randomUUID(), JSON.stringify({ text: title })]);
+              run(`INSERT INTO content_queue (id, platform, content, source_agent, status, scheduled_for)
+                VALUES (?, 'facebook', ?, 'hoa', 'pending', datetime('now', '+3 days'))`,
+                [crypto.randomUUID(), JSON.stringify({ text: title })]);
+              console.log(`[PostProcessor] HOA social amplification queued for "${title}"`);
+            }
+          }
+        } catch (qaErr) {
+          console.warn('[PostProcessor] HOA QA/amplification failed (non-fatal):', qaErr.message);
+        }
+
+        // Brain observation
+        try {
+          const brain = require('./collectiveBrain');
+          brain.observe(`content-${new Date().toISOString().slice(0, 10)}`, name, 'content_drafted', {
+            subject: p.title || 'Untitled',
+            content: `HOA content drafted: "${p.title}" (${p.pillar || 'general'}/${p.channel || 'blog'})`,
+            confidence: 1.0,
+          });
+        } catch {}
       }
     }
 

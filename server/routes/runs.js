@@ -267,6 +267,19 @@ const SPECIAL_HANDLERS = {
       );
     } catch {}
 
+    // Brain Layer 3: record discovery episode for signal performance tracking
+    try {
+      const brain = require('../services/collectiveBrain');
+      brain.recordEpisode('hoa-discovery', {
+        market: topTarget,
+        actionTaken: `Google Maps HOA discovery: ${result.queries_run || 0} queries`,
+        outcome: `Found ${totalNew} new HOA communities in ${topTarget}`,
+        outcomeType: 'discovery',
+        outcomeScore: totalNew > 10 ? 0.8 : totalNew > 0 ? 0.6 : 0.2,
+        signalSource: 'maps_discovery',
+      });
+    } catch {}
+
     return { outputText, durationMs, extra: { discoveryResult: result } };
   },
 
@@ -762,6 +775,16 @@ const SPECIAL_HANDLERS = {
       } catch {}
     }
 
+    // Brain Layer 3: record enrichment episode for signal performance tracking
+    const topMethod = Object.entries(methodDist).sort((a,b) => b[1] - a[1])[0];
+    brain.recordEpisode('jake-contact-enricher', {
+      actionTaken: `Contact enrichment: ${result.total} leads processed`,
+      outcome: `Enriched ${result.enriched}/${result.total} (${hitRate}% hit rate). Best method: ${topMethod?.[0] || 'none'}`,
+      outcomeType: 'enrichment',
+      outcomeScore: hitRate >= 25 ? 0.8 : hitRate >= 15 ? 0.6 : 0.3,
+      signalSource: 'enrichment',
+    });
+
     return { outputText, durationMs, extra: { enrichResult: result, hitRate, methodDist } };
   },
 
@@ -809,6 +832,16 @@ const SPECIAL_HANDLERS = {
         });
       }
     }
+
+    // Brain Layer 3: record discovery episode for signal performance tracking
+    brain.recordEpisode('jake-construction-discovery', {
+      market: result.region,
+      actionTaken: `Google Maps discovery scan: ${result.stats.total || 0} companies scraped`,
+      outcome: `Inserted ${result.stats.inserted || 0} new GC leads in ${result.region}`,
+      outcomeType: 'discovery',
+      outcomeScore: result.stats.inserted > 10 ? 0.8 : result.stats.inserted > 0 ? 0.6 : 0.2,
+      signalSource: 'maps_discovery',
+    });
 
     return { outputText, durationMs, costUsd: 0, extra: { stats: result.stats, region: result.region } };
   },
@@ -1086,6 +1119,8 @@ const SPECIAL_HANDLERS = {
       outcomeScore: outcomeScoreMap[classification] ?? 0.5,
       daysToOutcome,
       leadId: String(lead_id),
+      signalSource: lead.source || lead.attribution_source || null,
+      signalFitScore: lead.pilot_fit_score || null,
     });
 
     // Cadence Brain v2: deactivate cadence on terminal reply outcomes
@@ -1095,6 +1130,41 @@ const SPECIAL_HANDLERS = {
         cadence.deactivateCadence(lead_id, 'jake');
       } catch { /* service may not be seeded yet */ }
     }
+
+    // Revenue tracking: record reply event + update variant
+    try {
+      const revenueTracker = require('../services/revenueTracker');
+      const replyEventMap = {
+        INTERESTED: 'replied', NOT_NOW: 'replied', WRONG_PERSON: 'replied',
+        UNSUBSCRIBE: 'deal_lost', BOUNCED: 'deal_lost', NEUTRAL: 'replied',
+      };
+      const lastSeq = get("SELECT id FROM cfo_outreach_sequences WHERE lead_id=? ORDER BY sent_at DESC LIMIT 1", [lead_id]);
+      revenueTracker.recordEvent(lead_id, replyEventMap[classification], {
+        agent: 'jake-reply-classifier',
+        sequenceId: lastSeq?.id,
+        channel: 'email',
+        metadata: { classification, reply_preview: reply_text.slice(0, 200) },
+      });
+      revenueTracker.updateEngagementScore(lead_id, 'reply', { sequenceId: lastSeq?.id });
+      if (lastSeq) {
+        revenueTracker.updateVariantOutcome(lastSeq.id, 'replied', 1);
+        revenueTracker.updateVariantOutcome(lastSeq.id, 'reply_sentiment', classification);
+        revenueTracker.updateVariantOutcome(lastSeq.id, 'replied_at', new Date().toISOString());
+        if (classification === 'INTERESTED') {
+          revenueTracker.updateVariantOutcome(lastSeq.id, 'converted', 1);
+          revenueTracker.recordEvent(lead_id, 'meeting_booked', {
+            agent: 'jake-reply-classifier', sequenceId: lastSeq.id, channel: 'email',
+          });
+        }
+      }
+    } catch {}
+
+    // Marketing learner: record what angle/tone worked for this reply
+    try {
+      const learner = require('../services/marketingLearner');
+      const lastSeq2 = get("SELECT id FROM cfo_outreach_sequences WHERE lead_id=? ORDER BY sent_at DESC LIMIT 1", [lead_id]);
+      if (lastSeq2) learner.learnFromReply(lead_id, classification, lastSeq2.id);
+    } catch {}
 
     const outputText = `Reply Classifier: ${lead.company_name} \u2192 ${classification} | New status: ${newLeadStatus || 'unchanged'} | Next: ${nextAction}`;
     return { outputText, durationMs: Date.now() - startTime, extra: { classification, newLeadStatus, nextAction } };
@@ -1183,7 +1253,18 @@ const SPECIAL_HANDLERS = {
       outcomeScore: 1.0,
       daysToOutcome,
       leadId: String(lead_id),
+      signalSource: lead.source || lead.attribution_source || null,
+      signalFitScore: lead.pilot_fit_score || null,
     });
+
+    // Revenue tracking: meeting booked event
+    try {
+      const revenueTracker = require('../services/revenueTracker');
+      revenueTracker.recordEvent(lead_id, 'meeting_booked', {
+        agent: 'jake-meeting-booker', channel: 'email',
+        metadata: { subject: meetingSubject, qa_status: meetingStatus },
+      });
+    } catch {}
 
     const outputText = `Meeting Booker: Draft created for ${lead.contact_name} at ${lead.company_name} | Subject: "${data.subject || 'Meeting draft'}"`;
     return { outputText, durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0 };
@@ -1359,6 +1440,20 @@ const SPECIAL_HANDLERS = {
             { subject: seq.company_name, content: `Email sent to ${seq.contact_name || 'contact'} at ${seq.company_name} (${market})`, confidence: 1.0,
               metadata: { lead_id: seq.lead_id, seq_id: seq.id, position: seq.sequence_position } }
           );
+
+          // Revenue tracking: record send event + A/B variant
+          try {
+            const revenueTracker = require('../services/revenueTracker');
+            revenueTracker.recordEvent(seq.lead_id, 'contacted', {
+              agent: 'outreach-sender', sequenceId: seq.id,
+              touchNumber: seq.sequence_position, channel: 'email',
+            });
+            revenueTracker.recordOutreachVariant(seq.id, seq.lead_id, {
+              subjectLine: seq.email_subject || '',
+              angleType: seq.pilot_offer || null,
+              personalizationLevel: seq.contact_name ? 'person' : 'company',
+            });
+          } catch {}
         } else {
           throw new Error(result.error || result.reason || 'SendGrid failed');
         }
@@ -2038,17 +2133,14 @@ const SPECIAL_HANDLERS = {
         [proto.id, today]
       );
 
-      if (!existing) {
-        // Insert placeholder traction entry (real metrics filled by deploy integrations)
-        const tractionScore = 0; // Will be computed when real data comes in
-        dbRun(
-          `INSERT INTO opp_traction (prototype_id, date, page_views, signups, github_stars, mentions, revenue_cents, traction_score)
-           VALUES (?, ?, 0, 0, 0, 0, 0, ?)`,
-          [proto.id, today, tractionScore]
-        );
-      }
+      // Fetch real metrics from GitHub, Vercel, Stripe
+      const { fetchAndRecordMetrics } = require('../services/tractionMonitorService');
+      let metrics;
+      try {
+        metrics = await fetchAndRecordMetrics(proto);
+      } catch { metrics = null; }
 
-      // Get latest traction score
+      // Get latest traction score (freshly updated by fetchAndRecordMetrics)
       const latestTraction = dbGet(
         "SELECT traction_score, revenue_cents FROM opp_traction WHERE prototype_id = ? ORDER BY date DESC LIMIT 1",
         [proto.id]
@@ -2156,6 +2248,183 @@ const SPECIAL_HANDLERS = {
   // Layer 2: Deep training via queue → skill candidates → QA grading → promotion
   // Modes: { mode: 'train' } (default), { mode: 'promote' }, { mode: 'stats' }
   //        { agent_id } for specific agent, { max_agents } for batch (default 3)
+  // ── Database Health Monitor — daily integrity checks ────────────────────
+  db_health_monitor: async ({ message, runId, agent }) => {
+    const monitor = require('../services/dbHealthMonitor');
+    const startTime = Date.now();
+    const report = monitor.runHealthCheck();
+    const formatted = monitor.formatReport(report);
+
+    // Discord alert if unhealthy
+    if (!report.healthy) {
+      try {
+        const discord = require('../services/discordNotifier');
+        await discord.sendEmbed({
+          title: `DB Health: ${report.summary.critical} critical, ${report.summary.high} high issues`,
+          color: report.summary.critical > 0 ? 0xef4444 : 0xf59e0b,
+          description: report.issues.slice(0, 5).map(i => `[${i.severity}] ${i.message}`).join('\n'),
+          fields: [
+            { name: 'Tables', value: `${report.tableCount}`, inline: true },
+            { name: 'DB Size', value: `${report.dbStats?.db_size_mb || '?'} MB`, inline: true },
+          ],
+          timestamp: new Date().toISOString(),
+          footer: { text: `Health check took ${report.durationMs}ms` },
+        });
+      } catch {}
+    }
+
+    return {
+      outputText: `DB Health: ${report.healthy ? 'HEALTHY' : 'ISSUES FOUND'}\n${formatted}`,
+      durationMs: Date.now() - startTime,
+      costUsd: 0,
+      extra: report,
+    };
+  },
+
+  // ── Ralph Code Reviewer — static analysis on changed/new code ───────────
+  ralph_code_review: async ({ message, runId, agent }) => {
+    const ralph = require('../services/ralphCodeReview');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    let results;
+    if (params.file) {
+      // Review single file
+      results = [ralph.reviewFile(params.file)];
+    } else if (params.mode === 'new') {
+      // Review all new services we built
+      results = ralph.reviewNewServices();
+    } else {
+      // Default: review all changed files (git diff)
+      const batch = ralph.reviewChangedFiles();
+      results = batch.results || [];
+    }
+
+    const totalIssues = results.reduce((sum, r) => sum + (r.issues?.length || 0), 0);
+    const criticals = results.reduce((sum, r) => sum + (r.summary?.critical || 0), 0);
+    const avgScore = results.length > 0
+      ? Math.round(results.reduce((sum, r) => sum + (r.score || 0), 0) / results.length)
+      : 100;
+
+    // Discord alert if critical issues found
+    if (criticals > 0) {
+      try {
+        const discord = require('../services/discordNotifier');
+        await discord.sendEmbed({
+          title: `Ralph Code Review — ${criticals} CRITICAL issues`,
+          color: 0xef4444,
+          description: results.filter(r => r.summary?.critical > 0)
+            .map(r => `**${r.file}**: ${r.issues.filter(i => i.severity === 'CRITICAL').map(i => i.message).join('; ')}`)
+            .join('\n'),
+          timestamp: new Date().toISOString(),
+          footer: { text: `${results.length} files reviewed, avg score: ${avgScore}/100` },
+        });
+      } catch {}
+    }
+
+    const report = ralph.formatReport(results);
+    const outputText = [
+      `Ralph Code Review: ${results.length} files, ${totalIssues} issues (${criticals} critical), avg score: ${avgScore}/100`,
+      criticals > 0 ? '⚠️  CRITICAL issues require immediate fix' : '✅ No critical issues',
+      '',
+      report,
+    ].join('\n');
+
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: { filesReviewed: results.length, totalIssues, criticals, avgScore } };
+  },
+
+  // ── Marketing Learning Cycle — self-recursive improvement ───────────────
+  marketing_learner: async ({ message, runId, agent }) => {
+    const learner = require('../services/marketingLearner');
+    const startTime = Date.now();
+    const result = await learner.runLearningCycle();
+    const outputText = [
+      `Marketing Learner: Cycle complete`,
+      `  Content scored: ${result.scoring.scored}/${result.scoring.total}`,
+      `  Patterns extracted: ${result.patterns.learnings_stored}`,
+      `  Calendar entries generated: ${result.calendarResult.created}`,
+      `  Duration: ${result.durationMs}ms`,
+    ].join('\n');
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: result };
+  },
+
+  // ── Welcome Sequence Processor — sends welcome emails to new subscribers ──
+  welcome_sequence: async ({ message, runId, agent }) => {
+    const newsletter = require('../services/newsletterBroadcast');
+    const startTime = Date.now();
+    const result = await newsletter.processWelcomeSequence();
+    return {
+      outputText: `Welcome Sequence: ${result.sent} emails sent (${result.due} subscribers due)`,
+      durationMs: Date.now() - startTime, costUsd: 0, extra: result,
+    };
+  },
+
+  // ── LinkedIn Poster — posts to LinkedIn org page via API v2 ──────────────
+  linkedin_poster: async ({ message, runId, agent }) => {
+    const linkedin = require('../services/linkedinPoster');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const linkedinStatus = linkedin.status();
+    if (!linkedinStatus.configured) {
+      return { outputText: 'LinkedIn Poster: SKIPPED — LINKEDIN_ACCESS_TOKEN or LINKEDIN_ORGANIZATION_ID not configured', durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    const text = params.text || params.content || message;
+    const articleUrl = params.url || params.article_url || null;
+    const title = params.title || '';
+
+    let result;
+    if (articleUrl) {
+      result = await linkedin.postArticle(text, articleUrl, title, params.description || '');
+    } else {
+      result = await linkedin.postText(text, { agent: agent?.name || 'linkedin-direct-poster' });
+    }
+
+    if (result.success) {
+      // Track in content_queue as published
+      try {
+        run("INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'social_post', 'linkedin', ?, 'success')",
+          [JSON.stringify({ post_id: result.postId, text_preview: text.slice(0, 100) })]);
+      } catch {}
+    }
+
+    const outputText = result.success
+      ? `LinkedIn Poster: Posted successfully (ID: ${result.postId})`
+      : `LinkedIn Poster: FAILED — ${result.error}`;
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: result };
+  },
+
+  // ── Twitter Poster — posts tweets/threads via API v2 ──────────────────────
+  twitter_poster: async ({ message, runId, agent }) => {
+    const twitter = require('../services/twitterPoster');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const twitterStatus = twitter.status();
+    if (!twitterStatus.configured) {
+      return { outputText: 'Twitter Poster: SKIPPED — TWITTER_API_KEY or TWITTER_ACCESS_TOKEN not configured', durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    // Thread mode: array of tweets
+    if (params.thread && Array.isArray(params.thread)) {
+      const result = await twitter.postThread(params.thread, { agent: agent?.name || 'jake-twitter-poster' });
+      const outputText = result.success
+        ? `Twitter Poster: Thread posted (${result.tweetCount} tweets)`
+        : `Twitter Poster: Thread FAILED — ${result.error}`;
+      return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: result };
+    }
+
+    // Single tweet mode
+    const text = params.text || params.tweet || message;
+    const result = await twitter.postTweet(text, { agent: agent?.name || 'jake-twitter-poster' });
+
+    const outputText = result.success
+      ? `Twitter Poster: Tweet posted (ID: ${result.tweetId})`
+      : `Twitter Poster: FAILED — ${result.error}`;
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: result };
+  },
+
   idle_training: async ({ message, runId, agent }) => {
     const trainer = require('../services/idleTrainer');
     const startTime = Date.now();
@@ -2579,6 +2848,465 @@ const SPECIAL_HANDLERS = {
       durationMs,
       costUsd: 0,
       extra: summary,
+    };
+  },
+
+  // ── Owen PM Discovery — Google Maps PM company scraper ────────────────────
+  owen_pm_discovery: async ({ message, runId, agent }) => {
+    const { runPMDiscovery } = require('../services/owenPMDiscovery');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const result = await runPMDiscovery({
+      region: params.region || null,
+      limit: parseInt(params.limit) || 100,
+    });
+    const durationMs = Date.now() - startTime;
+    const outputText = [
+      result.summary,
+      `  Duration: ${(durationMs / 1000).toFixed(1)}s | Cost: $0.00`,
+      result.stats.inserted > 0
+        ? '  Run owen-contact-enricher next to find CFO/controller emails'
+        : '  No new companies — try a different region',
+    ].join('\n');
+
+    // Brain observations + episodes
+    if (result.stats.inserted > 0) {
+      const sessionId = `owen-pipeline-${result.region?.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}`;
+      brain.observe(sessionId, 'owen-pm-discovery', 'market_insight', {
+        subject: result.region,
+        content: `Owen PM Discovery: ${result.stats.inserted} new PM companies in ${result.region}. Total scraped: ${result.stats.total}.`,
+        confidence: 1.0,
+        metadata: { region: result.region, inserted: result.stats.inserted, total: result.stats.total },
+      });
+    }
+    brain.recordEpisode('owen-pm-discovery', {
+      market: result.region,
+      actionTaken: `Google Maps PM company discovery: ${SEARCH_QUERIES?.length || 7} query types`,
+      outcome: `Inserted ${result.stats.inserted} new PM companies in ${result.region}`,
+      outcomeType: 'discovery', outcomeScore: result.stats.inserted > 10 ? 0.8 : result.stats.inserted > 0 ? 0.6 : 0.2,
+      signalSource: 'maps_discovery',
+    });
+
+    return { outputText, durationMs, costUsd: 0, extra: { stats: result.stats, region: result.region } };
+  },
+
+  // ── Data Rehab Discovery — cross-sell mining from existing leads ─────────
+  data_rehab_discovery: async ({ message, runId, agent }) => {
+    const { mineExistingLeads } = require('../services/dataRehabDiscovery');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const result = mineExistingLeads({ limit: parseInt(params.limit) || 30 });
+    const durationMs = Date.now() - startTime;
+
+    const highScore = result.crossSellLeads.filter(l => l.data_rehab_score >= 75);
+    const medScore = result.crossSellLeads.filter(l => l.data_rehab_score >= 50 && l.data_rehab_score < 75);
+
+    const outputText = [
+      `Data Rehab Discovery: ${result.crossSellLeads.length} candidates found, ${result.tagged} tagged for outreach`,
+      `  HIGH (75+): ${highScore.length} | MEDIUM (50-74): ${medScore.length}`,
+      ...highScore.slice(0, 5).map(l => `  🎯 ${l.company} (${l.erp || 'unknown'}) — score: ${l.data_rehab_score} → upsell: ${l.upsell_to}`),
+    ].join('\n');
+
+    brain.recordEpisode('data-rehab-discovery', {
+      actionTaken: `Cross-sell mining: ${result.crossSellLeads.length} candidates assessed`,
+      outcome: `${result.tagged} tagged for Data Rehab outreach (${highScore.length} HIGH, ${medScore.length} MED)`,
+      outcomeType: 'discovery', outcomeScore: result.tagged > 5 ? 0.8 : result.tagged > 0 ? 0.6 : 0.3,
+      signalSource: 'data_rehab_cross_sell',
+    });
+
+    if (highScore.length > 0) {
+      try {
+        const discord = require('../services/discordNotifier');
+        await discord.sendEmbed({
+          title: '🔧 Data Rehab — Cross-Sell Candidates',
+          description: highScore.slice(0, 5).map(l => `**${l.company}** (${l.erp}) — ${l.signals[0]}`).join('\n'),
+          color: 0x9C27B0,
+          footer: `${result.tagged} tagged | ${highScore.length} HIGH priority`,
+        });
+      } catch {}
+    }
+
+    return { outputText, durationMs, costUsd: 0, extra: result };
+  },
+
+  // ── Pain Signal Monitor — escalation handler ─────────────────────────────
+  // Parses LLM output JSON, creates/boosts leads, posts Discord alerts.
+  pain_signal_monitor: async ({ message, runId, agent }) => {
+    const openclawBridge = require('../services/openclawBridge');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+
+    // Run the LLM agent to scan for signals
+    const agentSlug = agent?.name || 'jake-pain-signal-monitor';
+    const sessionId = `signal-${agentSlug}-${new Date().toISOString().slice(0, 10)}`;
+    const brainContext = await brain.buildAgentContext(agentSlug, sessionId, {
+      obsTypes: ['lead_signal', 'market_insight'],
+    });
+    const enrichedMsg = (brainContext || '') + (message || '{"scan": true}');
+    const raw = await openclawBridge.runAgent(agentSlug, { message: enrichedMsg, sessionId });
+    const parsed = openclawBridge.parseOutput(raw);
+
+    let data;
+    try { data = JSON.parse(parsed.text); } catch {
+      return { outputText: `Pain Signal Monitor: LLM returned non-JSON — ${(parsed.text || '').slice(0, 200)}`, durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0 };
+    }
+
+    const { run: dbRun, get } = require('../db/connection');
+    let boosted = 0, created = 0;
+    const signals = data.high_priority_signals || data.top_signals || [];
+
+    for (const sig of signals) {
+      const companyName = sig.company || sig.company_name;
+      if (!companyName) continue;
+      const existing = get('SELECT id, urgency_score, urgency_signals FROM cfo_leads WHERE company_name = ? COLLATE NOCASE LIMIT 1', [companyName]);
+
+      const scoreBoost = sig.urgency === 'high' ? 25 : sig.urgency === 'medium' ? 15 : 10;
+
+      if (existing) {
+        // Boost urgency on existing lead
+        const currentSignals = JSON.parse(existing.urgency_signals || '[]');
+        currentSignals.push({ type: 'pain_signal', signal: sig.signal_type, description: sig.brief_description, date: new Date().toISOString().slice(0, 10) });
+        dbRun('UPDATE cfo_leads SET urgency_score = MIN(100, urgency_score + ?), urgency_signals = ?, urgency_updated_at = datetime(\'now\') WHERE id = ?',
+          [scoreBoost, JSON.stringify(currentSignals), existing.id]);
+        boosted++;
+      } else if (sig.lead_inserted !== false) {
+        // Create new lead from signal
+        const fitScore = sig.urgency === 'high' ? 85 : sig.urgency === 'medium' ? 75 : 65;
+        dbRun(`INSERT INTO cfo_leads (company_name, city, state, source, source_agent, pilot_fit_score, pilot_fit_reason, status, enrichment_status, attribution_source, revenue_stage, notes)
+               VALUES (?, ?, ?, 'pain_signal', 'jake', ?, ?, 'new', 'pending', 'pain_signal', 'discovered', ?)`,
+          [companyName, sig.location?.split(',')[0]?.trim() || null, sig.location?.split(',')[1]?.trim() || null,
+           fitScore, `${sig.signal_type}: ${sig.brief_description || ''}`,
+           `Pain signal: ${sig.signal_type}. Source: ${sig.source_url || 'web search'}. ${sig.brief_description || ''}`]);
+        created++;
+      }
+    }
+
+    // Discord alert for high-priority signals
+    const highPriority = signals.filter(s => s.urgency === 'high');
+    if (highPriority.length > 0) {
+      try {
+        const discord = require('../services/discordNotifier');
+        await discord.sendEmbed({
+          title: '🚨 Pain Signals Detected',
+          description: highPriority.map(s => `**${s.company}**: ${s.signal_type} — ${s.brief_description || ''}`).join('\n'),
+          color: 0xFF5722,
+          footer: `${created} new leads, ${boosted} boosted | ${signals.length} total signals`,
+        });
+      } catch {}
+    }
+
+    // Record brain episode for signal discovery
+    brain.recordEpisode(agentSlug, {
+      actionTaken: `Pain signal scan: ${data.searches_run || 0} searches`,
+      outcome: `Found ${signals.length} signals, created ${created} leads, boosted ${boosted}`,
+      outcomeType: 'discovery', outcomeScore: signals.length > 0 ? 0.7 : 0.3,
+      signalSource: 'pain_signal',
+    });
+
+    return {
+      outputText: `Pain Signal Monitor: ${signals.length} signals found — ${created} new leads, ${boosted} urgency boosts | ${highPriority.length} HIGH priority`,
+      durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0,
+      extra: { signals_found: signals.length, created, boosted, high_priority: highPriority.length },
+    };
+  },
+
+  // ── Hiring Signal Agent — escalation handler ────────────────────────────
+  // Parses LLM output JSON, creates high-priority leads from job postings.
+  hiring_signal_agent: async ({ message, runId, agent }) => {
+    const openclawBridge = require('../services/openclawBridge');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+
+    const agentSlug = agent?.name || 'jake-hiring-signal-agent';
+    const sessionId = `signal-${agentSlug}-${new Date().toISOString().slice(0, 10)}`;
+    const brainContext = await brain.buildAgentContext(agentSlug, sessionId, {
+      obsTypes: ['lead_signal', 'market_insight'],
+    });
+    const enrichedMsg = (brainContext || '') + (message || '{"scan": true}');
+    const raw = await openclawBridge.runAgent(agentSlug, { message: enrichedMsg, sessionId });
+    const parsed = openclawBridge.parseOutput(raw);
+
+    let data;
+    try { data = JSON.parse(parsed.text); } catch {
+      return { outputText: `Hiring Signal Agent: LLM returned non-JSON — ${(parsed.text || '').slice(0, 200)}`, durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0 };
+    }
+
+    const { run: dbRun, get } = require('../db/connection');
+    let created = 0, skipped = 0;
+    const topSignals = data.top_signals || [];
+
+    for (const sig of topSignals) {
+      const companyName = sig.company || sig.company_name;
+      if (!companyName) continue;
+      const existing = get('SELECT id FROM cfo_leads WHERE company_name = ? COLLATE NOCASE LIMIT 1', [companyName]);
+
+      if (existing) {
+        // Boost urgency on existing lead
+        const urgencyBoost = sig.score >= 85 ? 20 : sig.score >= 70 ? 15 : 10;
+        dbRun('UPDATE cfo_leads SET urgency_score = MIN(100, urgency_score + ?), urgency_updated_at = datetime(\'now\') WHERE id = ?',
+          [urgencyBoost, existing.id]);
+        skipped++;
+        continue;
+      }
+
+      const city = sig.location?.split(',')[0]?.trim() || null;
+      const state = sig.location?.split(',')[1]?.trim() || null;
+      dbRun(`INSERT INTO cfo_leads (company_name, city, state, source, source_agent, pilot_fit_score, pilot_fit_reason, status, enrichment_status, attribution_source, revenue_stage, notes)
+             VALUES (?, ?, ?, 'hiring_signal', 'jake', ?, ?, 'new', 'pending', 'hiring_signal', 'discovered', ?)`,
+        [companyName, city, state,
+         sig.score || 70, `Hiring: ${sig.role || 'finance role'}`,
+         `Hiring signal: ${sig.role} posted ${sig.posted || 'recently'}. URL: ${sig.job_url || 'n/a'}`]);
+      created++;
+    }
+
+    // Discord notification
+    if (created > 0) {
+      try {
+        const discord = require('../services/discordNotifier');
+        await discord.sendEmbed({
+          title: '💼 Hiring Signals — New Leads',
+          description: topSignals.slice(0, 5).map(s => `**${s.company}**: ${s.role} (score: ${s.score})`).join('\n'),
+          color: 0x2196F3,
+          footer: `${created} new leads, ${skipped} existing boosted`,
+        });
+      } catch {}
+    }
+
+    brain.recordEpisode(agentSlug, {
+      actionTaken: `Hiring signal scan: ${data.searches_run || 0} searches`,
+      outcome: `Found ${topSignals.length} postings, created ${created} leads`,
+      outcomeType: 'discovery', outcomeScore: topSignals.length > 0 ? 0.7 : 0.3,
+      signalSource: 'hiring_signal',
+    });
+
+    return {
+      outputText: `Hiring Signal Agent: ${topSignals.length} postings found — ${created} new leads, ${skipped} existing boosted`,
+      durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0,
+      extra: { postings_found: topSignals.length, created, skipped },
+    };
+  },
+
+  // ── HOA Special Assessment Monitor — escalation handler ─────────────────
+  // Parses LLM output, creates HOA leads from FL condo/reserve filings.
+  hoa_assessment_monitor: async ({ message, runId, agent }) => {
+    const openclawBridge = require('../services/openclawBridge');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+
+    const agentSlug = agent?.name || 'hoa-special-assessment-monitor';
+    const sessionId = `signal-${agentSlug}-${new Date().toISOString().slice(0, 10)}`;
+    const brainContext = await brain.buildAgentContext(agentSlug, sessionId, {
+      obsTypes: ['lead_signal', 'market_insight'],
+    });
+    const enrichedMsg = (brainContext || '') + (message || '{"scan": true}');
+    const raw = await openclawBridge.runAgent(agentSlug, { message: enrichedMsg, sessionId });
+    const parsed = openclawBridge.parseOutput(raw);
+
+    let data;
+    try { data = JSON.parse(parsed.text); } catch {
+      return { outputText: `HOA Assessment Monitor: LLM returned non-JSON — ${(parsed.text || '').slice(0, 200)}`, durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0 };
+    }
+
+    const { run: dbRun, get } = require('../db/connection');
+    let created = 0;
+    const topSignals = data.top_signals || [];
+
+    for (const sig of topSignals) {
+      const hoaName = sig.hoa_name || sig.company;
+      if (!hoaName) continue;
+
+      // Check lg_engagement_queue (HOA pipeline) for dedup
+      const existing = get('SELECT id FROM lg_engagement_queue WHERE title LIKE ? LIMIT 1', [`%${hoaName}%`]);
+      if (existing) continue;
+
+      const fitScore = sig.urgency === 'immediate' ? 90 : sig.urgency === '6_months' ? 75 : 60;
+      dbRun(`INSERT INTO cfo_leads (company_name, city, state, source, source_agent, pilot_fit_score, pilot_fit_reason, status, enrichment_status, attribution_source, revenue_stage, notes)
+             VALUES (?, ?, ?, 'special_assessment', 'hoa', ?, ?, 'new', 'pending', 'special_assessment', 'discovered', ?)`,
+        [hoaName, sig.city || sig.location?.split(',')[0]?.trim() || null,
+         sig.state || 'FL', fitScore,
+         `${sig.signal_type}: ${sig.assessment_purpose || 'capital project'}`,
+         `Assessment: ${sig.signal_type}. Amount: $${sig.assessment_amount || 'unknown'}. Units: ${sig.units_count || '?'}. Source: ${sig.source_url || 'filing search'}`]);
+      created++;
+    }
+
+    if (created > 0) {
+      try {
+        const discord = require('../services/discordNotifier');
+        await discord.sendEmbed({
+          title: '🏢 HOA Assessment Signals',
+          description: topSignals.slice(0, 5).map(s => `**${s.hoa_name}**: ${s.signal_type} — ${s.urgency}`).join('\n'),
+          color: 0xFF9800,
+          footer: `${created} new leads from ${topSignals.length} signals`,
+        });
+      } catch {}
+    }
+
+    brain.recordEpisode(agentSlug, {
+      actionTaken: `HOA assessment scan: ${data.searches_run || 0} searches`,
+      outcome: `Found ${topSignals.length} signals, created ${created} leads`,
+      outcomeType: 'discovery', outcomeScore: topSignals.length > 0 ? 0.7 : 0.3,
+      signalSource: 'special_assessment',
+    });
+
+    return {
+      outputText: `HOA Assessment Monitor: ${topSignals.length} signals — ${created} new leads | Types: ${JSON.stringify(data.signal_breakdown || {})}`,
+      durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0, tokensUsed: parsed.tokensUsed || 0,
+      extra: { signals: topSignals.length, created },
+    };
+  },
+
+  // ── Signal Performance Rollup — Phase 1 Revenue Tracking ────────────────
+  // Computes 30-day rolling conversion rates by signal source.
+  // Posts Discord summary. $0/run.
+  signal_performance: async ({ message, runId, agent }) => {
+    const { computeSignalPerformance, getDiscordSummary } = require('../services/signalPerformance');
+    const startTime = Date.now();
+    const result = computeSignalPerformance();
+    const durationMs = Date.now() - startTime;
+
+    // Post to Discord
+    try {
+      const discord = require('../services/discordNotifier');
+      const summary = getDiscordSummary();
+      await discord.sendEmbed({
+        title: '📊 Signal Performance Rollup',
+        description: summary,
+        color: 0x4CAF50,
+        footer: `${result.sources} sources | ${result.totalLeads} leads | Top: ${result.topSource}`,
+      });
+    } catch {}
+
+    return {
+      outputText: `Signal Performance: ${result.sources} sources, ${result.totalLeads} leads. Top: ${result.topSource}`,
+      durationMs,
+      costUsd: 0,
+      extra: result,
+    };
+  },
+
+  // ── Data Audit Service (Lane 3: Service Arbitrage) ──────────────────────
+  data_audit: async ({ message, runId, agent }) => {
+    const { processPendingAudits, createAndRunAudit } = require('../services/dataAuditService');
+    const startTime = Date.now();
+
+    // Parse message for direct audit request or batch mode
+    let result;
+    try {
+      const params = JSON.parse(message || '{}');
+      if (params.companyName) {
+        // Direct audit request
+        result = await createAndRunAudit(params);
+        result = { processed: 1, results: [result] };
+      } else {
+        // Batch: process pending audits
+        result = await processPendingAudits(params.limit || 5);
+      }
+    } catch {
+      // Default: batch process pending
+      result = await processPendingAudits(5);
+    }
+
+    const durationMs = Date.now() - startTime;
+    const completed = result.results.filter(r => !r.error).length;
+    const failed = result.results.filter(r => r.error).length;
+
+    // Discord notification
+    try {
+      const discord = require('../services/discordNotifier');
+      if (completed > 0) {
+        const topScore = Math.max(...result.results.filter(r => r.chaosScore).map(r => r.chaosScore), 0);
+        await discord.sendEmbed({
+          title: '📋 Data Audit Complete',
+          description: `${completed} audits completed${failed ? `, ${failed} failed` : ''}`,
+          color: topScore >= 50 ? 0xf59e0b : 0x22c55e,
+          fields: result.results.filter(r => !r.error).map(r => ({
+            name: `Score: ${r.chaosScore}/100 (${r.rating})`,
+            value: `${r.signals} signals found`,
+            inline: true,
+          })),
+        });
+      }
+    } catch {}
+
+    return {
+      outputText: `Data Audit: ${completed} completed, ${failed} failed in ${(durationMs / 1000).toFixed(1)}s`,
+      durationMs,
+      costUsd: completed * 0.05,
+      extra: result,
+    };
+  },
+
+  // ── Prototype Deployer (Lane 2: Micro-SaaS) ────────────────────────────
+  prototype_deployer: async ({ message, runId, agent }) => {
+    const { deployPending, deployPrototype } = require('../services/prototypeDeployer');
+    const startTime = Date.now();
+
+    let result;
+    try {
+      const params = JSON.parse(message || '{}');
+      if (params.prototypeId) {
+        // Deploy a specific prototype
+        const single = await deployPrototype(params.prototypeId);
+        result = { deployed: 1, failed: 0, results: [single] };
+      } else {
+        // Batch: deploy pending scaffolded prototypes
+        result = await deployPending(params.limit || 3);
+      }
+    } catch (error) {
+      result = { deployed: 0, failed: 1, results: [{ error: error.message }] };
+    }
+
+    const durationMs = Date.now() - startTime;
+
+    // Discord notification
+    try {
+      const discord = require('../services/discordNotifier');
+      if (result.deployed > 0) {
+        await discord.sendEmbed({
+          title: 'Prototype Deployed',
+          description: `${result.deployed} deployed, ${result.failed} failed`,
+          color: result.failed === 0 ? 0x22c55e : 0xf59e0b,
+          fields: result.results.filter(r => !r.error).map(r => ({
+            name: r.name || 'Prototype',
+            value: r.deployUrl || 'No URL',
+            inline: false,
+          })),
+        });
+      }
+    } catch {}
+
+    return {
+      outputText: `Prototype Deploy: ${result.deployed} deployed, ${result.failed} failed in ${(durationMs / 1000).toFixed(1)}s`,
+      durationMs,
+      costUsd: 0,
+      extra: result,
+    };
+  },
+
+  // ── Revenue Radar (Cross-Lane Revenue Intelligence) ─────────────────────
+  revenue_radar: async ({ message, runId, agent }) => {
+    const { runRevenueScan, formatForDiscord } = require('../services/revenueRadar');
+    const startTime = Date.now();
+
+    const scan = runRevenueScan();
+    const durationMs = Date.now() - startTime;
+
+    // Discord notification with top money moves
+    try {
+      const discord = require('../services/discordNotifier');
+      const embed = formatForDiscord(scan);
+      await discord.sendEmbed(embed);
+    } catch {}
+
+    const movesSummary = scan.moneyMoves.slice(0, 3).map((m, i) => `${i + 1}. ${m.action}`).join('\n');
+
+    return {
+      outputText: `Revenue Radar: ${scan.allActions.length} actions found across ${Object.values(scan.lanes).filter(l => l.status !== 'inactive').length} active lanes\n\nTop Money Moves:\n${movesSummary}`,
+      durationMs,
+      costUsd: 0,
+      extra: scan,
     };
   },
 };

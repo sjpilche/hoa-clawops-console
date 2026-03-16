@@ -35,6 +35,7 @@ export const NAV_ITEMS = [
   { path: '/opportunities', label: 'Opportunities', icon: 'Radar' },
   { path: '/rse', label: 'Signal Engine', icon: 'Radio' },
   { path: '/audit', label: 'Audit Log', icon: 'Shield' },
+  { path: '/revenue', label: 'Revenue', icon: 'DollarSign' },
   { path: '/costs', label: 'Costs', icon: 'DollarSign' },
   { path: '/help', label: 'Help', icon: 'HelpCircle' },
   { path: '/settings', label: 'Settings', icon: 'Settings' },

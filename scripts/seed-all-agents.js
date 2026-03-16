@@ -66,16 +66,14 @@ const AGENT_FLEET = [
   { name: 'pipeline-digest', description: 'Morning Discord digest — posts yesterday pipeline stats at 7 AM ($0/run)', group: 'core', special_handler: 'morning_digest' },
 
   // ── Tier 1: Social Publishing ──
-  { name: 'jake-twitter-poster', description: 'Posts Jake-voice tweet threads from approved content pieces via openclaw-twitter extension', group: 'jake-marketing' },
-  { name: 'linkedin-direct-poster', description: 'Posts Jake-voice LinkedIn long-form posts and short takes from approved content pieces', group: 'jake-marketing' },
+  { name: 'jake-twitter-poster', description: 'Posts Jake-voice tweet threads from approved content pieces via Twitter API v2 ($0/run)', group: 'jake-marketing', special_handler: 'twitter_poster' },
+  { name: 'linkedin-direct-poster', description: 'Posts Jake-voice LinkedIn long-form posts and articles via LinkedIn API v2 ($0/run)', group: 'jake-marketing', special_handler: 'linkedin_poster' },
   { name: 'sms-follow-up', description: 'Sends 1-2 sentence SMS via Twilio to enriched leads with phone after 10+ days no reply ($0.0075/sms)', group: 'jake-marketing' },
 
   // ── Tier 2: New Signal Sources ──
   { name: 'jake-permit-scanner', description: 'Scrapes county building permit portals for recently issued $250K+ commercial permits — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_permit_scanner' },
-  { name: 'jake-hiring-signal-agent', description: 'Monitors Indeed/LinkedIn Jobs for construction companies posting CFO/Controller/AP roles — high-intent leads', group: 'jake-marketing' },
-  // hoa-special-assessment-monitor CUT (2026-03-14 audit): No handler, no schedule, can't execute.
-  // Rule 4: "If your output can't be evaluated... you are not production-ready."
-  // Re-add when a special_handler is built for FL condo filing scraping.
+  { name: 'jake-hiring-signal-agent', description: 'Monitors Indeed/LinkedIn Jobs for construction companies posting CFO/Controller/AP roles — high-intent leads', group: 'jake-marketing', special_handler: 'hiring_signal_agent' },
+  { name: 'hoa-special-assessment-monitor', description: 'Scans FL Division of Condominiums filings, SIRS/SB4D reserve studies for HOA capital project signals', group: 'hoa-marketing', special_handler: 'hoa_assessment_monitor' },
 
   // ── Tier 3: Close Loops ──
   { name: 'jake-crm-sync', description: 'Pushes replied/meeting_booked/pilot leads to Google Sheets or CSV ($0/run)', group: 'jake-marketing', special_handler: 'jake_crm_sync' },
@@ -84,20 +82,24 @@ const AGENT_FLEET = [
 
   // ── Tier 4: Creative Intel ──
   { name: 'competitor-intel', description: 'Scrapes Procore/Sage/Vista forums for finance complaints. Output: cfo_leads rows with source=competitor_intel. Scorecard: leads found, conversion to contacted.', group: 'jake-marketing' },
-  { name: 'jake-pain-signal-monitor', description: 'Scrapes public records (liens, judgments, BBB) for GC financial stress. Output: cfo_leads rows with source=pain_signal. Scorecard: leads found, signal accuracy.', group: 'jake-marketing' },
+  { name: 'jake-pain-signal-monitor', description: 'Scrapes public records (liens, judgments, BBB) for GC financial stress — auto-creates leads and boosts urgency. Scorecard: signals found, leads created, urgency boosts.', group: 'jake-marketing', special_handler: 'pain_signal_monitor' },
   { name: 'bid-result-scraper', description: 'Scrapes FL/TX procurement portals for recently awarded $500K+ construction contracts — GC lead source ($0/run)', group: 'jake-marketing', special_handler: 'jake_bid_scraper' },
 
-  // ── Owen CFO Marketing (5) — Property Management sister product to Jake ──
-  { name: 'owen-content-engine', description: 'Owen-voice content — LinkedIn posts, blog articles for property management CFO audience', group: 'owen-marketing' },
-  { name: 'owen-outreach-agent', description: 'Personalized cold emails to property management companies — trust accounting, CAM recon, owner distribution pain', group: 'owen-marketing' },
+  // ── Owen CFO Marketing (7) — Property Management powerhouse ──
+  { name: 'owen-pm-discovery', description: 'Google Maps PM company scraper — discovers property management companies across 25 target markets. $0/run.', group: 'owen-marketing', special_handler: 'owen_pm_discovery' },
+  { name: 'owen-content-engine', description: 'Owen-voice content — trust accounting, CAM recon, reserve studies for PM CFO audience. Self-evaluating.', group: 'owen-marketing' },
+  { name: 'owen-outreach-agent', description: 'Personalized cold emails to PM companies — trust accounting, CAM recon, owner distribution pain. Self-evaluating.', group: 'owen-marketing' },
   { name: 'owen-lead-scout', description: 'Discovers property management companies (500–5,000 units) across target markets via web search', group: 'owen-marketing', special_handler: 'jake_lead_scout' },
-  { name: 'owen-social-scheduler', description: 'Formats Owen content for LinkedIn, Twitter, Facebook', group: 'owen-marketing' },
+  { name: 'owen-social-scheduler', description: 'Formats Owen content for LinkedIn, Twitter, Facebook — PM CFO voice', group: 'owen-marketing' },
   { name: 'owen-analytics-monitor', description: 'Owen pipeline health — leads, outreach, content, costs', group: 'owen-marketing' },
+  { name: 'owen-contact-enricher', description: 'Enriches Owen PM leads with CFO/controller contacts — CAM license lookup, PM directories, LinkedIn. $0/run.', group: 'owen-marketing', special_handler: 'jake_contact_enricher' },
 
-  // ── Data Rehab (3) — Foot-in-door data cleaning service ──
-  { name: 'data-rehab-outreach', description: 'Cold outreach for Data Rehab — low-risk data audit offer, bridges to Jake/Owen upsell', group: 'data-rehab' },
-  { name: 'data-rehab-content', description: 'Content for Data Rehab — GIGO messaging, hidden cost of messy data, AI-readiness education', group: 'data-rehab' },
-  { name: 'data-rehab-scout', description: 'Finds SMBs with data chaos signals — QB+Excel mix, hiring accountants, ERP migration issues', group: 'data-rehab' },
+  // ── Data Rehab (5) — Foot-in-door data cleaning → Jake/Owen upsell ──
+  { name: 'data-rehab-discovery', description: 'Cross-sell mining — finds existing leads with data chaos signals for Data Rehab pitch. $0/run.', group: 'data-rehab', special_handler: 'data_rehab_discovery' },
+  { name: 'data-rehab-outreach', description: 'Cold outreach for Data Rehab — low-risk data audit offer, bridges to Jake/Owen upsell. Self-evaluating.', group: 'data-rehab' },
+  { name: 'data-rehab-content', description: 'Content for Data Rehab — GIGO messaging, hidden cost of messy data, AI-readiness education. Self-evaluating.', group: 'data-rehab' },
+  { name: 'data-rehab-scout', description: 'Finds SMBs with data chaos signals — QB+Excel mix, hiring accountants, ERP migration issues. Self-evaluating.', group: 'data-rehab' },
+  { name: 'data-rehab-scorer', description: 'Scores leads on data-readiness: ERP age, employee count, manual processes, failed migrations. $0/run.', group: 'data-rehab', special_handler: 'data_rehab_discovery' },
 
   // ── ClawOps 2.0 Upgrades ──
   { name: 'urgency-scorer', description: 'Scores all leads 0-100 across Fit/Pain/Timeliness/Enrichment. Dual-product (Jake + HOA). $0/run — no LLM.', group: 'jake-marketing', special_handler: 'urgency_scorer' },
@@ -112,6 +114,9 @@ const AGENT_FLEET = [
   { name: 'software-factory', description: 'Takes top-scored opportunities (score >= 75) and scaffolds prototypes from 5 templates (SaaS, CLI, landing page, API wrapper, Chrome ext). Phase 3.', group: 'opportunity-engine', special_handler: 'software_factory' },
   { name: 'traction-monitor', description: 'Tracks deployed prototype metrics daily (page views, signups, stars, revenue). 14-day kill gate. Phase 3.', group: 'opportunity-engine', special_handler: 'traction_monitor' },
 
+  // ── Signal Performance ──
+  { name: 'signal-performance-rollup', description: 'Nightly 30-day rolling conversion rates by signal source. Feeds back into agent context. $0/run.', group: 'core', special_handler: 'signal_performance' },
+
   // ── Dream Team Nightly ──
   { name: 'dream-team-nightly', description: 'Nightly learning cycle — scorecards, self-assessment, pattern proposals, Ralph QA, Todd actions, morning report. ~$0.07/night.', group: 'core', special_handler: 'dream_team_nightly' },
 
@@ -123,6 +128,12 @@ const AGENT_FLEET = [
 
   // ── Idle Training ──
   { name: 'idle-trainer', description: 'Self-training system — agents study YouTube videos when idle + system has spare capacity. Grows skills, levels up, posts funny quips. $0/run.', group: 'core', special_handler: 'idle_training' },
+
+  // ── Marketing Intelligence ──
+  { name: 'db-health-monitor', description: 'Daily database integrity: missing tables, broken columns, orphaned records, stale data, anomalies. $0/run.', group: 'core', special_handler: 'db_health_monitor' },
+  { name: 'ralph-code-reviewer', description: 'Static code analysis: SQL injection, schema mismatches, missing error handling, hardcoded secrets. Reviews git diff or specific files. $0/run.', group: 'core', special_handler: 'ralph_code_review' },
+  { name: 'marketing-learner', description: 'Weekly self-recursive learning cycle: scores content, extracts patterns, generates writer briefings, extends content calendar. $0/run.', group: 'core', special_handler: 'marketing_learner' },
+  { name: 'welcome-sequence', description: 'Processes welcome email sequence for new newsletter subscribers. Sends next step to subscribers who are due. $0/run (SendGrid).', group: 'core', special_handler: 'welcome_sequence' },
 
   // ── Revenue Signal Engine (7) ──
   { name: 'rse-channel-monitor', description: 'Checks YouTube RSS feeds for new videos from curated creators. $0/run.', group: 'revenue-signal', special_handler: 'rse_channel_monitor' },

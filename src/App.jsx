@@ -67,6 +67,7 @@ import MissionControlPage from '@/pages/MissionControlPage';
 import OpportunityEnginePage from '@/pages/OpportunityEnginePage';
 import RSEEnginePage from '@/pages/RSEEnginePage';
 import AgentDirectoryPage from '@/pages/AgentDirectoryPage';
+import RevenueDashboard from '@/pages/RevenueDashboard';
 
 /**
  * Protected Route wrapper.
@@ -128,6 +129,7 @@ export default function App() {
         <Route path="/mission-control" element={<MissionControlPage />} />
         <Route path="/opportunities" element={<OpportunityEnginePage />} />
         <Route path="/rse" element={<RSEEnginePage />} />
+        <Route path="/revenue" element={<RevenueDashboard />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />

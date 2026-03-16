@@ -20,6 +20,7 @@ require('dotenv').config({ path: '.env.local' });
 
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 
@@ -64,6 +65,9 @@ const qaRoutes             = require('./routes/qa');
 const agentHealthRoutes    = require('./routes/agentHealth');
 const dashboardRoutes      = require('./routes/dashboard');
 const sendgridWebhookRoutes = require('./routes/sendgridWebhook');
+const revenueRoutes          = require('./routes/revenue');
+const leadCaptureRoutes      = require('./routes/leadCapture');
+const dataAuditRoutes        = require('./routes/dataAudit');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -176,6 +180,31 @@ async function startServer() {
 
     app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
+    // --- Public Pages (no auth) ---
+    // Data Audit intake landing page
+    app.get('/audit', (_req, res) => {
+      res.sendFile(path.join(__dirname, 'public', 'data-audit.html'));
+    });
+
+    // Public audit submission endpoint (no auth — landing page form)
+    app.post('/api/data-audit/public', async (req, res) => {
+      try {
+        const { companyName, contactName, contactEmail, website, industry, erpSystem } = req.body;
+        if (!companyName || !contactEmail) {
+          return res.status(400).json({ error: 'Company name and email are required' });
+        }
+        const { createAndRunAudit } = require('./services/dataAuditService');
+        const result = await createAndRunAudit({
+          companyName, contactName, contactEmail, website, industry, erpSystem,
+          source: 'landing_page', amountCents: 0,
+        });
+        res.json({ success: true, auditId: result.auditId });
+      } catch (error) {
+        console.error('[data-audit/public] Error:', error.message);
+        res.status(500).json({ error: 'Audit request failed. Please try again.' });
+      }
+    });
+
     // --- Rate Limiting (DISABLED) ---
     // Single-user local console — rate limiting just gets in the way
     // app.use('/api', generalLimiter);
@@ -219,6 +248,9 @@ async function startServer() {
     app.use('/api/health/agents', agentHealthRoutes);
     app.use('/api/dashboard', dashboardRoutes);
     app.use('/api/webhooks', sendgridWebhookRoutes);
+    app.use('/api/revenue', revenueRoutes);
+    app.use('/api/capture', leadCaptureRoutes);
+    app.use('/api/data-audit', dataAuditRoutes);
 
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {

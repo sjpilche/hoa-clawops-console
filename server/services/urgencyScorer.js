@@ -23,6 +23,10 @@
 
 const { get, all, run } = require('../db/connection');
 
+// Brain reader for learned insights (non-fatal if not available)
+let brainReader;
+try { brainReader = require('./brainReader'); } catch { brainReader = null; }
+
 // ── Scoring weights (must sum to 1.0) ─────────────────────────────────────
 const W_FIT         = 0.30;   // pilot_fit_score / 100  (already 0-100)
 const W_PAIN_INTENT = 0.40;   // signals from notes, pain keywords, job postings etc.
@@ -145,15 +149,36 @@ function scoreLead(leadId, product = 'jake') {
   const enrichScore = enrichmentScore(lead);
   signals.push({ type: 'enrichment', has_email: !!lead.contact_email, has_phone: !!lead.phone, score: enrichScore });
 
+  // ── Component 5: Brain bonus (up to +15 points) ──────────────────────────
+  // Leads with positive brain history get a boost; leads with rejection history get penalized.
+  let brainBonus = 0;
+  if (brainReader) {
+    try {
+      const insights = brainReader.getLeadInsights(leadId);
+      if (insights.wasConverted) brainBonus = 15;
+      else if (insights.bestOutcome && insights.bestOutcome.outcome_score >= 0.7) brainBonus = 10;
+      else if (insights.hasHistory && !insights.wasRejected) brainBonus = 5;
+      else if (insights.wasRejected) brainBonus = -10;
+
+      // Also check if this lead's ERP/market combo has winning patterns
+      const angles = brainReader.getWinningAngles(product, lead.erp_type);
+      if (angles.totalWins >= 3) brainBonus += 5; // proven market
+      if (brainBonus !== 0) {
+        signals.push({ type: 'brain_context', bonus: brainBonus, wins: angles.totalWins, wasRejected: insights.wasRejected });
+      }
+    } catch {} // Non-fatal
+  }
+
   // ── Composite score ───────────────────────────────────────────────────────
-  const composite = Math.round(
+  const composite = Math.min(100, Math.max(0, Math.round(
     fitScore    * W_FIT         +
     painFinal   * W_PAIN_INTENT +
     timeScore   * W_TIMELINESS  +
-    enrichScore * W_ENRICHMENT
-  );
+    enrichScore * W_ENRICHMENT  +
+    brainBonus
+  )));
 
-  const breakdown = { fit: fitScore, pain_intent: painFinal, timeliness: timeScore, enrichment: enrichScore };
+  const breakdown = { fit: fitScore, pain_intent: painFinal, timeliness: timeScore, enrichment: enrichScore, brain_bonus: brainBonus };
 
   // Persist to DB
   run(

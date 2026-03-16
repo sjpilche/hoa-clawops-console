@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS outreach_variants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sequence_id INTEGER NOT NULL,
+  lead_id INTEGER NOT NULL,
+  subject_line TEXT NOT NULL,
+  angle_type TEXT DEFAULT NULL,
+  template_name TEXT DEFAULT NULL,
+  tone TEXT DEFAULT NULL,
+  personalization_level TEXT DEFAULT NULL,
+  delivered INTEGER DEFAULT 0,
+  opened INTEGER DEFAULT 0,
+  open_count INTEGER DEFAULT 0,
+  clicked INTEGER DEFAULT 0,
+  replied INTEGER DEFAULT 0,
+  reply_sentiment TEXT DEFAULT NULL,
+  converted INTEGER DEFAULT 0,
+  sent_at TEXT DEFAULT NULL,
+  first_open_at TEXT DEFAULT NULL,
+  first_click_at TEXT DEFAULT NULL,
+  replied_at TEXT DEFAULT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);

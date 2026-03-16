@@ -35,7 +35,7 @@ function checkDatabase() {
     // Get table counts
     const agentCount = get('SELECT COUNT(*) as count FROM agents').count;
     const runCount = get('SELECT COUNT(*) as count FROM runs').count;
-    const messageCount = get('SELECT COUNT(*) as count FROM messages').count;
+    const messageCount = get('SELECT COUNT(*) as count FROM chat_messages').count;
 
     return {
       status: 'healthy',

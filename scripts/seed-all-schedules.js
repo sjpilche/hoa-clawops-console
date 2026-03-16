@@ -465,6 +465,148 @@ const SCHEDULES = [
     cron: '0 3 * * 0',
     message: '{}',
   },
+
+  // ═══════════════════════════════════════════════════════════════
+  // OWEN CFO — Property Management Pipeline
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'Owen — PM Discovery — Tue/Fri 6 AM',
+    description: 'Google Maps PM company scraper across 25 target markets. $0/run.',
+    agent_name: 'owen-pm-discovery',
+    cron: '0 6 * * 2,5',
+    message: '{"limit": 100}',
+  },
+  {
+    name: 'Owen — Contact Enricher — Weekdays 9 AM',
+    description: 'Enriches Owen PM leads with CFO/controller contacts. $0/run.',
+    agent_name: 'owen-contact-enricher',
+    cron: '0 9 * * 1-5',
+    message: '{"limit": 20, "status_filter": "pending", "source": "owen"}',
+  },
+  {
+    name: 'Owen — Lead Scout — Tue 7 AM',
+    description: 'Web search for PM companies 500-5000 units. LLM agent.',
+    agent_name: 'owen-lead-scout',
+    cron: '0 7 * * 2',
+    message: '{"markets": ["Tampa, FL", "Miami, FL", "Phoenix, AZ", "Dallas, TX"]}',
+  },
+  {
+    name: 'Owen — Content Engine — Tue 8 AM',
+    description: 'Owen-voice PM content — trust accounting, reserves, owner comms. LLM agent.',
+    agent_name: 'owen-content-engine',
+    cron: '0 8 * * 2',
+    message: '{"pillar": "trust_accounting", "channel": "linkedin"}',
+  },
+  {
+    name: 'Owen — Outreach Agent — Wed/Fri 10 AM',
+    description: 'Personalized PM cold emails with research. LLM agent.',
+    agent_name: 'owen-outreach-agent',
+    cron: '0 10 * * 3,5',
+    message: '{"batch_size": 5, "tone": "peer-frustrated"}',
+  },
+  {
+    name: 'Owen — Social Scheduler — Thu 9 AM',
+    description: 'Formats approved Owen content for social channels. LLM agent.',
+    agent_name: 'owen-social-scheduler',
+    cron: '0 9 * * 4',
+    message: '{}',
+  },
+  {
+    name: 'Owen — Analytics Monitor — Daily 7:45 AM',
+    description: 'Owen pipeline health — leads, outreach, content, costs.',
+    agent_name: 'owen-analytics-monitor',
+    cron: '45 7 * * 1-5',
+    message: '{}',
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // DATA REHAB — Foot-in-Door Data Cleaning
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'Data Rehab — Cross-Sell Discovery — Mon 8 AM',
+    description: 'Mines existing leads for data chaos signals. Tags for Data Rehab outreach. $0/run.',
+    agent_name: 'data-rehab-discovery',
+    cron: '0 8 * * 1',
+    message: '{"limit": 30}',
+  },
+  {
+    name: 'Data Rehab — Scout — Wed 8 AM',
+    description: 'Finds new SMBs with data chaos signals via web search. LLM agent.',
+    agent_name: 'data-rehab-scout',
+    cron: '0 8 * * 3',
+    message: '{"industries": ["construction", "property_management", "professional_services"]}',
+  },
+  {
+    name: 'Data Rehab — Content — Thu 8 AM',
+    description: 'GIGO messaging content — hidden cost of messy data, data audit education. LLM agent.',
+    agent_name: 'data-rehab-content',
+    cron: '0 8 * * 4',
+    message: '{"pillar": "gigo", "channel": "linkedin"}',
+  },
+  {
+    name: 'Data Rehab — Outreach — Tue/Thu 11 AM',
+    description: 'Low-risk data audit offer outreach to tagged leads. LLM agent.',
+    agent_name: 'data-rehab-outreach',
+    cron: '0 11 * * 2,4',
+    message: '{"batch_size": 5}',
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // SIGNAL MONITORS — Escalation handlers create/boost leads
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'Pain Signal Monitor — Wed/Fri 6 AM',
+    description: 'Scans liens, judgments, BBB for GC financial stress signals. Auto-creates leads + boosts urgency.',
+    agent_name: 'jake-pain-signal-monitor',
+    cron: '0 6 * * 3,5',
+    message: '{"scan": true}',
+  },
+  {
+    name: 'Hiring Signal Agent — Tue/Thu 7 AM',
+    description: 'Monitors job postings for CFO/Controller/AP roles — high-intent lead creation.',
+    agent_name: 'jake-hiring-signal-agent',
+    cron: '0 7 * * 2,4',
+    message: '{"scan": true}',
+  },
+  {
+    name: 'HOA Assessment Monitor — Mon/Thu 8 AM',
+    description: 'Scans FL condo filings, SIRS/SB4D reserve studies for HOA capital project signals.',
+    agent_name: 'hoa-special-assessment-monitor',
+    cron: '0 8 * * 1,4',
+    message: '{"scan": true}',
+  },
+  {
+    name: 'Signal Performance Rollup — Nightly 1:30 AM',
+    description: 'Computes 30-day conversion rates by signal source. Posts Discord summary. $0/run.',
+    agent_name: 'signal-performance-rollup',
+    cron: '30 1 * * *',
+    message: '{}',
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // MARKETING INTELLIGENCE
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'DB Health Monitor — Daily 2:30 AM',
+    description: 'Checks table existence, column integrity, orphaned records, stale data, data anomalies. $0/run.',
+    agent_name: 'db-health-monitor',
+    cron: '30 2 * * *',
+    message: '{}',
+  },
+  {
+    name: 'Marketing Learner — Sunday 11 PM',
+    description: 'Self-recursive learning: scores content, extracts patterns, generates writer briefings, extends calendar. $0/run.',
+    agent_name: 'marketing-learner',
+    cron: '0 23 * * 0',
+    message: '{}',
+  },
+  {
+    name: 'Welcome Sequence — Every Hour',
+    description: 'Sends next welcome email to newsletter subscribers who are due. $0/run (SendGrid).',
+    agent_name: 'welcome-sequence',
+    cron: '0 * * * *',
+    message: '{}',
+  },
 ];
 
 async function main() {
