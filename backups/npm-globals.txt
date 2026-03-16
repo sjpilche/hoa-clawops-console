@@ -1,0 +1,8 @@
+C:\Users\SPilcher\AppData\Roaming\npm
++-- @anthropic-ai/claude-code@2.1.76
++-- clawhub@0.8.0
++-- openclaw@2026.3.12
++-- pm2@6.0.14
++-- pnpm@10.29.1
+`-- vercel@50.13.2
+

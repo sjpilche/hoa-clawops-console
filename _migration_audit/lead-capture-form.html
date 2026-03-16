@@ -1,0 +1,211 @@
+<!--
+  HOA Project Funding — Lead Capture Form
+
+  Drop this into any page on hoaprojectfunding.com.
+  It POSTs to your ClawOps server at /api/capture/lead.
+
+  UPDATE THE ACTION URL below to your actual server address:
+  - Local dev: http://localhost:3001/api/capture/lead
+  - Production: https://your-server.com/api/capture/lead
+
+  The form works with or without JavaScript.
+  With JS: AJAX submit, no page reload, shows success message.
+  Without JS: Standard form POST, redirects.
+-->
+
+<!-- EMBED THIS CSS in your page's <head> or stylesheet -->
+<style>
+  .claw-capture {
+    max-width: 480px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .claw-capture h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #111827;
+  }
+  .claw-capture p.subtitle {
+    margin: 0 0 1.5rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+  }
+  .claw-capture label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #374151;
+  }
+  .claw-capture input, .claw-capture textarea {
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    margin-bottom: 1rem;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: #111827;
+    background: #f9fafb;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+  }
+  .claw-capture input:focus, .claw-capture textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  }
+  .claw-capture textarea {
+    min-height: 80px;
+    resize: vertical;
+  }
+  .claw-capture button {
+    width: 100%;
+    padding: 0.75rem;
+    background: #2563eb;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .claw-capture button:hover {
+    background: #1d4ed8;
+  }
+  .claw-capture button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+  }
+  .claw-capture .success-msg {
+    display: none;
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+  .claw-capture .success-msg h4 {
+    color: #059669;
+    font-size: 1.125rem;
+    margin: 0 0 0.5rem;
+  }
+  .claw-capture .success-msg p {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin: 0;
+  }
+  .claw-capture .error-msg {
+    color: #dc2626;
+    font-size: 0.8125rem;
+    margin: -0.5rem 0 1rem;
+    display: none;
+  }
+</style>
+
+<!-- EMBED THIS HTML where you want the form -->
+<div class="claw-capture" id="clawCapture">
+  <form id="clawCaptureForm">
+    <h3>Get a Free HOA Funding Assessment</h3>
+    <p class="subtitle">See how much your HOA could access for deferred maintenance, reserves, or capital projects.</p>
+
+    <label for="cc-name">Your Name</label>
+    <input type="text" id="cc-name" name="name" placeholder="Jane Smith" required>
+
+    <label for="cc-email">Email *</label>
+    <input type="email" id="cc-email" name="email" placeholder="jane@example.com" required>
+
+    <label for="cc-company">HOA / Community Name</label>
+    <input type="text" id="cc-company" name="company" placeholder="Sunset Palms HOA">
+
+    <label for="cc-phone">Phone (optional)</label>
+    <input type="tel" id="cc-phone" name="phone" placeholder="(555) 123-4567">
+
+    <label for="cc-message">What's your biggest challenge?</label>
+    <textarea id="cc-message" name="message" placeholder="Deferred maintenance, special assessments, reserve funding..."></textarea>
+
+    <div class="error-msg" id="ccError"></div>
+
+    <button type="submit" id="ccSubmit">Get My Free Assessment</button>
+  </form>
+
+  <div class="success-msg" id="ccSuccess">
+    <h4>Thank you!</h4>
+    <p>We'll review your information and get back to you within 24 hours.</p>
+  </div>
+</div>
+
+<!-- EMBED THIS SCRIPT at the bottom of your page -->
+<script>
+(function() {
+  // *** UPDATE THIS URL to your ClawOps server ***
+  var API_URL = 'http://localhost:3001/api/capture/lead';
+
+  var form = document.getElementById('clawCaptureForm');
+  var btn = document.getElementById('ccSubmit');
+  var errEl = document.getElementById('ccError');
+  var successEl = document.getElementById('ccSuccess');
+
+  // Parse UTM parameters from the current page URL
+  function getUTM() {
+    var params = new URLSearchParams(window.location.search);
+    return {
+      utm_source: params.get('utm_source') || '',
+      utm_medium: params.get('utm_medium') || '',
+      utm_campaign: params.get('utm_campaign') || '',
+      utm_content: params.get('utm_content') || '',
+      utm_term: params.get('utm_term') || '',
+      referrer: document.referrer || ''
+    };
+  }
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    errEl.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    var utm = getUTM();
+    var data = {
+      name: document.getElementById('cc-name').value,
+      email: document.getElementById('cc-email').value,
+      company: document.getElementById('cc-company').value,
+      phone: document.getElementById('cc-phone').value,
+      message: document.getElementById('cc-message').value,
+      source: 'blog_form',
+      source_detail: window.location.pathname,
+      product: 'hoa',
+      utm_source: utm.utm_source,
+      utm_medium: utm.utm_medium,
+      utm_campaign: utm.utm_campaign,
+      utm_content: utm.utm_content,
+      utm_term: utm.utm_term,
+      referrer: utm.referrer
+    };
+
+    fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(result) {
+      if (result.status === 'captured' || result.status === 'existing_lead_updated') {
+        form.style.display = 'none';
+        successEl.style.display = 'block';
+      } else {
+        throw new Error(result.error || 'Something went wrong');
+      }
+    })
+    .catch(function(err) {
+      errEl.textContent = err.message || 'Failed to submit. Please try again.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Get My Free Assessment';
+    });
+  });
+})();
+</script>
