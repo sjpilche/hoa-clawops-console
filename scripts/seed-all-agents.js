@@ -113,6 +113,10 @@ const AGENT_FLEET = [
   { name: 'opportunity-scorer', description: 'Scores opportunity clusters (signal_count >= 3) using ICE+RPS+ALS via GPT-4o. ~$0.01/cluster. Daily 4 AM.', group: 'opportunity-engine', special_handler: 'opportunity_scorer' },
   { name: 'software-factory', description: 'Takes top-scored opportunities (score >= 75) and scaffolds prototypes from 5 templates (SaaS, CLI, landing page, API wrapper, Chrome ext). Phase 3.', group: 'opportunity-engine', special_handler: 'software_factory' },
   { name: 'traction-monitor', description: 'Tracks deployed prototype metrics daily (page views, signups, stars, revenue). 14-day kill gate. Phase 3.', group: 'opportunity-engine', special_handler: 'traction_monitor' },
+  { name: 'prototype-deployer', description: 'Deploys scaffolded prototypes to GitHub + Vercel with Stripe payment. Lane 2.', group: 'opportunity-engine', special_handler: 'prototype_deployer' },
+
+  // ── Revenue Intelligence ──
+  { name: 'revenue-radar', description: 'Cross-lane revenue intelligence scanner — surfaces top Money Moves across Trading, SaaS, Service, and Pipeline lanes. Daily.', group: 'core', special_handler: 'revenue_radar' },
 
   // ── Signal Performance ──
   { name: 'signal-performance-rollup', description: 'Nightly 30-day rolling conversion rates by signal source. Feeds back into agent context. $0/run.', group: 'core', special_handler: 'signal_performance' },
