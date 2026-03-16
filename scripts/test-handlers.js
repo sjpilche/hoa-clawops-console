@@ -34,7 +34,7 @@ async function main() {
 
   // Test 1: Revenue Radar
   console.log('--- TEST 1: Revenue Radar ---');
-  const rrAgentId = '0d43a768-1cde-5daa-dcaa-2b4c0f3e5659';
+  const rrAgentId = 'ec1fb829-b2c5-443a-964d-0ad928d10cea';
   await testHandler(headers, rrAgentId, 'Run revenue radar scan', 'Revenue Radar');
 
   // Test 2: Traction Monitor
@@ -44,7 +44,7 @@ async function main() {
 
   // Test 3: Prototype Deployer (will likely say "nothing to deploy" — that's fine)
   console.log('\n--- TEST 3: Prototype Deployer ---');
-  const pdAgentId = '0fd6a4a5-f597-3700-c877-4c22a6171ddd';
+  const pdAgentId = '5efc0756-17d7-4340-a7a3-92b90b73939b';
   await testHandler(headers, pdAgentId, '{}', 'Prototype Deployer');
 
   // Test 4: Data Audit public endpoint
@@ -115,11 +115,12 @@ async function testHandler(headers, agentId, message, label) {
 
   if (confirmRes.status === 200) {
     const d = JSON.parse(confirmRes.body);
-    const output = d.outputText || d.output || '';
+    const run = d.run || d;
+    const output = run.outputText || run.output || d.outputText || '';
     console.log('  Status: PASS');
-    console.log('  Output:', output.slice(0, 300));
-    console.log('  Cost: $' + (d.costUsd || d.cost || 0));
-    console.log('  Duration:', (d.durationMs || d.duration || 0) + 'ms');
+    console.log('  Output:', output.slice(0, 400));
+    console.log('  Cost: $' + (run.cost_usd || run.costUsd || d.cost || 0));
+    console.log('  Duration:', (run.duration_ms || run.durationMs || 0) + 'ms');
   } else {
     console.log('  Confirm: FAIL (' + confirmRes.status + ')');
     console.log('  Error:', confirmRes.body.slice(0, 300));

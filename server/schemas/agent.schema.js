@@ -64,7 +64,7 @@ const createAgentSchema = z.object({
       requireConfirmation: z.boolean().optional(),
       allowedActions: z.array(z.string()).nullish().default([]),
     }).optional(),
-  }).optional().default({}),
+  }).passthrough().optional().default({}),
 
   domains: domainsSchema,
 
@@ -130,7 +130,7 @@ const updateAgentSchema = z.object({
       requireConfirmation: z.boolean().optional(),
       allowedActions: z.array(z.string()).nullish().default([]),
     }).optional(),
-  }).optional().default({}),
+  }).passthrough().optional().default({}),
 
   domains: domainsSchema,
 
