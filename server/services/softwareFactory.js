@@ -83,9 +83,11 @@ const TEMPLATE_PROMPTS = {
   saas: `Generate a complete Next.js SaaS prototype. Return ALL files as JSON:
 {"files": [{"name": "package.json", "content": "..."}, {"name": "app/page.tsx", "content": "..."}, ...]}
 
-Required files: package.json, app/page.tsx (landing with signup CTA), app/dashboard/page.tsx (one core feature), lib/supabase.ts (client), .env.example, README.md
-Stack: Next.js 14, Supabase (auth + DB), Tailwind CSS
+Required files: package.json, app/page.tsx (landing with signup CTA), app/dashboard/page.tsx (one core feature), app/api/checkout/route.ts (Stripe Checkout session), lib/supabase.ts (client), .env.example, README.md
+Stack: Next.js 14, Supabase (auth + DB), Tailwind CSS, Stripe Checkout
 Must include: responsive landing page, clear pain statement, email signup, one working feature screen.
+Stripe: app/api/checkout/route.ts creates a Stripe Checkout session using STRIPE_SECRET_KEY from env. Price comes from STRIPE_PRICE_ID env var.
+.env.example must include: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, STRIPE_SECRET_KEY, STRIPE_PRICE_ID
 Keep it minimal — proving the concept, not production ready.`,
 
   cli: `Generate a complete Node.js CLI tool. Return ALL files as JSON:
@@ -99,7 +101,8 @@ Zero or minimal dependencies. Must work with just \`node index.js\`.`,
 {"files": [{"name": "index.html", "content": "..."}, {"name": "README.md", "content": "..."}]}
 
 Required files: index.html (self-contained with inline CSS), README.md
-Must include: hero with pain statement headline, 3 benefit bullets, email capture form (Formspree action), responsive design, dark mode.
+Must include: hero with pain statement headline, 3 benefit bullets, email capture form (Formspree action), Stripe payment link button (href="STRIPE_PAYMENT_LINK_URL"), responsive design, dark mode.
+Add both: free email signup AND paid "Get Started" button pointing to Stripe payment link.
 Single file, no build step. Ready for Netlify drag-and-drop deploy.`,
 
   'api-wrapper': `Generate a complete Express.js API microservice. Return ALL files as JSON:
@@ -493,12 +496,205 @@ async function buildPrototype(clusterId) {
   };
 }
 
+// ── Pre-Build Demand Validation ──────────────────────────────────────────────
+
+/**
+ * Generate a lightweight validation landing page (no LLM needed).
+ * Deploys immediately to capture emails for 48 hours before committing to a full build.
+ */
+function generateValidationPage(cluster, productName) {
+  const painSummary = cluster.pain_summary || 'A common pain point that needs a better solution';
+  const category = cluster.category || 'Productivity';
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${productName} — Coming Soon</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 600px; padding: 2rem; text-align: center; }
+    h1 { font-size: 2.5rem; margin-bottom: 1rem; background: linear-gradient(135deg, #818cf8, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .pain { font-size: 1.25rem; color: #94a3b8; margin-bottom: 2rem; line-height: 1.6; }
+    .badge { display: inline-block; background: #1e293b; border: 1px solid #334155; padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.875rem; color: #818cf8; margin-bottom: 1.5rem; }
+    form { display: flex; gap: 0.5rem; max-width: 400px; margin: 0 auto 1rem; }
+    input[type="email"] { flex: 1; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 1rem; }
+    button { padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; background: #6366f1; color: white; font-size: 1rem; font-weight: 600; cursor: pointer; }
+    button:hover { background: #4f46e5; }
+    .note { font-size: 0.875rem; color: #64748b; }
+    .count { margin-top: 2rem; font-size: 0.875rem; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="badge">${category}</div>
+    <h1>${productName}</h1>
+    <p class="pain">${painSummary}</p>
+    <p class="pain" style="font-size:1rem; margin-bottom:1.5rem;">We're building a solution. Get notified when it launches.</p>
+    <form action="https://formspree.io/f/xpznqwjl" method="POST">
+      <input type="email" name="email" placeholder="your@email.com" required>
+      <input type="hidden" name="_subject" value="Validation: ${productName}">
+      <input type="hidden" name="product" value="${productName}">
+      <button type="submit">Notify Me</button>
+    </form>
+    <p class="note">No spam. Just a launch notification.</p>
+    <div class="count" id="visitors"></div>
+  </div>
+  <script>
+    // Simple visitor counter via localStorage (per-browser, not server-side)
+    const key = 'v_${productName.replace(/[^a-zA-Z0-9]/g, '_')}';
+    let count = parseInt(localStorage.getItem(key) || '0') + 1;
+    localStorage.setItem(key, count);
+  </script>
+</body>
+</html>`;
+
+  return [
+    { name: 'index.html', content: html },
+    { name: 'README.md', content: `# ${productName} — Validation Landing Page\n\nDemand validation for: ${painSummary}\n\nThis page captures email interest before we commit to a full build.\n` },
+  ];
+}
+
+/**
+ * Deploy a validation landing page for a cluster.
+ * Sets cluster status to 'validating' with a 48-hour timer.
+ */
+async function validateDemand(clusterId) {
+  const cluster = get('SELECT * FROM opp_clusters WHERE id = ?', [clusterId]);
+  if (!cluster) throw new Error(`Cluster ${clusterId} not found`);
+
+  const productName = generateProductName(cluster.pain_summary);
+  const validationName = `val-${productName}`;
+  const files = generateValidationPage(cluster, productName);
+
+  // Save validation files to disk
+  const allowedBase = path.resolve(process.cwd(), 'data', 'prototypes');
+  const valDir = path.join(allowedBase, validationName.replace(/[^a-zA-Z0-9_-]/g, '_'));
+  if (!path.resolve(valDir).startsWith(allowedBase)) {
+    throw new Error('Path traversal attempt blocked');
+  }
+
+  fs.mkdirSync(valDir, { recursive: true });
+  for (const file of files) {
+    fs.writeFileSync(path.join(valDir, file.name), file.content, 'utf8');
+  }
+
+  // Deploy immediately via prototypeDeployer
+  let deployResult = null;
+  try {
+    const { createRepo, pushFilesToRepo, deployToVercel, healthCheck } = require('./prototypeDeployer');
+    const repoName = validationName.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 100);
+    await createRepo(repoName, `Demand validation: ${cluster.pain_summary}`);
+    await pushFilesToRepo(repoName, valDir);
+    const { url, source } = await deployToVercel(repoName);
+    deployResult = { url, source, repoName };
+  } catch (err) {
+    console.warn(`[SoftwareFactory] Validation deploy failed: ${err.message}`);
+  }
+
+  // Mark cluster as validating with 48-hour deadline
+  const validationDeadline = new Date(Date.now() + 48 * 3600000).toISOString();
+  run(`UPDATE opp_clusters SET
+    status = 'validating',
+    updated_at = datetime('now')
+    WHERE id = ?`, [clusterId]);
+
+  // Insert a lightweight prototype record for tracking
+  run(`INSERT INTO opp_prototypes (cluster_id, name, description, template_type, status, deploy_url, repo_url, deployed_at, build_cost_usd, total_cost_usd)
+    VALUES (?, ?, ?, 'landing', 'validating', ?, ?, datetime('now'), 0, 0)`,
+    [clusterId, validationName, `Demand validation: ${cluster.pain_summary}`,
+     deployResult?.url || null, deployResult ? `https://github.com/${deployResult.repoName}` : null]);
+
+  // Discord notification
+  try {
+    const discord = require('./discordNotifier');
+    await discord.sendEmbed({
+      title: `Validation Deployed: ${productName}`,
+      description: cluster.pain_summary,
+      color: 0x818cf8,
+      fields: [
+        { name: 'URL', value: deployResult?.url || 'Deploy failed', inline: false },
+        { name: 'Deadline', value: validationDeadline.slice(0, 16), inline: true },
+        { name: 'Gate', value: '5% email capture rate', inline: true },
+      ],
+    });
+  } catch {}
+
+  return {
+    clusterId,
+    productName,
+    validationUrl: deployResult?.url || null,
+    deadline: validationDeadline,
+    outputText: `Validation page deployed for "${productName}" — checking demand in 48h`,
+    costUsd: 0,
+  };
+}
+
+/**
+ * Check validation results for clusters that have been validating 48+ hours.
+ * Promotes to 'scored' (ready for full build) or marks as 'validated_low_demand'.
+ */
+async function checkValidationResults() {
+  const expired = all(`
+    SELECT c.*, p.id as proto_id, p.deploy_url, p.name as proto_name
+    FROM opp_clusters c
+    JOIN opp_prototypes p ON p.cluster_id = c.id AND p.status = 'validating'
+    WHERE c.status = 'validating'
+    AND p.deployed_at <= datetime('now', '-48 hours')
+  `);
+
+  const results = [];
+  for (const cluster of expired) {
+    // Check traction (signups via Formspree won't be tracked here — use page views as proxy)
+    const traction = get(
+      "SELECT SUM(page_views) as views, SUM(signups) as signups FROM opp_traction WHERE prototype_id = ?",
+      [cluster.proto_id]
+    );
+
+    const views = traction?.views || 0;
+    const signups = traction?.signups || 0;
+    const captureRate = views > 0 ? (signups / views) * 100 : 0;
+
+    if (captureRate >= 5 || signups >= 3) {
+      // Demand validated — promote to scored for full build
+      run("UPDATE opp_clusters SET status = 'scored', updated_at = datetime('now') WHERE id = ?", [cluster.id]);
+      run("UPDATE opp_prototypes SET status = 'validated', updated_at = datetime('now') WHERE id = ?", [cluster.proto_id]);
+      results.push({ cluster: cluster.id, name: cluster.proto_name, result: 'PASSED', captureRate, signups, views });
+
+      try {
+        const discord = require('./discordNotifier');
+        await discord.sendEmbed({
+          title: `Demand Validated: ${cluster.proto_name}`,
+          description: `${signups} signups from ${views} views (${captureRate.toFixed(1)}%) — proceeding to full build`,
+          color: 0x22c55e,
+        });
+      } catch {}
+    } else {
+      // Low demand — skip full build
+      run("UPDATE opp_clusters SET status = 'validated_low_demand', updated_at = datetime('now') WHERE id = ?", [cluster.id]);
+      run("UPDATE opp_prototypes SET status = 'killed', updated_at = datetime('now') WHERE id = ?", [cluster.proto_id]);
+      results.push({ cluster: cluster.id, name: cluster.proto_name, result: 'FAILED', captureRate, signups, views });
+    }
+  }
+
+  return { checked: results.length, passed: results.filter(r => r.result === 'PASSED').length, results };
+}
+
 /**
  * Run factory batch: pick the top unbuilt scored cluster and build it.
+ * First checks for validation results, then validates or builds.
  * @returns {{ built: boolean, outputText: string, costUsd: number }}
  */
 async function runFactoryBatch() {
-  // Find top scored cluster that hasn't been built yet
+  // Step 0: Check validation results for any expired validations
+  const validationResults = await checkValidationResults();
+  if (validationResults.checked > 0) {
+    console.log(`[SoftwareFactory] Validation check: ${validationResults.passed}/${validationResults.checked} passed`);
+  }
+
+  // Step 1: Find top scored cluster ready for building
   const cluster = get(`
     SELECT * FROM opp_clusters
     WHERE composite_score >= 75 AND status = 'scored'
@@ -507,9 +703,26 @@ async function runFactoryBatch() {
   `);
 
   if (!cluster) {
+    // Step 2: No scored clusters — try validating a high-scoring unvalidated cluster
+    const unvalidated = get(`
+      SELECT * FROM opp_clusters
+      WHERE composite_score >= 75 AND status NOT IN ('scored', 'validating', 'validated_low_demand', 'prototyping', 'launched', 'monitoring', 'killed', 'scaled')
+      ORDER BY composite_score DESC
+      LIMIT 1
+    `);
+
+    if (unvalidated) {
+      const valResult = await validateDemand(unvalidated.id);
+      return {
+        built: false,
+        outputText: valResult.outputText,
+        costUsd: 0,
+      };
+    }
+
     return {
       built: false,
-      outputText: 'Software Factory: No clusters scored >= 75 ready for prototyping',
+      outputText: `Software Factory: No clusters ready. ${validationResults.checked > 0 ? `Checked ${validationResults.checked} validations (${validationResults.passed} passed).` : 'No clusters scored >= 75.'}`,
       costUsd: 0,
     };
   }
@@ -527,5 +740,7 @@ module.exports = {
   buildPrototype,
   runFactoryBatch,
   generateProductName,
+  validateDemand,
+  checkValidationResults,
   TEMPLATES,
 };

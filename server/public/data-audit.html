@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Free Data Health Audit | Is Your Business Data Costing You Money?</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; }
+
+    /* Hero */
+    .hero { max-width: 800px; margin: 0 auto; padding: 4rem 2rem 3rem; text-align: center; }
+    .hero h1 { font-size: 2.75rem; font-weight: 800; margin-bottom: 1.5rem; background: linear-gradient(135deg, #f59e0b, #ef4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero .subtitle { font-size: 1.25rem; color: #94a3b8; margin-bottom: 2rem; max-width: 600px; margin-left: auto; margin-right: auto; }
+
+    /* Stats bar */
+    .stats { display: flex; justify-content: center; gap: 3rem; margin-bottom: 3rem; flex-wrap: wrap; }
+    .stat { text-align: center; }
+    .stat .number { font-size: 2rem; font-weight: 700; color: #f59e0b; }
+    .stat .label { font-size: 0.875rem; color: #64748b; }
+
+    /* Pain points */
+    .pain { max-width: 700px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .pain h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .pain-list { list-style: none; display: grid; gap: 1rem; }
+    .pain-list li { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem 1.25rem; background: #1e293b; border-radius: 0.75rem; border-left: 3px solid #ef4444; }
+    .pain-list li .icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 0.1rem; }
+    .pain-list li .text { font-size: 0.95rem; }
+
+    /* CTA form */
+    .cta { max-width: 600px; margin: 0 auto 3rem; padding: 2.5rem 2rem; background: #1e293b; border-radius: 1rem; border: 1px solid #334155; }
+    .cta h2 { font-size: 1.75rem; text-align: center; margin-bottom: 0.75rem; color: #f8fafc; }
+    .cta .desc { text-align: center; color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: 0.875rem; color: #94a3b8; margin-bottom: 0.375rem; }
+    .form-group input, .form-group select { width: 100%; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 1rem; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #f59e0b; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .submit-btn { width: 100%; padding: 1rem; border: none; border-radius: 0.5rem; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; font-size: 1.125rem; font-weight: 700; cursor: pointer; margin-top: 1rem; transition: transform 0.15s; }
+    .submit-btn:hover { transform: translateY(-1px); }
+    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .free-note { text-align: center; margin-top: 0.75rem; font-size: 0.8rem; color: #64748b; }
+
+    /* What you get */
+    .deliverable { max-width: 700px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .deliverable h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .deliverable-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; }
+    .deliverable-card { padding: 1.25rem; background: #1e293b; border-radius: 0.75rem; text-align: center; }
+    .deliverable-card .d-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+    .deliverable-card h3 { font-size: 1rem; margin-bottom: 0.5rem; color: #f8fafc; }
+    .deliverable-card p { font-size: 0.85rem; color: #94a3b8; }
+
+    /* Success state */
+    .success { display: none; text-align: center; padding: 2rem; }
+    .success h2 { color: #22c55e; margin-bottom: 1rem; }
+    .success p { color: #94a3b8; }
+
+    /* Footer */
+    footer { text-align: center; padding: 2rem; color: #475569; font-size: 0.8rem; border-top: 1px solid #1e293b; }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 2rem; }
+      .stats { gap: 1.5rem; }
+      .form-row { grid-template-columns: 1fr; }
+      .cta { margin: 0 1rem 3rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Is Your Business Data Costing You Money?</h1>
+    <p class="subtitle">Get a free Data Health Audit — we'll score your data chaos, find the hidden costs, and show you exactly what to fix.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="number">73%</div><div class="label">of SMBs have data quality issues</div></div>
+    <div class="stat"><div class="number">$12.9M</div><div class="label">avg annual cost of poor data</div></div>
+    <div class="stat"><div class="number">5 min</div><div class="label">to request your audit</div></div>
+  </div>
+
+  <div class="pain">
+    <h2>Sound Familiar?</h2>
+    <ul class="pain-list">
+      <li><span class="icon">&#x26A0;</span><span class="text">Month-end close takes days of manual reconciliation between spreadsheets and your accounting system</span></li>
+      <li><span class="icon">&#x1F504;</span><span class="text">Duplicate entries, missing records, and data that doesn't match across systems</span></li>
+      <li><span class="icon">&#x1F4CA;</span><span class="text">You can't trust your reports because the underlying data is a mess</span></li>
+      <li><span class="icon">&#x1F4B8;</span><span class="text">Paying for software that doesn't talk to each other — manual data entry between systems</span></li>
+    </ul>
+  </div>
+
+  <div class="deliverable">
+    <h2>What You'll Get</h2>
+    <div class="deliverable-grid">
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F4CB;</div>
+        <h3>Data Chaos Score</h3>
+        <p>0-100 rating of your data health across 6 dimensions</p>
+      </div>
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F50D;</div>
+        <h3>Issue Breakdown</h3>
+        <p>Specific problems found in your tech stack and processes</p>
+      </div>
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F6E0;</div>
+        <h3>Fix Roadmap</h3>
+        <p>Prioritized action items with estimated ROI</p>
+      </div>
+      <div class="deliverable-card">
+        <div class="d-icon">&#x1F4E7;</div>
+        <h3>Email Delivery</h3>
+        <p>Full PDF report delivered to your inbox within 24 hours</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="cta" id="audit-form-container">
+    <h2>Get Your Free Data Audit</h2>
+    <p class="desc">Takes 2 minutes. No credit card required.</p>
+
+    <form id="audit-form">
+      <div class="form-group">
+        <label for="companyName">Company Name *</label>
+        <input type="text" id="companyName" name="companyName" required placeholder="Acme Construction LLC">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="contactName">Your Name</label>
+          <input type="text" id="contactName" name="contactName" placeholder="Jane Smith">
+        </div>
+        <div class="form-group">
+          <label for="contactEmail">Email *</label>
+          <input type="email" id="contactEmail" name="contactEmail" required placeholder="jane@acme.com">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="website">Company Website</label>
+          <input type="url" id="website" name="website" placeholder="https://acme.com">
+        </div>
+        <div class="form-group">
+          <label for="industry">Industry</label>
+          <select id="industry" name="industry">
+            <option value="">Select...</option>
+            <option value="construction">Construction</option>
+            <option value="real_estate">Real Estate / Property Mgmt</option>
+            <option value="manufacturing">Manufacturing</option>
+            <option value="professional_services">Professional Services</option>
+            <option value="retail">Retail / E-commerce</option>
+            <option value="healthcare">Healthcare</option>
+            <option value="finance">Finance / Accounting</option>
+            <option value="nonprofit">Nonprofit</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="erpSystem">Current Accounting / ERP System</label>
+        <select id="erpSystem" name="erpSystem">
+          <option value="">Select...</option>
+          <option value="quickbooks">QuickBooks (Desktop or Online)</option>
+          <option value="quickbooks_enterprise">QuickBooks Enterprise</option>
+          <option value="xero">Xero</option>
+          <option value="sage">Sage</option>
+          <option value="netsuite">NetSuite</option>
+          <option value="dynamics">Microsoft Dynamics</option>
+          <option value="sap">SAP</option>
+          <option value="freshbooks">FreshBooks</option>
+          <option value="excel">Excel / Google Sheets</option>
+          <option value="none">None / Manual</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submit-btn">Get My Free Audit</button>
+      <p class="free-note">100% free. Report delivered via email within 24 hours.</p>
+    </form>
+
+    <div class="success" id="success-msg">
+      <h2>Audit Requested!</h2>
+      <p>We're analyzing your data landscape now. You'll receive your Data Health Report via email within 24 hours.</p>
+    </div>
+  </div>
+
+  <footer>
+    <p>Powered by AI-driven data analysis. Your information is kept confidential and never shared.</p>
+  </footer>
+
+  <script>
+    const form = document.getElementById('audit-form');
+    const btn = document.getElementById('submit-btn');
+    const successMsg = document.getElementById('success-msg');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+
+      const data = {
+        companyName: document.getElementById('companyName').value,
+        contactName: document.getElementById('contactName').value,
+        contactEmail: document.getElementById('contactEmail').value,
+        website: document.getElementById('website').value,
+        industry: document.getElementById('industry').value,
+        erpSystem: document.getElementById('erpSystem').value,
+        source: 'landing_page',
+      };
+
+      try {
+        const resp = await fetch('/api/data-audit/public', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+
+        if (resp.ok) {
+          form.style.display = 'none';
+          successMsg.style.display = 'block';
+        } else {
+          const err = await resp.json();
+          alert(err.error || 'Something went wrong. Please try again.');
+          btn.disabled = false;
+          btn.textContent = 'Get My Free Audit';
+        }
+      } catch {
+        alert('Network error. Please check your connection and try again.');
+        btn.disabled = false;
+        btn.textContent = 'Get My Free Audit';
+      }
+    });
+  </script>
+</body>
+</html>

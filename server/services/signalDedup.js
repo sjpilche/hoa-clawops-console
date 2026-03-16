@@ -97,19 +97,45 @@ function levenshtein(a, b) {
   return prev[lb];
 }
 
-const FINGERPRINT_THRESHOLD = 8; // Levenshtein distance ≤ 8 = same pain cluster
+const FINGERPRINT_THRESHOLD = 20; // Levenshtein distance — loosened from 8 (too strict for LLM-generated fingerprints)
+const WORD_OVERLAP_THRESHOLD = 0.4; // 40% shared words between fingerprints = same cluster
 
 /**
- * Find the best matching cluster for a pain fingerprint.
- * Scans recent clusters (last 90 days) and returns the closest match.
- * @param {string} fingerprint - Ollama-generated pain fingerprint
- * @returns {{ clusterId: number, distance: number } | null}
+ * Calculate word overlap ratio between two fingerprints.
+ * "manual-data-import-excel" vs "manual-csv-import-google-sheets" → 0.33 (shared: manual, import)
  */
-function findMatchingCluster(fingerprint) {
-  if (!fingerprint) return null;
+function wordOverlap(a, b) {
+  const wordsA = new Set(a.replace(/-/g, ' ').split(/\s+/).filter(w => w.length > 2));
+  const wordsB = new Set(b.replace(/-/g, ' ').split(/\s+/).filter(w => w.length > 2));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  let shared = 0;
+  for (const w of wordsA) { if (wordsB.has(w)) shared++; }
+  return shared / Math.min(wordsA.size, wordsB.size);
+}
 
-  // Get all clusters with at least one signal that has a fingerprint
-  // We compare against the pain_summary-derived fingerprints stored in signals
+/**
+ * Find the best matching cluster for a signal.
+ * Strategy: CATEGORY-FIRST clustering. If a cluster exists with the same
+ * pain_category, the signal joins it. Period. Levenshtein is used as a
+ * tiebreaker only when multiple clusters share the same category.
+ *
+ * Previous approach (Levenshtein distance ≤ 8) produced 46 singleton clusters
+ * because LLM fingerprints are too varied. Category clustering is coarser
+ * but actually produces scorable clusters.
+ */
+function findMatchingCluster(fingerprint, category) {
+  // Primary: match by category (coarse but effective)
+  if (category) {
+    const catCluster = get(`
+      SELECT c.id FROM opp_clusters c
+      WHERE c.pain_category = ? AND c.status NOT IN ('killed', 'scaled')
+      ORDER BY c.last_signal_at DESC LIMIT 1
+    `, [category]);
+    if (catCluster) return { clusterId: catCluster.id, distance: 0 };
+  }
+
+  // Fallback: word overlap on fingerprint (if no category match)
+  if (!fingerprint) return null;
   const clusters = all(`
     SELECT DISTINCT c.id, s.pain_fingerprint
     FROM opp_clusters c
@@ -121,17 +147,17 @@ function findMatchingCluster(fingerprint) {
   `);
 
   let bestMatch = null;
-  let bestDistance = Infinity;
+  let bestOverlap = 0;
 
   for (const row of clusters) {
-    const dist = levenshtein(fingerprint, row.pain_fingerprint);
-    if (dist < bestDistance) {
-      bestDistance = dist;
-      bestMatch = { clusterId: row.id, distance: dist };
+    const overlap = wordOverlap(fingerprint, row.pain_fingerprint);
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      bestMatch = { clusterId: row.id, distance: 0, overlap };
     }
   }
 
-  if (bestMatch && bestMatch.distance <= FINGERPRINT_THRESHOLD) {
+  if (bestMatch && bestOverlap >= WORD_OVERLAP_THRESHOLD) {
     return bestMatch;
   }
   return null;
@@ -146,7 +172,7 @@ function findMatchingCluster(fingerprint) {
  * @returns {{ clusterId: number, isNew: boolean }}
  */
 function assignToCluster(signalId, painFingerprint, painSummary, category) {
-  const match = findMatchingCluster(painFingerprint);
+  const match = findMatchingCluster(painFingerprint, category);
 
   if (match) {
     // Existing cluster — add signal and update aggregates

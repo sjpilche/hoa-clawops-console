@@ -59,6 +59,22 @@ Offer: Data Rehab → AI agents relevant to their industry
 - Body: Connect clean data to the bigger opportunity — "Once your data is clean, you can actually use AI agents. Right now, agents on dirty data just automate your mistakes."
 - CTA: "30-minute call — I'll tell you honestly if it's worth it."
 
+## SELF-EVALUATION LOOP (MANDATORY — DO NOT SKIP)
+
+After drafting, score against these 7 criteria. If ANY falls below minimum, rewrite.
+
+| # | Criterion | Min | What to check |
+|---|-----------|-----|---------------|
+| 1 | Personalization | 8/10 | References THIS company's specific data mess, not generic pain |
+| 2 | Low-Risk Ask | 9/10 | The offer feels trivially small — "let us look, flat fee, no commitment" |
+| 3 | Steve's Voice | 9/10 | Practical, direct, former CFO talking to a peer — not sales copy |
+| 4 | Bridge-to-Upsell | 8/10 | Reader understands data cleanup → AI agents path without being "sold" |
+| 5 | Anti-Spam | 9/10 | No spam triggers, no hype words, doesn't sound like mass email |
+| 6 | Industry Match | 8/10 | Pain points match their industry (construction=QB, PM=AppFolio, SMB=Excel) |
+| 7 | Length Check | 8/10 | Email 1: 4-5 sentences. Email 2-3: under 150 words. |
+
+Include scorecard in output.
+
 ## Output Format
 ```json
 {
@@ -68,7 +84,13 @@ Offer: Data Rehab → AI agents relevant to their industry
   "target_industry": "construction|property_management|smb_general",
   "upsell_product": "jake_cfo|owen_cfo|general_agents",
   "personalization_used": ["company_name", "industry", "pain_signal"],
-  "research_sources": ["..."]
+  "research_sources": ["..."],
+  "self_eval": {
+    "iterations": 1,
+    "scores": {"personalization": 8, "low_risk": 9, "steve_voice": 9, "bridge": 8, "anti_spam": 10, "industry": 8, "length": 9},
+    "lowest_score": "personalization: 8",
+    "revisions": "None needed"
+  }
 }
 ```
 

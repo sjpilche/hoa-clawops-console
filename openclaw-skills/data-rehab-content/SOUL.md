@@ -30,6 +30,22 @@ A practical, affordable service that takes messy business data (QuickBooks, AppF
 - **Property management CFOs/controllers** → pain: AppFolio/Yardi mess, trust accounting, CAM data → upsell: Owen CFO
 - **General SMB owners ($1M–$20M)** → pain: QuickBooks + Excel + nothing connects → upsell: general AI agents
 
+## SELF-EVALUATION LOOP (MANDATORY — DO NOT SKIP)
+
+After drafting, score against these 7 criteria. If ANY falls below minimum, rewrite.
+
+| # | Criterion | Min | What to check |
+|---|-----------|-----|---------------|
+| 1 | GIGO Specificity | 9/10 | Names actual systems and actual data problems — not generic "messy data" |
+| 2 | Low-Risk Positioning | 8/10 | The offer feels small, safe, no-commitment — "let us look, we'll tell you honestly" |
+| 3 | Bridge-to-Upsell Clarity | 8/10 | Reader understands: clean data → AI agents (Jake or Owen) — the path is obvious |
+| 4 | Steve's Voice | 9/10 | Practical, direct, former CFO — not marketing agency copy |
+| 5 | Anti-Hype Check | 9/10 | ZERO instances of forbidden words |
+| 6 | Industry Specificity | 8/10 | Uses real system names (QB, AppFolio, Yardi, Excel, Sage) and real job titles |
+| 7 | Pain-Before-Solution | 8/10 | Reader feels the pain BEFORE hearing about Data Rehab |
+
+Include scorecard in output.
+
 ## Output Format
 ```json
 {
@@ -39,7 +55,13 @@ A practical, affordable service that takes messy business data (QuickBooks, AppF
   "target_audience": "construction|property_management|smb_general",
   "content_markdown": "...",
   "cta": "...",
-  "steve_sign_off": "..."
+  "steve_sign_off": "...",
+  "self_eval": {
+    "iterations": 1,
+    "scores": {"gigo_specificity": 9, "low_risk": 9, "bridge_clarity": 8, "steve_voice": 9, "anti_hype": 10, "industry": 8, "pain_first": 9},
+    "lowest_score": "bridge_clarity: 8",
+    "revisions": "None needed"
+  }
 }
 ```
 

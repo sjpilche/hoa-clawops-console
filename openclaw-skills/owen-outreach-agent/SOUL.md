@@ -98,6 +98,22 @@ Use when: high-volume batches, executive targets who won't read long emails.
 - **"Month-end close takes 5 days"** — No automation, manual journal entries, data cleanup every time
 - **"Vendors duplicated across 400 units"** — Same vendor, 12 different spellings, AP chaos
 
+## SELF-EVALUATION LOOP (MANDATORY — DO NOT SKIP)
+
+After writing your draft, score against these 7 criteria. If ANY falls below minimum, diagnose and rewrite.
+
+| # | Criterion | Min | What to check |
+|---|-----------|-----|---------------|
+| 1 | Personalization Depth | 8/10 | References something specific to THIS company (not generic PM pain) |
+| 2 | Subject Line | 8/10 | Casual, specific, wouldn't trigger spam — sounds like a peer forwarding a note |
+| 3 | Peer Voice | 9/10 | Owen talking to a colleague, not vendor-to-prospect pitch |
+| 4 | Single Ask | 8/10 | ONE clear CTA (health check, quick chat, reply) — not multiple actions |
+| 5 | Anti-Spam | 9/10 | No spam triggers: "limited time", "act now", "exclusive", "guaranteed" |
+| 6 | Research Evidence | 8/10 | Email proves you actually researched them (mentions their website, portfolio, news) |
+| 7 | Length Check | 8/10 | Email 1: 4-5 sentences. Email 2-3: under 150 words. No bloat. |
+
+Include scorecard in output.
+
 ## Output Format
 ```json
 {
@@ -107,7 +123,13 @@ Use when: high-volume batches, executive targets who won't read long emails.
   "personalization_used": ["company_name", "portfolio_size", "location"],
   "tone_check": "peer-to-peer",
   "pain_point_addressed": "...",
-  "research_sources": ["what you searched and found"]
+  "research_sources": ["what you searched and found"],
+  "self_eval": {
+    "iterations": 1,
+    "scores": {"personalization": 9, "subject": 8, "peer_voice": 9, "single_ask": 9, "anti_spam": 10, "research": 8, "length": 9},
+    "lowest_score": "subject: 8",
+    "revisions": "None needed"
+  }
 }
 ```
 

@@ -25,7 +25,7 @@ import {
 } from './cost-tier-config';
 import { OpenClawExecutor } from './openclaw-executor';
 import { AnalystReport, AnalystPick, AggregatedPick, RebalanceTrade } from './index';
-import { fetchAllSkillsContext, formatSkillsContext } from './skills-fetcher';
+import { fetchRealMarketData, formatRealMarketData } from './market-data';
 import { BrainStore } from '../learning/brain-store';
 import { BrainContextBuilder } from '../learning/brain-context';
 import { OutcomeTracker } from '../learning/outcome-tracker';
@@ -103,9 +103,9 @@ export class PanelRunner {
       const watchlist = options.watchlist || this.getDefaultWatchlist();
       const allSymbols = [...new Set([...portfolio.positions.map((p: any) => p.symbol), ...watchlist])];
 
-      // Step 2b: Fetch all 7 skills in parallel
-      const skillsCtx = await fetchAllSkillsContext(allSymbols);
-      const skillsBlock = formatSkillsContext(skillsCtx);
+      // Step 2b: Fetch real market data (Yahoo Finance, Fear & Greed, indices, Alpaca bars)
+      const skillsCtx = await fetchRealMarketData(allSymbols);
+      const skillsBlock = formatRealMarketData(skillsCtx);
       const marketContext = this.buildMarketContext(skillsBlock);
 
       // Record observation

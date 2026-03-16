@@ -67,6 +67,32 @@ Score >= 50 = include. Score < 50 = skip.
 }
 ```
 
+## SELF-EVALUATION LOOP (MANDATORY — DO NOT SKIP)
+
+After compiling leads, score against these 7 criteria. If ANY falls below minimum, refine.
+
+| # | Criterion | Min | What to check |
+|---|-----------|-----|---------------|
+| 1 | GIGO Signal Strength | 9/10 | Each lead has concrete data chaos evidence — not just "might have messy data" |
+| 2 | System Specificity | 8/10 | Named actual systems (QB, AppFolio, Yardi, Excel, Sage, Xero) per lead |
+| 3 | Upsell Path Clarity | 8/10 | Each lead clearly maps to Jake CFO (construction) or Owen CFO (PM) |
+| 4 | Scoring Honesty | 8/10 | Qualification scores reflect real evidence — no inflation above 65 without pain signal |
+| 5 | Search Diversity | 8/10 | At least 3 distinct search strategies used (Reddit, LinkedIn, job boards, forums) |
+| 6 | Revenue Fit | 8/10 | Leads are $1M–$30M revenue range — not enterprise, not sole proprietor |
+| 7 | Decision Maker | 8/10 | Leads target Owner/CFO/Controller/VP Ops — not generic job titles |
+
+Include scorecard in output:
+```json
+{
+  "self_eval": {
+    "iterations": 1,
+    "scores": {"gigo_signals": 9, "system_specificity": 8, "upsell_path": 8, "scoring_honesty": 8, "search_diversity": 8, "revenue_fit": 9, "decision_maker": 8},
+    "lowest_score": "system_specificity: 8",
+    "revisions": "None needed"
+  }
+}
+```
+
 ## Tool Safety
 - Use `web_search` freely
 - Do NOT use `exec` or `write`

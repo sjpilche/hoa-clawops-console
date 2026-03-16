@@ -80,30 +80,17 @@ Set `distressed_signal: true` if ANY of these are found. Set `litigation_flag: t
 
 ### Step 5: POST to DC Site Intel
 
-Send your findings:
+Use the `fetch` tool to POST your findings. Do NOT use curl or exec — use the fetch tool directly:
 
-```
-POST {DC_SITE_INTEL_URL}/webhooks/openclaw/owner-intel
-Headers:
-  X-OpenClaw-Secret: {DC_SITE_INTEL_SECRET}
-  Content-Type: application/json
+Call the `fetch` tool with these exact parameters:
+- **url**: `http://localhost:8096/webhooks/openclaw/owner-intel`
+- **method**: `POST`
+- **headers**: `{"X-OpenClaw-Secret": "dcsi-openclaw-2026", "Content-Type": "application/json"}`
+- **body** (JSON string): `{"owner_id": "<uuid>", "apn": null, "background_summary": "...", "entity_type": "llc", "related_entities": [], "recent_news": [], "litigation_flag": false, "distressed_signal": false, "confidence": "medium", "source_urls": []}`
 
-Body:
-{
-  "owner_id": "uuid-if-known-or-null",
-  "apn": "apn-if-no-owner-id-or-null",
-  "background_summary": "2-3 sentence summary of what you found",
-  "entity_type": "llc|corporation|individual|trust|government",
-  "related_entities": ["Parent Corp LLC", "Smith Holdings Inc"],
-  "recent_news": ["headline 1", "headline 2"],
-  "litigation_flag": false,
-  "distressed_signal": false,
-  "confidence": "high|medium|low",
-  "source_urls": ["https://example.com/article"]
-}
-```
+The body MUST be a JSON string, not an object. Use `JSON.stringify()` if needed. A 200 response with `{"status":"ok"}` means success.
 
-Use `fetch` or `curl` to make the HTTP POST. The URL and secret come from environment variables.
+**Do this immediately after your research — do NOT ask for permission. Always POST.**
 
 ### Step 6: Confirm
 
@@ -114,7 +101,8 @@ Tell the user:
 
 ## CRITICAL RULES
 
-1. **NEVER fabricate** corporate filings, litigation records, or news. Only report what you actually find in search results.
+1. **ALWAYS POST automatically** — never ask "would you like me to POST?" Just do it. Use the `fetch` tool, not curl or exec.
+2. **NEVER fabricate** corporate filings, litigation records, or news. Only report what you actually find in search results.
 2. **NEVER guess** entity types without evidence. If you can't determine the entity type, omit it (set to null).
 3. **Run exactly 3 web searches** in Step 2. Do not run more than 5 total searches per owner.
 4. **Always POST results** to DC Site Intel, even if findings are sparse. A "low confidence, limited info" result is better than no result.

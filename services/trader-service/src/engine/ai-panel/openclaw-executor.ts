@@ -1,7 +1,12 @@
 // =============================================================================
-// OpenClaw Executor - Connects AI Panel to OpenClaw Risk Engine & Alpaca
+// OpenClaw Executor - Risk-Enforced Order Router → Alpaca
 // =============================================================================
-// Takes panel recommendations and executes through OpenClaw's order router
+// Before every order:
+//   1. Daily P&L vs RISK_MAX_DAILY_LOSS — halt if breached
+//   2. Position size vs RISK_MAX_POSITION_USD — cap order value
+//   3. Gross exposure vs RISK_MAX_GROSS_EXPOSURE_USD — reject if exceeded
+//   4. Trade count vs RISK_MAX_TRADES_PER_DAY — reject if exceeded
+// All rejections logged so brain can learn what gets blocked.
 // =============================================================================
 
 import { RebalanceTrade, PortfolioSnapshot, PositionInfo } from './index';
@@ -13,10 +18,19 @@ export interface ExecutionResult {
   success: boolean;
   orderId?: string;
   error?: string;
+  riskRejected?: boolean;
+}
+
+interface RiskState {
+  date: string;           // YYYY-MM-DD — resets daily
+  tradesExecuted: number;
+  realizedPnl: number;    // From Alpaca account activities
+  grossExposure: number;  // Sum of abs(position market values)
 }
 
 export class OpenClawExecutor {
   private broker: AlpacaAdapter;
+  private riskState: RiskState;
 
   constructor() {
     if (!config.brokerApiKey || !config.brokerApiSecret) {
@@ -28,6 +42,103 @@ export class OpenClawExecutor {
       apiSecret: config.brokerApiSecret,
       baseUrl: config.brokerBaseUrl,
     });
+
+    this.riskState = {
+      date: new Date().toISOString().split('T')[0],
+      tradesExecuted: 0,
+      realizedPnl: 0,
+      grossExposure: 0,
+    };
+  }
+
+  /** Reset risk counters if a new trading day */
+  private checkDayRollover(): void {
+    const today = new Date().toISOString().split('T')[0];
+    if (this.riskState.date !== today) {
+      console.log(`[RiskEngine] New trading day: ${today} — resetting counters`);
+      this.riskState = {
+        date: today,
+        tradesExecuted: 0,
+        realizedPnl: 0,
+        grossExposure: 0,
+      };
+    }
+  }
+
+  /** Refresh gross exposure and daily P&L from Alpaca */
+  private async refreshRiskState(): Promise<void> {
+    this.checkDayRollover();
+
+    try {
+      const account = await this.broker.getAccount();
+      const positions = await this.broker.getPositions();
+
+      // Gross exposure = sum of abs(marketValue) of all positions
+      this.riskState.grossExposure = positions.reduce(
+        (sum: number, p: any) => sum + Math.abs(p.marketValue || 0), 0
+      );
+
+      // Daily P&L from Alpaca (unrealized + realized for the day)
+      const dailyPnl = account.equity - account.lastEquity;
+      this.riskState.realizedPnl = dailyPnl;
+    } catch (error: any) {
+      console.warn('[RiskEngine] Could not refresh risk state:', error.message);
+    }
+  }
+
+  /**
+   * Get effective risk limits. In live mode with small accounts, auto-clamp to survival limits.
+   * $50 account: max position $10, max daily loss $5, max exposure $25, max 5 trades.
+   * Survives 10 consecutive max-loss days.
+   */
+  private getEffectiveLimits() {
+    let maxDailyLoss = config.riskMaxDailyLoss;
+    let maxPositionUsd = config.riskMaxPositionUsd;
+    let maxGrossExposure = config.riskMaxGrossExposureUsd;
+    let maxTrades = config.riskMaxTradesPerDay;
+
+    if (config.tradingMode === 'live') {
+      // Hard-clamp for live small accounts — these are ceilings, env can go lower
+      maxDailyLoss = Math.min(maxDailyLoss, 5);
+      maxPositionUsd = Math.min(maxPositionUsd, 10);
+      maxGrossExposure = Math.min(maxGrossExposure, 25);
+      maxTrades = Math.min(maxTrades, 5);
+      console.log(`[RiskEngine] LIVE MODE — limits clamped: loss=$${maxDailyLoss}, pos=$${maxPositionUsd}, exp=$${maxGrossExposure}, trades=${maxTrades}`);
+    }
+
+    return { maxDailyLoss, maxPositionUsd, maxGrossExposure, maxTrades };
+  }
+
+  /**
+   * Check all risk limits before a trade. Returns null if OK, error string if blocked.
+   */
+  private checkRiskLimits(trade: RebalanceTrade, dollarValue: number): string | null {
+    const { maxDailyLoss, maxPositionUsd, maxGrossExposure, maxTrades } = this.getEffectiveLimits();
+
+    // 1. Daily P&L check — are we already at max loss?
+    if (this.riskState.realizedPnl <= -maxDailyLoss) {
+      return `RISK: Daily loss limit breached ($${Math.abs(this.riskState.realizedPnl).toFixed(2)} loss vs $${maxDailyLoss} limit) — trading halted for today`;
+    }
+
+    // 2. Trade count check
+    if (this.riskState.tradesExecuted >= maxTrades) {
+      return `RISK: Max trades per day reached (${this.riskState.tradesExecuted}/${maxTrades}) — no more trades today`;
+    }
+
+    // 3. Position size check (buys only — sells reduce risk)
+    if (trade.side === 'buy' && dollarValue > maxPositionUsd) {
+      return `RISK: Position size $${dollarValue.toFixed(2)} exceeds max $${maxPositionUsd} — will be capped`;
+    }
+
+    // 4. Gross exposure check (buys only)
+    if (trade.side === 'buy') {
+      const projectedExposure = this.riskState.grossExposure + dollarValue;
+      if (projectedExposure > maxGrossExposure) {
+        return `RISK: Would bring gross exposure to $${projectedExposure.toFixed(2)} vs $${maxGrossExposure} limit — rejected`;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -35,7 +146,6 @@ export class OpenClawExecutor {
    */
   async getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
     try {
-      // Get account info
       const account = await this.broker.getAccount();
       const positions = await this.broker.getPositions();
 
@@ -69,10 +179,9 @@ export class OpenClawExecutor {
       };
     } catch (error: any) {
       console.error('[OpenClawExecutor] Failed to get portfolio:', error);
-      // Return empty portfolio as fallback
       return {
         timestamp: new Date(),
-        totalValue: 500, // Default for new account
+        totalValue: 500,
         cash: 500,
         positions: [],
       };
@@ -80,34 +189,53 @@ export class OpenClawExecutor {
   }
 
   /**
-   * Execute a rebalance trade through Alpaca
+   * Execute a rebalance trade through Alpaca — with risk enforcement
    */
   async executeTrade(trade: RebalanceTrade): Promise<ExecutionResult> {
     try {
+      // Refresh risk state before every trade
+      await this.refreshRiskState();
+
       // Get current price for accurate share calculation
       const quote = await this.broker.getQuote(trade.symbol);
-      const currentPrice = quote.price || 0;
+      const currentPrice = quote.last || 0;
 
       if (currentPrice === 0) {
-        return {
-          trade,
-          success: false,
-          error: `Unable to get price for ${trade.symbol}`,
-        };
+        return { trade, success: false, error: `Unable to get price for ${trade.symbol}` };
       }
 
-      // Calculate shares based on dollar value and current price
-      const dollarValue = Math.abs(trade.estimatedValue);
+      let dollarValue = Math.abs(trade.estimatedValue);
+
+      // --- RISK CHECKS ---
+      const riskError = this.checkRiskLimits(trade, dollarValue);
+
+      if (riskError) {
+        // Hard rejections (daily loss, trade count, gross exposure)
+        if (!riskError.includes('will be capped')) {
+          console.warn(`[RiskEngine] BLOCKED: ${trade.symbol} ${trade.side} — ${riskError}`);
+          return { trade, success: false, error: riskError, riskRejected: true };
+        }
+
+        // Soft cap: reduce position size to max allowed
+        console.warn(`[RiskEngine] CAPPING: ${trade.symbol} from $${dollarValue.toFixed(2)} to $${config.riskMaxPositionUsd}`);
+        dollarValue = config.riskMaxPositionUsd;
+      }
+
+      // For buys, also cap to avoid exceeding gross exposure
+      if (trade.side === 'buy') {
+        const headroom = config.riskMaxGrossExposureUsd - this.riskState.grossExposure;
+        if (dollarValue > headroom && headroom > 0) {
+          console.warn(`[RiskEngine] Exposure cap: reducing $${dollarValue.toFixed(2)} to $${headroom.toFixed(2)} headroom`);
+          dollarValue = headroom;
+        }
+      }
+
       const shares = Math.floor(dollarValue / currentPrice);
 
-      console.log(`[OpenClawExecutor] Executing ${trade.side.toUpperCase()} ${shares} ${trade.symbol} @ $${currentPrice.toFixed(2)} (${dollarValue.toFixed(2)} value)`);
+      console.log(`[OpenClawExecutor] Executing ${trade.side.toUpperCase()} ${shares} ${trade.symbol} @ $${currentPrice.toFixed(2)} ($${dollarValue.toFixed(2)} value)`);
 
       if (shares === 0) {
-        return {
-          trade,
-          success: false,
-          error: 'Zero shares calculated - position too small',
-        };
+        return { trade, success: false, error: 'Zero shares calculated - position too small' };
       }
 
       // Submit market order to Alpaca
@@ -116,42 +244,46 @@ export class OpenClawExecutor {
         qty: shares,
         side: trade.side as 'buy' | 'sell',
         type: 'market',
-        time_in_force: 'day',
+        timeInForce: 'day',
       });
 
-      console.log(`[OpenClawExecutor] ✅ Order submitted: ${order.id} for ${shares} ${trade.symbol}`);
+      // Update risk state
+      this.riskState.tradesExecuted++;
+      if (trade.side === 'buy') {
+        this.riskState.grossExposure += dollarValue;
+      } else {
+        this.riskState.grossExposure = Math.max(0, this.riskState.grossExposure - dollarValue);
+      }
 
-      return {
-        trade,
-        success: true,
-        orderId: order.id,
-      };
+      console.log(`[OpenClawExecutor] Order submitted: ${order.id} for ${shares} ${trade.symbol} [trades today: ${this.riskState.tradesExecuted}/${config.riskMaxTradesPerDay}]`);
+
+      return { trade, success: true, orderId: order.id };
     } catch (error: any) {
-      console.error(`[OpenClawExecutor] ❌ Failed to execute trade for ${trade.symbol}:`, error.message);
-      return {
-        trade,
-        success: false,
-        error: error.message,
-      };
+      console.error(`[OpenClawExecutor] Failed to execute trade for ${trade.symbol}:`, error.message);
+      return { trade, success: false, error: error.message };
     }
   }
 
   /**
-   * Execute all rebalance trades
+   * Execute all rebalance trades — sells first, then buys
    */
   async executePortfolioRebalance(trades: RebalanceTrade[]): Promise<ExecutionResult[]> {
-    console.log(`\n[OpenClawExecutor] Executing ${trades.length} rebalance trades...\n`);
+    // Refresh risk state once at the start
+    await this.refreshRiskState();
+
+    console.log(`\n[OpenClawExecutor] Executing ${trades.length} rebalance trades...`);
+    console.log(`[RiskEngine] Limits: maxLoss=$${config.riskMaxDailyLoss} maxPos=$${config.riskMaxPositionUsd} maxExposure=$${config.riskMaxGrossExposureUsd} maxTrades=${config.riskMaxTradesPerDay}`);
+    console.log(`[RiskEngine] Current: dailyPnL=$${this.riskState.realizedPnl.toFixed(2)} exposure=$${this.riskState.grossExposure.toFixed(2)} trades=${this.riskState.tradesExecuted}\n`);
 
     const results: ExecutionResult[] = [];
 
-    // Execute sells first to free up cash
+    // Sells first to free cash + reduce exposure
     const sells = trades.filter(t => t.side === 'sell');
     const buys = trades.filter(t => t.side === 'buy');
 
     for (const trade of sells) {
       const result = await this.executeTrade(trade);
       results.push(result);
-      // Small delay between orders
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
@@ -163,8 +295,9 @@ export class OpenClawExecutor {
 
     const successful = results.filter(r => r.success).length;
     const failed = results.filter(r => !r.success).length;
+    const riskBlocked = results.filter(r => r.riskRejected).length;
 
-    console.log(`\n[OpenClawExecutor] Execution complete: ${successful} success, ${failed} failed\n`);
+    console.log(`\n[OpenClawExecutor] Complete: ${successful} success, ${failed} failed (${riskBlocked} risk-blocked)\n`);
 
     return results;
   }
@@ -179,7 +312,7 @@ export class OpenClawExecutor {
       for (const symbol of symbols) {
         try {
           const quote = await this.broker.getQuote(symbol);
-          prices[symbol] = quote.price || 0;
+          prices[symbol] = quote.last || 0;
         } catch (error) {
           console.warn(`[OpenClawExecutor] Failed to get price for ${symbol}`);
           prices[symbol] = 0;

@@ -57,6 +57,24 @@ ACTION ITEMS
 COST THIS WEEK: $[X]
 ```
 
+## SELF-EVALUATION LOOP (MANDATORY — DO NOT SKIP)
+
+After generating the report, score against these 6 criteria. If ANY falls below minimum, revise.
+
+| # | Criterion | Min | What to check |
+|---|-----------|-----|---------------|
+| 1 | Data Accuracy | 9/10 | All numbers pulled from actual DB queries — no estimates or guesses |
+| 2 | Actionability | 8/10 | Action items are specific with lead counts, not "check pipeline" |
+| 3 | Trend Comparison | 8/10 | Week-over-week changes shown with direction (up/down/flat) |
+| 4 | Completeness | 8/10 | All 4 sections present: Leads, Outreach, Content, Action Items |
+| 5 | Readability | 8/10 | Steve can read this in 60 seconds — no walls of text |
+| 6 | PM Focus | 8/10 | Report is Owen-specific (source_agent='owen'), not mixed with Jake |
+
+Include scorecard at end of report:
+```
+REPORT QUALITY: data_accuracy=9 actionability=8 trends=8 completeness=9 readability=9 pm_focus=9
+```
+
 ## Tool Safety
 - You read from the database. Do NOT write or delete anything.
 - Use `web_search` only if you need market context for commentary.

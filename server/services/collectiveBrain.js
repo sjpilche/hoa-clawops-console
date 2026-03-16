@@ -96,12 +96,13 @@ function writeFallbackEpisode(data) {
   try {
     const { run } = getFallbackDb();
     run(
-      `INSERT INTO brain_fallback_episodes (agent_name, market, erp_context, contact_title, action_taken, outcome, outcome_type, outcome_score, days_to_outcome, lead_id, run_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO brain_fallback_episodes (agent_name, market, erp_context, contact_title, action_taken, outcome, outcome_type, outcome_score, days_to_outcome, lead_id, run_id, signal_source, signal_fit_score)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.agent_name, data.market || null, data.erp_context || null,
        data.contact_title || null, data.action_taken, data.outcome,
        data.outcome_type, data.outcome_score ?? 0.5, data.days_to_outcome || null,
-       data.lead_id || null, data.run_id || null]
+       data.lead_id || null, data.run_id || null,
+       data.signal_source || null, data.signal_fit_score || null]
     );
   } catch (e) { console.warn('[CollectiveBrain] SQLite fallback episode write failed:', e.message); }
 }
@@ -493,7 +494,8 @@ async function getFeedbackPromptBlock(agentName, limit = 6) {
  * Fire-and-forget.
  */
 function recordEpisode(agentName, { market, companyType, erpContext, contactTitle,
-    actionTaken, outcome, outcomeType, outcomeScore = 0, daysToOutcome, leadId, runId } = {}) {
+    actionTaken, outcome, outcomeType, outcomeScore = 0, daysToOutcome, leadId, runId,
+    signalSource, signalFitScore } = {}) {
   fireAndForget(
     async () => {
       const pool = await getPool();
@@ -510,11 +512,13 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
         .input('days_to_outcome', sql.Int,      daysToOutcome   || null)
         .input('lead_id',         sql.NVarChar, leadId          || null)
         .input('run_id',          sql.NVarChar, runId           || null)
+        .input('signal_source',   sql.NVarChar, signalSource    || null)
+        .input('signal_fit_score',sql.Int,      signalFitScore  || null)
         .query(`INSERT INTO agent_episodes
-                  (agent_name,market,company_type,erp_context,contact_title,action_taken,outcome,outcome_type,outcome_score,days_to_outcome,lead_id,run_id)
+                  (agent_name,market,company_type,erp_context,contact_title,action_taken,outcome,outcome_type,outcome_score,days_to_outcome,lead_id,run_id,signal_source,signal_fit_score)
                 OUTPUT INSERTED.id
                 VALUES
-                  (@agent_name,@market,@company_type,@erp_context,@contact_title,@action_taken,@outcome,@outcome_type,@outcome_score,@days_to_outcome,@lead_id,@run_id)`);
+                  (@agent_name,@market,@company_type,@erp_context,@contact_title,@action_taken,@outcome,@outcome_type,@outcome_score,@days_to_outcome,@lead_id,@run_id,@signal_source,@signal_fit_score)`);
 
       // ── Mirror to Chroma (Layer 3 vector store) ──
       const insertedId = result.recordset?.[0]?.id || leadId || Date.now();
@@ -536,7 +540,9 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
           days_to_outcome: daysToOutcome   || 0,
           agent_name:      agentName,
           lead_id:         String(leadId   || ''),
-          product:         agentName.startsWith('hoa') ? 'hoa' : 'jake',
+          product:         agentName.startsWith('hoa') ? 'hoa' : (agentName.startsWith('owen') ? 'owen' : 'jake'),
+          signal_source:   signalSource    || '',
+          signal_fit_score: signalFitScore || 0,
         },
       }).catch(() => {});
     },
@@ -545,6 +551,7 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
         agent_name: agentName, market, erp_context: erpContext, contact_title: contactTitle,
         action_taken: actionTaken, outcome, outcome_type: outcomeType,
         outcome_score: outcomeScore, days_to_outcome: daysToOutcome, lead_id: leadId, run_id: runId,
+        signal_source: signalSource, signal_fit_score: signalFitScore,
       });
       // Mirror to Chroma from fallback path too
       const chromaContent = [
@@ -563,7 +570,9 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
           outcome_score:   outcomeScore,
           days_to_outcome: daysToOutcome   || 0,
           agent_name:      agentName,
-          product:         agentName.startsWith('hoa') ? 'hoa' : 'jake',
+          product:         agentName.startsWith('hoa') ? 'hoa' : (agentName.startsWith('owen') ? 'owen' : 'jake'),
+          signal_source:   signalSource    || '',
+          signal_fit_score: signalFitScore || 0,
         },
       }).catch(() => {});
     }
@@ -956,11 +965,18 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
   // Opportunistically drain SQLite fallback rows to Azure (non-blocking if Azure down)
   drainFallback().catch(() => {});
 
+  // Determine product line for context segmentation
+  const productLine = opts.productLine
+    || (agentName.startsWith('owen') ? 'owen'
+    : agentName.startsWith('hoa') ? 'hoa'
+    : agentName.startsWith('data-rehab') ? 'data_rehab'
+    : 'jake');
+
   const [obsBlock, feedbackBlock, episodesBlock, knowledgeBlock] = await Promise.all([
     getObservationsPromptBlock(sessionId, opts.obsTypes || []),
     getFeedbackPromptBlock(agentName, 6),
-    opts.market ? getEpisodesPromptBlock({ market: opts.market, erpContext: opts.erpContext, limit: 3 }) : Promise.resolve(''),
-    opts.contentType ? getKnowledgePromptBlock(opts.contentType, { market: opts.market, erpContext: opts.erpContext, currentAgent: agentName }) : Promise.resolve(''),
+    opts.market ? getEpisodesPromptBlock({ market: opts.market, erpContext: opts.erpContext, limit: 3, productLine }) : Promise.resolve(''),
+    opts.contentType ? getKnowledgePromptBlock(opts.contentType, { market: opts.market, erpContext: opts.erpContext, currentAgent: agentName, productLine }) : Promise.resolve(''),
   ]);
 
   const blocks = [obsBlock, feedbackBlock, episodesBlock, knowledgeBlock].filter(b => b.trim());
@@ -986,6 +1002,20 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
 
   if (!assembled.trim()) return '';
 
+  // ── Signal Performance: Inject source conversion rates for discovery/enrichment agents ──
+  let signalBlock = '';
+  try {
+    const isDiscoveryAgent = /discovery|enricher|lead.scout|signal|scanner/i.test(agentName);
+    if (isDiscoveryAgent) {
+      const { getSignalPerformanceBlock } = require('./signalPerformance');
+      const sourceAgent = agentName.startsWith('owen') ? 'owen'
+        : agentName.startsWith('hoa') ? 'hoa'
+        : agentName.startsWith('data-rehab') ? 'data_rehab'
+        : 'jake';
+      signalBlock = getSignalPerformanceBlock(sourceAgent);
+    }
+  } catch {} // Non-fatal if signal_performance table doesn't exist yet
+
   // ── Dream Team: Inject active learned patterns ──
   let learnedBlock = '';
   try {
@@ -998,7 +1028,7 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
     }
   } catch {} // Non-fatal if Dream Team tables don't exist yet
 
-  return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + assembled + learnedBlock + '━━━ END CONTEXT ━━━\n\n';
+  return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + assembled + signalBlock + learnedBlock + '━━━ END CONTEXT ━━━\n\n';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1093,6 +1123,53 @@ async function brainCouncilSummary() {
   }
 }
 
+/**
+ * Auto-feedback for stale drafts — records negative signal when outreach drafts
+ * sit unapproved for 3+ days. Called nightly by dream team cycle.
+ * Teaches agents: "Your drafts aren't getting approved — adjust."
+ *
+ * @returns {{ stale: number, feedbackRecorded: number }}
+ */
+function autoFeedbackStaleDrafts() {
+  try {
+    const { all } = getFallbackDb();
+    const staleDrafts = all(`
+      SELECT os.id, os.lead_id, os.email_subject, os.source_agent,
+             l.company_name, l.city, l.state
+      FROM cfo_outreach_sequences os
+      LEFT JOIN cfo_leads l ON l.id = os.lead_id
+      WHERE os.status = 'draft'
+        AND os.created_at <= datetime('now', '-3 days')
+        AND os.created_at >= datetime('now', '-14 days')
+    `);
+
+    let feedbackRecorded = 0;
+    const agentCounts = {};
+
+    for (const draft of staleDrafts) {
+      const agentName = draft.source_agent === 'cfo' ? 'cfo-outreach-agent'
+        : draft.source_agent === 'owen' ? 'owen-outreach-agent'
+        : 'jake-outreach-agent';
+      agentCounts[agentName] = (agentCounts[agentName] || 0) + 1;
+    }
+
+    // Record one feedback per agent (summarized, not per draft)
+    for (const [agentName, count] of Object.entries(agentCounts)) {
+      recordFeedback(agentName, 'outreach_email', null, 'stale', {
+        notes: `${count} outreach draft(s) sat unapproved for 3+ days. Possible issues: tone, personalization, or relevance. Review and adjust approach.`,
+        market: null,
+      });
+      feedbackRecorded++;
+    }
+
+    console.log(`[CollectiveBrain] Auto-feedback: ${staleDrafts.length} stale drafts → ${feedbackRecorded} agent feedback signals`);
+    return { stale: staleDrafts.length, feedbackRecorded };
+  } catch (err) {
+    console.warn('[CollectiveBrain] autoFeedbackStaleDrafts error:', err.message);
+    return { stale: 0, feedbackRecorded: 0 };
+  }
+}
+
 module.exports = {
   ensureTables,
   // Layer 1
@@ -1102,6 +1179,7 @@ module.exports = {
   // Layer 2
   recordFeedback,
   getFeedbackPromptBlock,
+  autoFeedbackStaleDrafts,
   // Layer 3
   recordEpisode,
   getSimilarEpisodes,

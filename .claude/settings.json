@@ -14,7 +14,13 @@
       "Read(//c/Users/SPilcher/OpenClaw2.0 for linux - Copy/**)",
       "Bash(for agent in owen-content-engine owen-outreach-agent owen-lead-scout owen-social-scheduler owen-analytics-monitor data-rehab-outreach data-rehab-content data-rehab-scout)",
       "Bash(do echo \"Registering $agent...\")",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(find 'c:\\\\Users\\\\SPilcher\\\\OpenClaw2.0 for linux - Copy' -type f \\\\\\(-name *.sqlite -o -name *.db \\\\\\))",
+      "Bash(find 'c:\\\\Users\\\\SPilcher\\\\OpenClaw2.0 for linux - Copy' -type f \\\\\\(-name *.bat -o -name *.sh \\\\\\))",
+      "Bash(xcopy /E /I \"%USERPROFILE%\\\\.openclaw\" \"c:/Users/SPilcher/OpenClaw2.0 for linux - Copy/backups/openclaw-config\")",
+      "Bash(npm list:*)",
+      "Bash(\"c:/Users/SPilcher/OpenClaw2.0 for:*)",
+      "Bash(git -C 'c:/Users/SPilcher/OpenClaw2.0 for linux - Copy' diff --name-only)"
     ],
     "additionalDirectories": [
       "C:\\Users\\SPilcher\\.claude\\projects\\c--Users-SPilcher-OpenClaw2-0-for-linux---Copy\\memory"

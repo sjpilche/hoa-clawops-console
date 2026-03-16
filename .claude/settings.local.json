@@ -130,7 +130,10 @@
       "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJhZG1pbiIsImVtYWlsIjoiYWRtaW5AY2xhd29wcy5sb2NhbCIsImlhdCI6MTc3MTM3Mjc0NCwiZXhwIjoxNzcxNDU5MTQ0fQ.Rt2RUONu_6qX3_2y4IZirg_Rswk8T6_-xdmUHsTXWnQ\")",
       "Bash(grep:*)",
       "Bash(git mv:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "WebSearch",
+      "Bash(claude --version)",
+      "Bash(node -e \":*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\SPilcher\\OpenClaw2.0 for linux - Copy"
