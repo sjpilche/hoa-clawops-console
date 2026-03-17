@@ -12,8 +12,10 @@ const fs = require('fs');
 
 const TIMEOUT_MS = parseInt(process.env.MAX_DURATION_PER_RUN || '600', 10) * 1000;
 
-// ── Load founder mandate once — appended to every agent message ───────────────
+// ── Load founder mandate — workspace-specific if available, else global ───────
 let _cachedMandate = null;
+const _workspaceMandateCache = {};
+
 function loadFounderMandate() {
   if (_cachedMandate !== null) return _cachedMandate;
   const mandatePath = path.join(process.cwd(), 'founder', 'agent_mandate.md');
@@ -25,6 +27,26 @@ function loadFounderMandate() {
   } catch {}
   _cachedMandate = '';
   return _cachedMandate;
+}
+
+/**
+ * Load workspace-specific mandate if it exists, else fall back to global.
+ * Workspace mandates live in openclaw-skills/workspaces/{slug}/MANDATE.md
+ */
+function loadWorkspaceMandate(workspaceSlug) {
+  if (!workspaceSlug) return loadFounderMandate();
+  if (_workspaceMandateCache[workspaceSlug] !== undefined) return _workspaceMandateCache[workspaceSlug];
+
+  const wsPath = path.join(process.cwd(), 'openclaw-skills', 'workspaces', workspaceSlug, 'MANDATE.md');
+  try {
+    if (fs.existsSync(wsPath)) {
+      _workspaceMandateCache[workspaceSlug] = '\n\n---\n[WORKSPACE MANDATE: ' + workspaceSlug.toUpperCase() + ']\n' + fs.readFileSync(wsPath, 'utf-8').trim();
+      return _workspaceMandateCache[workspaceSlug];
+    }
+  } catch {}
+  // Fall back to global
+  _workspaceMandateCache[workspaceSlug] = loadFounderMandate();
+  return _workspaceMandateCache[workspaceSlug];
 }
 
 /** Shell-escape a value by wrapping in double quotes and escaping inner quotes. */

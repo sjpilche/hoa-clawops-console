@@ -20,6 +20,29 @@ const { checkContent } = require('./contentGuard');
 const ralphQA = require('./ralphQA');
 
 /**
+ * Derive workspace_id from agent name. Reads from DB first (durable), falls back to prefix matching.
+ */
+function deriveWorkspaceId(agentNameOrId) {
+  // Try DB lookup first
+  try {
+    const agent = get('SELECT workspace_id FROM agents WHERE name = ? OR id = ?', [agentNameOrId, agentNameOrId]);
+    if (agent?.workspace_id) return agent.workspace_id;
+  } catch {}
+
+  // Prefix fallback
+  const name = (agentNameOrId || '').toLowerCase();
+  if (name.startsWith('jake') || name.startsWith('ralph') || name.startsWith('charlie') ||
+      name.startsWith('todd') || name.startsWith('cfo-') || name.startsWith('bid-result') ||
+      name.startsWith('permit') || name.startsWith('hiring-signal') || name.startsWith('pain-signal') ||
+      name.startsWith('meeting-booker') || name.startsWith('linkedin-direct') || name.startsWith('twitter-poster')) return 1;
+  if (name.startsWith('hoa')) return 2;
+  if (name.startsWith('owen')) return 3;
+  if (name.startsWith('data-rehab')) return 4;
+
+  return null; // global/system agent
+}
+
+/**
  * Parse JSON from agent output — handles raw JSON and ```json``` code blocks.
  */
 function parseAgentJSON(text) {
@@ -56,6 +79,7 @@ function postProcessLLMOutput(agent, outputText, message) {
 
   try {
     const name = agent.name;
+    const wsId = deriveWorkspaceId(name);
 
     // ── Content engines → cfo_content_pieces (with QA + Brain obs + self-eval) ──
     if (name === 'cfo-content-engine' || name === 'jake-content-engine') {
@@ -63,8 +87,8 @@ function postProcessLLMOutput(agent, outputText, message) {
       const p = parseAgentJSON(outputText);
       if (p?.content_markdown) {
         run(
-          `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, source_agent, status, qa_status) VALUES (?, ?, ?, ?, ?, ?, 'draft', 'pending')`,
-          [p.pillar || 'general', p.channel || 'linkedin', p.title || 'Untitled', p.content_markdown, p.cta || '', source]
+          `INSERT INTO cfo_content_pieces (pillar, channel, title, content_markdown, cta, source_agent, status, qa_status, workspace_id) VALUES (?, ?, ?, ?, ?, ?, 'draft', 'pending', ?)`,
+          [p.pillar || 'general', p.channel || 'linkedin', p.title || 'Untitled', p.content_markdown, p.cta || '', source, wsId]
         );
 
         // Auto-trigger Ralph QA on content
@@ -150,8 +174,8 @@ function postProcessLLMOutput(agent, outputText, message) {
         const angleType = detectAngleType(body);
 
         run(
-          `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, source_agent, status, qa_status, angle_type) VALUES (?, 'blitz', ?, ?, ?, ?, ?, 'pending', ?)`,
-          [leadId, subject, body, p.pilot_offer || null, source, status, angleType]
+          `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, source_agent, status, qa_status, angle_type, workspace_id) VALUES (?, 'blitz', ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          [leadId, subject, body, p.pilot_offer || null, source, status, angleType, wsId]
         );
 
         // Auto-trigger Ralph QA on the newly inserted draft
@@ -326,4 +350,4 @@ function postProcessLLMOutput(agent, outputText, message) {
   } catch {}
 }
 
-module.exports = { postProcessLLMOutput, parseAgentJSON };
+module.exports = { postProcessLLMOutput, parseAgentJSON, deriveWorkspaceId };

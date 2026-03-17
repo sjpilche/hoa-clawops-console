@@ -346,8 +346,8 @@ async function runConstructionDiscovery(params = {}) {
            (company_name, phone, city, state,
             pilot_fit_score, pilot_fit_reason,
             source, source_agent, status,
-            enrichment_status, notes, erp_type)
-         VALUES (?, ?, ?, ?, ?, ?, 'google_maps_discovery', 'jake', 'new', 'pending', ?, 'Unknown')`,
+            enrichment_status, notes, erp_type, workspace_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'google_maps_discovery', 'jake', 'new', 'pending', ?, 'Unknown', 1)`,
         [
           name,
           r.phone || null,

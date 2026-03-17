@@ -71,10 +71,11 @@ function writeFallbackObservation(data) {
   try {
     const { run } = getFallbackDb();
     run(
-      `INSERT INTO brain_fallback_observations (session_id, agent_name, obs_type, subject, content, confidence, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO brain_fallback_observations (session_id, agent_name, obs_type, subject, content, confidence, metadata, workspace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.session_id, data.agent_name, data.obs_type, data.subject || null,
-       data.content, data.confidence ?? 0.8, data.metadata ? JSON.stringify(data.metadata) : null]
+       data.content, data.confidence ?? 0.8, data.metadata ? JSON.stringify(data.metadata) : null,
+       data.workspace_id || null]
     );
   } catch (e) { console.warn('[CollectiveBrain] SQLite fallback write failed:', e.message); }
 }
@@ -83,11 +84,12 @@ function writeFallbackFeedback(data) {
   try {
     const { run } = getFallbackDb();
     run(
-      `INSERT INTO brain_fallback_feedback (agent_name, output_type, output_id, signal, before_text, after_text, market, notes, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO brain_fallback_feedback (agent_name, output_type, output_id, signal, before_text, after_text, market, notes, metadata, workspace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.agent_name, data.output_type, data.output_id || null, data.signal,
        data.before_text || null, data.after_text || null, data.market || null,
-       data.notes || null, data.metadata ? JSON.stringify(data.metadata) : null]
+       data.notes || null, data.metadata ? JSON.stringify(data.metadata) : null,
+       data.workspace_id || null]
     );
   } catch (e) { console.warn('[CollectiveBrain] SQLite fallback feedback write failed:', e.message); }
 }
@@ -96,13 +98,14 @@ function writeFallbackEpisode(data) {
   try {
     const { run } = getFallbackDb();
     run(
-      `INSERT INTO brain_fallback_episodes (agent_name, market, erp_context, contact_title, action_taken, outcome, outcome_type, outcome_score, days_to_outcome, lead_id, run_id, signal_source, signal_fit_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO brain_fallback_episodes (agent_name, market, erp_context, contact_title, action_taken, outcome, outcome_type, outcome_score, days_to_outcome, lead_id, run_id, signal_source, signal_fit_score, workspace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.agent_name, data.market || null, data.erp_context || null,
        data.contact_title || null, data.action_taken, data.outcome,
        data.outcome_type, data.outcome_score ?? 0.5, data.days_to_outcome || null,
        data.lead_id || null, data.run_id || null,
-       data.signal_source || null, data.signal_fit_score || null]
+       data.signal_source || null, data.signal_fit_score || null,
+       data.workspace_id || null]
     );
   } catch (e) { console.warn('[CollectiveBrain] SQLite fallback episode write failed:', e.message); }
 }
@@ -305,7 +308,7 @@ async function ensureTables() {
  * @param {number} [opts.confidence=1.0]
  * @param {object} [opts.metadata]
  */
-function observe(sessionId, agentName, obsType, { subject, content, confidence = 1.0, metadata } = {}) {
+function observe(sessionId, agentName, obsType, { subject, content, confidence = 1.0, metadata, workspaceId = null } = {}) {
   fireAndForget(
     async () => {
       const pool = await getPool();
@@ -320,7 +323,7 @@ function observe(sessionId, agentName, obsType, { subject, content, confidence =
         .query(`INSERT INTO shared_observations (session_id,agent_name,obs_type,subject,content,confidence,metadata)
                 VALUES (@session_id,@agent_name,@obs_type,@subject,@content,@confidence,@metadata)`);
     },
-    () => writeFallbackObservation({ session_id: sessionId, agent_name: agentName, obs_type: obsType, subject, content, confidence, metadata })
+    () => writeFallbackObservation({ session_id: sessionId, agent_name: agentName, obs_type: obsType, subject, content, confidence, metadata, workspace_id: workspaceId })
   );
 }
 
@@ -417,7 +420,7 @@ function recordFeedback(agentName, outputType, outputId, signal, opts = {}) {
     () => writeFallbackFeedback({
       agent_name: agentName, output_type: outputType, output_id: outputId, signal,
       before_text: opts.beforeText, after_text: opts.afterText, notes: opts.notes,
-      market: opts.market, metadata: opts.metadata,
+      market: opts.market, metadata: opts.metadata, workspace_id: opts.workspaceId,
     })
   );
 }
@@ -495,7 +498,7 @@ async function getFeedbackPromptBlock(agentName, limit = 6) {
  */
 function recordEpisode(agentName, { market, companyType, erpContext, contactTitle,
     actionTaken, outcome, outcomeType, outcomeScore = 0, daysToOutcome, leadId, runId,
-    signalSource, signalFitScore } = {}) {
+    signalSource, signalFitScore, workspaceId = null } = {}) {
   fireAndForget(
     async () => {
       const pool = await getPool();
@@ -551,6 +554,7 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
         agent_name: agentName, market, erp_context: erpContext, contact_title: contactTitle,
         action_taken: actionTaken, outcome, outcome_type: outcomeType,
         outcome_score: outcomeScore, days_to_outcome: daysToOutcome, lead_id: leadId, run_id: runId,
+        workspace_id: workspaceId,
         signal_source: signalSource, signal_fit_score: signalFitScore,
       });
       // Mirror to Chroma from fallback path too
@@ -965,7 +969,10 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
   // Opportunistically drain SQLite fallback rows to Azure (non-blocking if Azure down)
   drainFallback().catch(() => {});
 
-  // Determine product line for context segmentation
+  // Determine workspace context — use explicit workspaceId or derive from agent name
+  const workspaceId = opts.workspaceId || null;
+
+  // Determine product line for context segmentation (maps to workspace slug)
   const productLine = opts.productLine
     || (agentName.startsWith('owen') ? 'owen'
     : agentName.startsWith('hoa') ? 'hoa'
