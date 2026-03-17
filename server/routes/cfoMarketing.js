@@ -39,6 +39,7 @@ router.get('/leads', (req, res, next) => {
     const erp_type = req.query.erp_type || null;
     const source_agent = req.query.source_agent || null;
     const min_score = parseInt(req.query.min_score) || 0;
+    const workspace_id = req.query.workspace_id ? parseInt(req.query.workspace_id) : null;
 
     let query = `
       SELECT
@@ -47,7 +48,7 @@ router.get('/leads', (req, res, next) => {
         website, state, city,
         pilot_fit_score, pilot_fit_reason,
         status, source, source_agent, notes,
-        created_at, updated_at
+        workspace_id, created_at, updated_at
       FROM cfo_leads
       WHERE pilot_fit_score >= ?
     `;
@@ -56,6 +57,7 @@ router.get('/leads', (req, res, next) => {
     if (status) { query += ' AND status = ?'; params.push(status); }
     if (erp_type) { query += ' AND erp_type = ?'; params.push(erp_type); }
     if (source_agent) { query += ' AND source_agent = ?'; params.push(source_agent); }
+    if (workspace_id) { query += ' AND workspace_id = ?'; params.push(workspace_id); }
 
     query += ' ORDER BY pilot_fit_score DESC, created_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
@@ -67,6 +69,7 @@ router.get('/leads', (req, res, next) => {
     if (status) { countQuery += ' AND status = ?'; countParams.push(status); }
     if (erp_type) { countQuery += ' AND erp_type = ?'; countParams.push(erp_type); }
     if (source_agent) { countQuery += ' AND source_agent = ?'; countParams.push(source_agent); }
+    if (workspace_id) { countQuery += ' AND workspace_id = ?'; countParams.push(workspace_id); }
     const { total } = get(countQuery, countParams) || { total: 0 };
 
     res.json({ leads, total, limit, offset });
@@ -265,12 +268,13 @@ router.get('/outreach', (req, res, next) => {
   try {
     const status = req.query.status || null;
     const source_agent = req.query.source_agent || null;
+    const workspace_id = req.query.workspace_id ? parseInt(req.query.workspace_id) : null;
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
 
     let query = `
       SELECT
         s.id, s.lead_id, s.sequence_type, s.email_subject, s.email_body, s.pilot_offer,
-        s.status, s.source_agent, s.sent_at, s.replied_at, s.created_at,
+        s.status, s.source_agent, s.sent_at, s.replied_at, s.created_at, s.workspace_id,
         l.company_name, l.contact_name, l.contact_email, l.erp_type, l.pilot_fit_score
       FROM cfo_outreach_sequences s
       LEFT JOIN cfo_leads l ON s.lead_id = l.id
@@ -280,6 +284,7 @@ router.get('/outreach', (req, res, next) => {
 
     if (status) { query += ' AND s.status = ?'; params.push(status); }
     if (source_agent) { query += ' AND s.source_agent = ?'; params.push(source_agent); }
+    if (workspace_id) { query += ' AND s.workspace_id = ?'; params.push(workspace_id); }
     query += ' ORDER BY s.created_at DESC LIMIT ?';
     params.push(limit);
 

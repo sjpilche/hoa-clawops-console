@@ -289,6 +289,21 @@ async function startServer() {
     app.use('/api/stripe', stripeWebhookRoutes);
     app.use('/api/command-center', commandCenterRoutes);
 
+    // Workspaces API (lightweight inline route)
+    const { Router: WsRouter } = require('express');
+    const wsRouter = WsRouter();
+    wsRouter.get('/', (req, res) => {
+      const workspaces = all('SELECT w.*, (SELECT COUNT(*) FROM agents a WHERE a.workspace_id = w.id) as agent_count, (SELECT COUNT(*) FROM cfo_leads l WHERE l.workspace_id = w.id) as lead_count FROM workspaces w ORDER BY w.id');
+      res.json({ workspaces });
+    });
+    wsRouter.patch('/:id/status', (req, res) => {
+      const { status } = req.body;
+      if (!['active', 'frozen', 'archived'].includes(status)) return res.status(400).json({ error: 'Invalid status. Use: active, frozen, archived' });
+      run('UPDATE workspaces SET status = ?, updated_at = datetime(?) WHERE id = ?', [status, new Date().toISOString(), req.params.id]);
+      res.json({ success: true, message: `Workspace ${req.params.id} set to ${status}` });
+    });
+    app.use('/api/workspaces', wsRouter);
+
     // SECURITY: Test routes only in development
     if (!IS_PRODUCTION) {
       console.log('[Security] ⚠️  Test routes enabled (development mode)');
