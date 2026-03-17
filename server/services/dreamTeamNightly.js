@@ -21,9 +21,14 @@ const { chat } = require('./llmClient');
 
 const MODEL = process.env.DT_MODEL || 'gpt-4o-mini';
 const PROVIDER = process.env.DT_PROVIDER || 'openai';
+const BASE_URL = process.env.DT_BASE_URL || process.env.OPENAI_BASE_URL || '';
+const API_KEY = process.env.DT_API_KEY || process.env.OPENAI_API_KEY || '';
 
 function llm(system, user, maxTokens = 1024) {
-  return chat(system, user, { model: MODEL, provider: PROVIDER, temperature: 0.3, maxTokens, timeoutMs: 30000 });
+  const opts = { model: MODEL, provider: PROVIDER, temperature: 0.3, maxTokens, timeoutMs: 90000, maxRetries: 1 };
+  if (BASE_URL) opts.baseURL = BASE_URL;
+  if (API_KEY) opts.apiKey = API_KEY;
+  return chat(system, user, opts);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -140,11 +145,13 @@ function collectDailyData() {
   // Build per-agent summaries
   data.builds_attempted = 0;
   data.builds_completed = 0;
-  data.qa_submissions = 0;
-  data.qa_passes = 0;
-  data.reviews_completed = 0;
-  data.false_passes = 0;
-  data.voice_rejections = 0;
+
+  // Ralph QA metrics — pull from real data
+  data.qa_submissions = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(qa_reviewed_at) = ?", [today])?.c || 0;
+  data.qa_passes = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(qa_reviewed_at) = ? AND qa_status = 'passed'", [today])?.c || 0;
+  data.reviews_completed = data.qa_submissions;
+  data.false_passes = get("SELECT COUNT(*) c FROM ralph_false_passes WHERE DATE(steve_rejected_at) = ?", [today])?.c || 0;
+  data.voice_rejections = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(qa_reviewed_at) = ? AND qa_status = 'failed'", [today])?.c || 0;
   data.avg_build_duration_s = 0;
   data.avg_build_cost = 0;
   data.avg_review_duration_s = 0;
@@ -605,10 +612,18 @@ async function buildMorningReport() {
   // Build report text
   const lines = [`DREAM TEAM OVERNIGHT REPORT — ${today}`, '━'.repeat(50), '', 'SCORECARDS:'];
 
-  for (const card of scorecards) {
-    lines.push(`  ${card.agent_name.charAt(0).toUpperCase() + card.agent_name.slice(1)}:`.padEnd(12) +
-      `${card.grade} (${card.composite_score})`.padEnd(10) + ' — ' +
-      `${card.dim1_name}: ${card.dim1_score} | ${card.dim2_name}: ${card.dim2_score} | ${card.dim3_name}: ${card.dim3_score} | ${card.dim4_name}: ${card.dim4_score}`);
+  if (scorecards.length === 0) {
+    lines.push('  (no scorecards generated — nightly cycle may not have run)');
+  } else {
+    const allBaseline = scorecards.every(c => c.composite_score === 50);
+    for (const card of scorecards) {
+      lines.push(`  ${card.agent_name.charAt(0).toUpperCase() + card.agent_name.slice(1)}:`.padEnd(12) +
+        `${card.grade} (${card.composite_score})`.padEnd(10) + ' — ' +
+        `${card.dim1_name}: ${card.dim1_score} | ${card.dim2_name}: ${card.dim2_score} | ${card.dim3_name}: ${card.dim3_score} | ${card.dim4_name}: ${card.dim4_score}`);
+    }
+    if (allBaseline) {
+      lines.push('', '  ⚠️ ALL SCORES AT BASELINE (50) — upstream agents may not be producing data. Check agent health.');
+    }
   }
 
   // ── Revenue Pipeline by Product Line ──
@@ -804,15 +819,30 @@ function getActivePatterns(agentName) {
 async function runFullCycle() {
   console.log('[DreamTeam] === Starting nightly cycle ===');
   const startTime = Date.now();
+  const errors = [];
 
-  const snapshot = collectDailyData();
-  const scorecards = await scoreAgents(snapshot);
-  const proposals = await selfAssessAndPropose(scorecards);
-  const qaResult = await ralphQAGate(proposals);
-  const actions = await toddOvernightActions(scorecards);
-  const report = await buildMorningReport();
+  let snapshot, scorecards = [], proposals = [], qaResult = { approved: 0, rejected: 0 }, actions = [], report;
+
+  try { snapshot = collectDailyData(); }
+  catch (err) { errors.push(`collect: ${err.message}`); console.error('[DreamTeam] collectDailyData failed:', err.message); snapshot = { date: new Date().toISOString().slice(0, 10) }; }
+
+  try { scorecards = await scoreAgents(snapshot); }
+  catch (err) { errors.push(`score: ${err.message}`); console.error('[DreamTeam] scoreAgents failed:', err.message); }
+
+  try { proposals = await selfAssessAndPropose(scorecards); }
+  catch (err) { errors.push(`propose: ${err.message}`); console.error('[DreamTeam] selfAssessAndPropose failed:', err.message); }
+
+  try { qaResult = await ralphQAGate(proposals); }
+  catch (err) { errors.push(`qa: ${err.message}`); console.error('[DreamTeam] ralphQAGate failed:', err.message); }
+
+  try { actions = await toddOvernightActions(scorecards); }
+  catch (err) { errors.push(`actions: ${err.message}`); console.error('[DreamTeam] toddOvernightActions failed:', err.message); }
+
+  try { report = await buildMorningReport(); }
+  catch (err) { errors.push(`report: ${err.message}`); console.error('[DreamTeam] buildMorningReport failed:', err.message); }
 
   const durationMs = Date.now() - startTime;
+  if (errors.length) console.warn(`[DreamTeam] Cycle completed with ${errors.length} error(s): ${errors.join('; ')}`);
   console.log(`[DreamTeam] === Nightly cycle complete in ${(durationMs / 1000).toFixed(1)}s ===`);
 
   return {
@@ -823,6 +853,7 @@ async function runFullCycle() {
     actions: actions.length,
     durationMs,
     reportDate: report?.report_date,
+    errors: errors.length > 0 ? errors : undefined,
   };
 }
 

@@ -360,6 +360,19 @@ async function startServer() {
       const { startScheduleRunner } = require('./services/scheduleRunner');
       startScheduleRunner();
 
+      // --- Validate Provider Configuration ---
+      console.log('[Startup] Checking provider configuration...');
+      const providerWarnings = [];
+      if (!process.env.SENDGRID_API_KEY) providerWarnings.push('SENDGRID_API_KEY not set — outbound email disabled');
+      if (!process.env.SENDGRID_FROM_EMAIL) providerWarnings.push('SENDGRID_FROM_EMAIL not set — will use default sender');
+      if (!process.env.REPLY_FORWARD_EMAIL) providerWarnings.push('REPLY_FORWARD_EMAIL not set — inbound replies will not be forwarded');
+      if (!process.env.SENDGRID_LIST_ID) providerWarnings.push('SENDGRID_LIST_ID not set — ESP lead-list sync disabled');
+      if (providerWarnings.length) {
+        providerWarnings.forEach(w => console.warn(`[Providers] ⚠ ${w}`));
+      } else {
+        console.log('[Providers] ✓ All email provider keys configured');
+      }
+
       // --- Initialize Collective Brain (Azure SQL tables) ---
       require('./services/collectiveBrain').ensureTables().catch(err =>
         console.warn('[CollectiveBrain] Table init warning (non-fatal):', err.message)

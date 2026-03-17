@@ -135,7 +135,7 @@ router.get('/leads/stats', (req, res, next) => {
 router.put('/leads/:id', (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, notes, contact_name, contact_title, contact_email, contact_linkedin, erp_type, website, phone } = req.body;
+    const { status, notes, contact_name, contact_title, contact_email, contact_linkedin, erp_type, website, phone, cadence_active, next_touch_due, last_touch_number, pipeline_stage } = req.body;
 
     const existing = get('SELECT id FROM cfo_leads WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
@@ -152,6 +152,10 @@ router.put('/leads/:id', (req, res, next) => {
     if (erp_type !== undefined) { updates.push('erp_type = ?'); params.push(erp_type); }
     if (website !== undefined) { updates.push('website = ?'); params.push(website); }
     if (phone !== undefined) { updates.push('phone = ?'); params.push(phone); }
+    if (cadence_active !== undefined) { updates.push('cadence_active = ?'); params.push(cadence_active); }
+    if (next_touch_due !== undefined) { updates.push('next_touch_due = ?'); params.push(next_touch_due); }
+    if (last_touch_number !== undefined) { updates.push('last_touch_number = ?'); params.push(last_touch_number); }
+    if (pipeline_stage !== undefined) { updates.push('pipeline_stage = ?'); params.push(pipeline_stage); }
 
     if (updates.length === 0) return res.json({ message: 'No changes' });
 
@@ -359,7 +363,7 @@ router.put('/outreach/:id', async (req, res, next) => {
           text: bodyText,
         });
         if (result.success) {
-          console.log(`[CfoMarketing] Email sent to ${lead.contact_email} (${lead.company_name}) msgId=${result.messageId}`);
+          console.log(`[CfoMarketing] Email sent to ${lead.contact_email} (${lead.company_name || 'CFO Insights Lead'}) msgId=${result.messageId}`);
           run("UPDATE cfo_outreach_sequences SET delivery_status = 'delivered', delivery_error = NULL WHERE id = ?", [id]);
           run("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [lead.id]);
           updated.email_sent = true;
@@ -378,6 +382,19 @@ router.put('/outreach/:id', async (req, res, next) => {
     // Auto-progress lead status on reply
     if (status === 'replied' && existing.lead_id) {
       run("UPDATE cfo_leads SET status = 'replied', updated_at = datetime('now') WHERE id = ? AND status IN ('new', 'contacted')", [existing.lead_id]);
+    }
+
+    // ── Ralph false pass tracking: if Steve rejects a Ralph-approved draft ──
+    if (status === 'rejected' && existing.qa_status === 'passed') {
+      try {
+        run(`INSERT INTO ralph_false_passes
+          (sequence_id, lead_id, agent_id, ralph_approved_at, steve_rejected_at, rejection_reason, created_at)
+          VALUES (?, ?, ?, ?, datetime('now'), ?, datetime('now'))`,
+          [id, existing.lead_id, existing.source_agent, existing.qa_reviewed_at || null, req.body.notes || req.body.reason || null]);
+        console.log(`[RalphQA] False pass recorded: sequence ${id} (Ralph approved, Steve rejected)`);
+      } catch (fpErr) {
+        console.warn('[RalphQA] Failed to record false pass (non-fatal):', fpErr.message);
+      }
     }
 
     // ── Collective Brain Layer 2: record feedback signal ──

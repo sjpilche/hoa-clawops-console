@@ -23,6 +23,33 @@
 const { get, all, run } = require('../db/connection');
 const { checkContent } = require('./contentGuard');
 
+// ── Ensure QA columns exist (guards against startup race conditions) ──
+let _qaColumnsVerified = false;
+function ensureQAColumns() {
+  if (_qaColumnsVerified) return;
+  try {
+    const seqCols = all("PRAGMA table_info(cfo_outreach_sequences)").map(c => c.name);
+    if (!seqCols.includes('qa_status')) {
+      run("ALTER TABLE cfo_outreach_sequences ADD COLUMN qa_status TEXT DEFAULT NULL");
+      run("ALTER TABLE cfo_outreach_sequences ADD COLUMN qa_score INTEGER DEFAULT NULL");
+      run("ALTER TABLE cfo_outreach_sequences ADD COLUMN qa_notes TEXT DEFAULT NULL");
+      run("ALTER TABLE cfo_outreach_sequences ADD COLUMN qa_reviewed_at TEXT DEFAULT NULL");
+      console.log('[RalphQA] Added missing qa columns to cfo_outreach_sequences');
+    }
+    const contentCols = all("PRAGMA table_info(cfo_content_pieces)").map(c => c.name);
+    if (!contentCols.includes('qa_status')) {
+      run("ALTER TABLE cfo_content_pieces ADD COLUMN qa_status TEXT DEFAULT NULL");
+      run("ALTER TABLE cfo_content_pieces ADD COLUMN qa_score INTEGER DEFAULT NULL");
+      run("ALTER TABLE cfo_content_pieces ADD COLUMN qa_notes TEXT DEFAULT NULL");
+      run("ALTER TABLE cfo_content_pieces ADD COLUMN qa_reviewed_at TEXT DEFAULT NULL");
+      console.log('[RalphQA] Added missing qa columns to cfo_content_pieces');
+    }
+  } catch (e) {
+    console.warn('[RalphQA] Column check failed (non-fatal):', e.message);
+  }
+  _qaColumnsVerified = true;
+}
+
 // ══════════════════════════════════════════════════════════════
 // SCORING RUBRIC — deterministic quality checks ($0)
 // ══════════════════════════════════════════════════════════════
@@ -109,6 +136,25 @@ function scoreOutreachDraft(subject, body, lead) {
     dimensions.tone = 0;
   }
 
+  // 6. Research evidence (20 points) — penalize generic templates, reward specificity
+  maxScore += 20;
+  if (body) {
+    let researchScore = 0;
+    const lowerBody = body.toLowerCase();
+    // Check for specific details that indicate research was done
+    if (/\b(I saw|I noticed|I read|your recent|your new|your latest|I found)\b/i.test(lowerBody)) researchScore += 5;
+    if (/\b(project|contract|award|permit|expansion|acquisition|merger|hire|new hire)\b/i.test(lowerBody)) researchScore += 5;
+    if (/\$\d/.test(body) || /\d+\s*(million|M|employees|units|projects)/i.test(body)) researchScore += 5; // specific numbers
+    // Penalty for obvious template markers
+    if (/\[.*\]/.test(body)) researchScore -= 10; // unfilled template brackets
+    if (/your company|your business|your organization/i.test(lowerBody) && !lead?.company_name) researchScore -= 5; // generic
+    researchScore = Math.max(0, Math.min(20, researchScore));
+    dimensions.research = researchScore;
+    totalScore += researchScore;
+  } else {
+    dimensions.research = 0;
+  }
+
   const score = Math.round((totalScore / maxScore) * 100);
 
   return {
@@ -129,6 +175,7 @@ function scoreOutreachDraft(subject, body, lead) {
  * Review a single outreach sequence by ID.
  */
 function reviewSingleOutreach(sequenceId) {
+  ensureQAColumns();
   const seq = get('SELECT s.*, l.company_name, l.contact_name, l.city, l.state, l.erp_type FROM cfo_outreach_sequences s LEFT JOIN cfo_leads l ON s.lead_id = l.id WHERE s.id = ?', [sequenceId]);
   if (!seq) return { error: 'Sequence not found' };
 
@@ -160,6 +207,7 @@ function reviewSingleOutreach(sequenceId) {
  * Review a batch of pending outreach sequences.
  */
 function reviewOutreachBatch(limit = 20) {
+  ensureQAColumns();
   // Find drafts that haven't been QA'd yet
   const pending = all(
     `SELECT s.id FROM cfo_outreach_sequences s WHERE (s.qa_status IS NULL OR s.qa_status = 'pending') AND s.status IN ('draft', 'flagged') ORDER BY s.created_at DESC LIMIT ?`,
@@ -228,6 +276,7 @@ function reviewSingleContent(contentId) {
  * Review a batch of pending content pieces.
  */
 function reviewContentBatch(limit = 20) {
+  ensureQAColumns();
   const pending = all(
     `SELECT id FROM cfo_content_pieces WHERE (qa_status IS NULL OR qa_status = 'pending') AND status = 'draft' ORDER BY created_at DESC LIMIT ?`,
     [limit]
@@ -254,6 +303,7 @@ function reviewContentBatch(limit = 20) {
  * Get QA queue stats.
  */
 function getQAStats() {
+  ensureQAColumns();
   const outreach = get(`
     SELECT
       COUNT(*) AS total,

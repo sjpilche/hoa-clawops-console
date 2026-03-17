@@ -227,7 +227,7 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
       return res.status(200).json({ status: 'unmatched', email: senderEmail });
     }
 
-    console.log(`[Inbound] Matched to lead #${lead.id}: ${lead.company_name} (${lead.contact_name})`);
+    console.log(`[Inbound] Matched to lead #${lead.id}: ${lead.company_name || 'CFO Insights Lead'} (${lead.contact_name || 'Unknown'})`);
 
     // ── Strip quoted text / email signatures — isolate the actual reply ──
     const cleanReply = stripQuotedText(replyText);
@@ -272,12 +272,44 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
           body_preview: cleanReply.slice(0, 1000),
           classification: classification.type,
           lead_status: classification.leadStatus,
-          company: lead.company_name,
+          company: lead.company_name || 'CFO Insights Lead',
           received_at: new Date().toISOString(),
         }),
         classification.type === 'INTERESTED' ? 'success' : 'info',
       ]
     );
+
+    // ── Forward reply to Steve's inbox ──
+    const forwardTo = process.env.REPLY_FORWARD_EMAIL;
+    if (forwardTo) {
+      try {
+        const sg = require('../services/sendgrid');
+        const classLabel = classification.type;
+        const color = classLabel === 'INTERESTED' ? '🟢' : classLabel === 'NOT_NOW' ? '🟡' : '🔴';
+        await sg.send({
+          to: forwardTo,
+          subject: `${color} [${classLabel}] Reply from ${lead.contact_name || senderEmail} — ${lead.company_name || 'CFO Insights Lead'}`,
+          text: [
+            `FROM: ${lead.contact_name || 'Unknown'} <${senderEmail}>`,
+            `COMPANY: ${lead.company_name || 'CFO Insights Lead'} (${[lead.city, lead.state].filter(Boolean).join(', ')})`,
+            `TITLE: ${lead.contact_title || 'N/A'}`,
+            `CLASSIFICATION: ${classification.type}`,
+            `ORIGINAL SUBJECT: ${subject}`,
+            '',
+            '--- REPLY ---',
+            cleanReply,
+            '',
+            '--- NEXT ACTION ---',
+            classification.nextAction,
+            '',
+            `Lead ID: ${lead.id} | Reply to: ${senderEmail}`,
+          ].join('\n'),
+        });
+        console.log(`[Inbound] Forwarded reply to ${forwardTo}`);
+      } catch (fwdErr) {
+        console.warn('[Inbound] Forward failed (non-fatal):', fwdErr.message);
+      }
+    }
 
     // ── Brain Layer 2: feedback signal ──
     try {
@@ -292,7 +324,7 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
       brain.recordFeedback(agentName, 'outreach', String(lead.id), signalMap[classification.type], {
         notes: `Inbound reply auto-classified: ${classification.type}. Reply: "${cleanReply.slice(0, 100)}"`,
         market,
-        metadata: { classification: classification.type, company: lead.company_name, erp: lead.erp_type, source: 'inbound_parse' },
+        metadata: { classification: classification.type, company: lead.company_name || 'CFO Insights Lead', erp: lead.erp_type, source: 'inbound_parse' },
       });
 
       // Brain Layer 3: episode
@@ -372,11 +404,11 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
       try {
         const discord = require('../services/discordNotifier');
         await discord.sendEmbed({
-          title: `\ud83d\udfe2 INTERESTED REPLY — ${lead.company_name}`,
+          title: `\ud83d\udfe2 INTERESTED REPLY — ${lead.company_name || 'CFO Insights Lead'}`,
           color: 0x22c55e,
           fields: [
             { name: 'Contact', value: `${lead.contact_name || 'Unknown'} (${lead.contact_title || 'N/A'})`, inline: true },
-            { name: 'Company', value: lead.company_name, inline: true },
+            { name: 'Company', value: lead.company_name || 'CFO Insights Lead', inline: true },
             { name: 'ERP', value: lead.erp_type || 'Unknown', inline: true },
             { name: 'Location', value: [lead.city, lead.state].filter(Boolean).join(', ') || 'Unknown', inline: true },
             { name: 'Reply Preview', value: cleanReply.slice(0, 300) || '(empty)', inline: false },
@@ -420,7 +452,7 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
         const discord = require('../services/discordNotifier');
         const colorMap = { NOT_NOW: 0xf59e0b, WRONG_PERSON: 0xf97316, UNSUBSCRIBE: 0xef4444 };
         await discord.sendEmbed({
-          title: `Reply: ${classification.type.replace('_', ' ')} — ${lead.company_name}`,
+          title: `Reply: ${classification.type.replace('_', ' ')} — ${lead.company_name || 'CFO Insights Lead'}`,
           color: colorMap[classification.type] || 0x6b7280,
           fields: [
             { name: 'Contact', value: `${lead.contact_name || 'Unknown'}`, inline: true },
@@ -439,7 +471,7 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
     res.status(200).json({
       status: 'classified',
       lead_id: lead.id,
-      company: lead.company_name,
+      company: lead.company_name || 'CFO Insights Lead',
       classification: classification.type,
       new_lead_status: classification.leadStatus,
       next_action: classification.nextAction,

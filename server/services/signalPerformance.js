@@ -38,7 +38,7 @@ function computeSignalPerformance() {
       SUM(CASE WHEN revenue_stage = 'meeting'                       THEN 1 ELSE 0 END)  AS leads_meeting,
       SUM(CASE WHEN status = 'pilot'                                THEN 1 ELSE 0 END)  AS leads_pilot,
       SUM(CASE WHEN status = 'closed_won'                           THEN 1 ELSE 0 END)  AS leads_closed,
-      SUM(COALESCE(close_value_cents, 0))                                                AS total_revenue_cents,
+      0                                                                                  AS total_revenue_cents,
       AVG(CASE WHEN days_to_close IS NOT NULL THEN days_to_close END)                    AS avg_days_to_close
     FROM cfo_leads
     WHERE created_at >= ?

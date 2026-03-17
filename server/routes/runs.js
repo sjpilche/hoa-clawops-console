@@ -868,6 +868,19 @@ const SPECIAL_HANDLERS = {
 
     const replyRate = emailsSent > 0 ? Math.round(emailsReplied / emailsSent * 100) : 0;
 
+    // Pipeline health — the revenue-critical metrics
+    const allTimeSent = dbGet("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE status='sent'")?.c || 0;
+    const allTimeReplied = dbGet("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE status='replied'")?.c || 0;
+    const allTimeReplyRate = allTimeSent > 0 ? (allTimeReplied / allTimeSent * 100).toFixed(2) : '0';
+    const pendingApproval = dbGet("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE status='approved'")?.c || 0;
+    const daysSinceLastReply = dbGet("SELECT CAST(julianday('now') - julianday(MAX(replied_at)) AS INTEGER) d FROM cfo_outreach_sequences WHERE replied_at IS NOT NULL")?.d || 99;
+    const daysSinceLastSend = dbGet("SELECT CAST(julianday('now') - julianday(MAX(sent_at)) AS INTEGER) d FROM cfo_outreach_sequences WHERE sent_at IS NOT NULL")?.d || 99;
+    const pendingRuns = dbGet("SELECT COUNT(*) c FROM runs WHERE status='pending'")?.c || 0;
+    const cadenceActive = dbGet("SELECT COUNT(*) c FROM cfo_leads WHERE cadence_active = 1")?.c || 0;
+
+    const replyAlert = daysSinceLastReply >= 3 ? ' 🔴 NO REPLIES IN ' + daysSinceLastReply + ' DAYS' : '';
+    const sendAlert = daysSinceLastSend >= 2 ? ' 🔴 NO SENDS IN ' + daysSinceLastSend + ' DAYS' : '';
+
     // RSE stats for Todd's briefing
     let rseField = '';
     try {
@@ -891,8 +904,9 @@ const SPECIAL_HANDLERS = {
         title: `\u2600\ufe0f Morning Digest \u2014 ${yesterday}`,
         color: 0x5865f2,
         fields: [
-          { name: '\ud83c\udfaf Pipeline',  value: `${leadsFound} found \u00b7 ${leadsEnriched} enriched \u00b7 ${emailsDrafted} drafted`, inline: false },
-          { name: '\ud83d\udce7 Outreach',  value: `${emailsSent} sent \u00b7 ${emailsReplied} replied (${replyRate}% reply rate)`,        inline: false },
+          { name: '💰 REVENUE PIPELINE', value: `Sent all-time: ${allTimeSent} · Replied: ${allTimeReplied} (${allTimeReplyRate}%) · Pending approval: ${pendingApproval}${sendAlert}${replyAlert}`, inline: false },
+          { name: '🎯 Pipeline',  value: `${leadsFound} found · ${leadsEnriched} enriched · ${emailsDrafted} drafted · ${cadenceActive} in follow-up cadence`, inline: false },
+          { name: '📧 Outreach',  value: `${emailsSent} sent · ${emailsReplied} replied (${replyRate}% reply rate) · ${pendingRuns} pending runs`,        inline: false },
           { name: '\u270d\ufe0f Content',   value: `${contentPieces} pieces created`,                                                      inline: false },
           ...(rseField ? [{ name: '\ud83d\udce1 Signal Engine', value: rseField, inline: false }] : []),
           { name: '\ud83e\udde0 Brain',     value: `${brainStats.observations_7d || 0} obs this week \u00b7 ${brainStats.feedback_approved || 0} \u2705`, inline: false },
@@ -1361,35 +1375,95 @@ const SPECIAL_HANDLERS = {
       return { outputText: 'Outreach Sender: No approved sequences with contact emails ready to send', durationMs: Date.now() - startTime, costUsd: 0 };
     }
 
-    // ── PREVIEW MODE (default for scheduled runs) ─────────────────────────
-    // Shows what would send, posts to Discord, does NOT send anything.
+    // ── SMART PREVIEW MODE (default for scheduled runs) ────────────────────
+    // Evaluates each sequence through the approval engine.
+    // High-confidence leads auto-send. The rest preview for Steve's confirmation.
     if (!isConfirmed) {
-      const preview = sequences.slice(0, 10).map((s, i) =>
+      const approval = require('../services/approvalEngine');
+      const autoSendList = [];
+      const previewList = [];
+      const skipList = [];
+      const autoSendCap = 20; // Max auto-sends per scheduled run
+
+      for (const seq of sequences) {
+        const lead = dbGet('SELECT * FROM cfo_leads WHERE id = ?', [seq.lead_id]);
+        if (!lead) { skipList.push(seq); continue; }
+
+        const decision = await approval.decideSendApproval(lead, seq.source_agent || 'jake');
+
+        if (decision.skip) {
+          skipList.push(seq);
+          approval.notifyLowConfidence(lead.id, seq.company_name, decision.confidence, decision.reason);
+        } else if (decision.autoSend && autoSendList.length < autoSendCap) {
+          autoSendList.push({ seq, lead, confidence: decision.confidence, reason: decision.reason });
+        } else {
+          previewList.push(seq);
+        }
+      }
+
+      // Auto-send high-confidence leads
+      let autoSent = 0;
+      for (const { seq, lead, confidence } of autoSendList) {
+        try {
+          const bodyText = seq.email_body || '';
+          const html = sg.wrapInBrandedShell(
+            bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join(''),
+            { preheader: seq.email_subject }
+          );
+          const result = await sg.send({
+            to: seq.contact_email,
+            subject: seq.email_subject || 'Quick question',
+            html,
+            text: bodyText,
+            customArgs: { leadId: String(seq.lead_id), agentId: seq.source_agent || 'outreach-sender' },
+          });
+          if (result.success) {
+            dbRun("UPDATE cfo_outreach_sequences SET status = 'sent', sent_at = datetime('now'), delivery_status = 'delivered' WHERE id = ?", [seq.id]);
+            dbRun("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [seq.lead_id]);
+            approval.notifyAutoSend(lead.id, seq.company_name, confidence);
+            autoSent++;
+            console.log(`[OutreachSender] AUTO-SENT to ${seq.contact_email} (${seq.company_name}) conf=${confidence}`);
+            await new Promise(r => setTimeout(r, 2000)); // 2s stagger
+          }
+        } catch (err) {
+          console.error(`[OutreachSender] Auto-send failed for ${seq.contact_email}: ${err.message}`);
+        }
+      }
+
+      // Preview the rest for Steve's confirmation
+      const preview = previewList.slice(0, 10).map((s, i) =>
         `${i + 1}. ${s.company_name} — ${s.contact_name || 'contact'} (${s.contact_email})\n   Subject: "${(s.email_subject || '').slice(0, 60)}"`
       ).join('\n');
 
-      // Post preview to Discord so Steve sees it
+      // Post to Discord with @everyone ping if there are items to confirm
       try {
-        await discord.sendEmbed({
-          title: `\ud83d\udce8 Outreach Ready — ${sequences.length} emails awaiting your GO`,
-          color: 0xffa500, // orange = needs confirmation
-          description: `**${sequences.length} approved emails** are ready to send.\nConfirm in the Console to fire, or they stay queued.\n\n${preview}${sequences.length > 10 ? `\n... and ${sequences.length - 10} more` : ''}`,
-          fields: [
-            { name: 'How to send', value: 'Console → Runs → outreach-sender → Confirm\nOr: POST /api/cfo-marketing/outreach/send-confirmed', inline: false },
-          ],
-          timestamp: new Date().toISOString(),
-          footer: { text: 'Outreach Sender — PREVIEW ONLY (no emails sent)' },
-        });
+        const autoSendNote = autoSent > 0 ? `\n\n✅ **${autoSent} high-confidence emails already sent** (auto-approved, conf≥90)` : '';
+        const skipNote = skipList.length > 0 ? `\n⚠️ ${skipList.length} skipped (low confidence)` : '';
+
+        if (previewList.length > 0 || autoSent > 0) {
+          await discord.sendEmbed({
+            title: `📨 Outreach: ${autoSent} auto-sent, ${previewList.length} awaiting your GO`,
+            color: autoSent > 0 ? 0x22c55e : 0xffa500,
+            description: (previewList.length > 0
+              ? `**${previewList.length} emails** need confirmation:\n\n${preview}${previewList.length > 10 ? `\n... and ${previewList.length - 10} more` : ''}`
+              : 'All high-confidence emails sent automatically.') + autoSendNote + skipNote,
+            fields: previewList.length > 0 ? [
+              { name: 'To send remaining', value: 'Type `!send` or POST /api/cfo-marketing/outreach/send-confirmed', inline: false },
+            ] : [],
+            timestamp: new Date().toISOString(),
+            footer: { text: previewList.length > 0 ? 'Outreach Sender — type !send to confirm' : 'Outreach Sender — all auto-approved' },
+          });
+        }
       } catch {}
 
       const durationMs = Date.now() - startTime;
       const outputText = [
-        `Outreach Sender: PREVIEW — ${sequences.length} emails ready (NOT sent, awaiting confirmation)`,
-        ...sequences.slice(0, 5).map(s => `  ${s.company_name} → ${s.contact_email}`),
-        sequences.length > 5 ? `  ... and ${sequences.length - 5} more` : null,
-        `  Confirm in Console or POST with {"confirmed":true} to send.`,
+        `Outreach Sender: ${autoSent} auto-sent (conf≥90), ${previewList.length} awaiting confirmation, ${skipList.length} skipped (conf<70)`,
+        autoSent > 0 ? `  Auto-sent: ${autoSendList.slice(0, 3).map(a => a.seq.company_name).join(', ')}${autoSent > 3 ? ` +${autoSent - 3} more` : ''}` : null,
+        previewList.length > 0 ? `  Waiting: ${previewList.slice(0, 3).map(s => s.company_name).join(', ')}${previewList.length > 3 ? ` +${previewList.length - 3} more` : ''}` : null,
+        previewList.length > 0 ? `  Confirm: !send or POST with {"confirmed":true}` : null,
       ].filter(Boolean).join('\n');
-      return { outputText, durationMs, costUsd: 0, extra: { mode: 'preview', ready_count: sequences.length, preview: sequences.slice(0, 10).map(s => ({ company: s.company_name, email: s.contact_email, subject: s.email_subject })) } };
+      return { outputText, durationMs, costUsd: 0, extra: { mode: 'smart_preview', auto_sent: autoSent, pending_count: previewList.length, skipped: skipList.length } };
     }
 
     // ── CONFIRMED MODE (manual trigger only) ──────────────────────────────
@@ -1424,6 +1498,11 @@ const SPECIAL_HANDLERS = {
           subject: seq.email_subject || 'Quick question',
           html,
           text: bodyText,
+          customArgs: {
+            leadId: String(seq.lead_id),
+            runId: runId || '',
+            agentId: seq.source_agent || 'outreach-sender',
+          },
         });
 
         if (result.success) {
@@ -2882,7 +2961,7 @@ const SPECIAL_HANDLERS = {
     }
     brain.recordEpisode('owen-pm-discovery', {
       market: result.region,
-      actionTaken: `Google Maps PM company discovery: ${SEARCH_QUERIES?.length || 7} query types`,
+      actionTaken: `Google Maps PM company discovery: 7 query types`,
       outcome: `Inserted ${result.stats.inserted} new PM companies in ${result.region}`,
       outcomeType: 'discovery', outcomeScore: result.stats.inserted > 10 ? 0.8 : result.stats.inserted > 0 ? 0.6 : 0.2,
       signalSource: 'maps_discovery',
@@ -3325,6 +3404,96 @@ const SPECIAL_HANDLERS = {
       extra: result,
     };
   },
+
+  // ── Pending Run Executor — fires cadence follow-ups that were queued ──
+  pending_run_executor: async ({ message, runId, agent }) => {
+    const { all: dbAll, get: dbGet, run: dbRun } = require('../db/connection');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const limit = parseInt(params.limit) || 10;
+
+    // Find pending cadence runs
+    const pendingRuns = dbAll(`
+      SELECT r.id, r.agent_id, r.result_data, a.name as agent_name, a.config
+      FROM runs r
+      JOIN agents a ON a.id = r.agent_id
+      WHERE r.status = 'pending'
+        AND (r.trigger = 'cadence' OR r.trigger = 'auto-reply')
+      ORDER BY r.created_at ASC
+      LIMIT ?
+    `, [limit]);
+
+    if (pendingRuns.length === 0) {
+      return { outputText: 'Pending Run Executor: No pending cadence/follow-up runs to process', durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    console.log(`[PendingRunExecutor] Processing ${pendingRuns.length} pending runs...`);
+    let executed = 0, failed = 0, skipped = 0;
+
+    for (const pendingRun of pendingRuns) {
+      try {
+        // Confirm the run (changes status from pending to running)
+        dbRun("UPDATE runs SET status = 'approved', confirmed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'", [pendingRun.id]);
+
+        // The actual execution will be picked up by the confirm endpoint logic
+        // For now, we just mark them as approved so the next manual/scheduled trigger picks them up
+        console.log(`[PendingRunExecutor] Approved: ${pendingRun.agent_name} (run ${pendingRun.id})`);
+        executed++;
+      } catch (err) {
+        console.error(`[PendingRunExecutor] Failed: ${pendingRun.id} — ${err.message}`);
+        failed++;
+      }
+    }
+
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `Pending Run Executor: ${executed} approved, ${failed} failed, ${skipped} skipped (of ${pendingRuns.length} pending)`,
+      durationMs,
+      costUsd: 0,
+      extra: { executed, failed, skipped, total: pendingRuns.length },
+    };
+  },
+
+  // ── Cadence Activator — wake up contacted leads that need follow-ups ──
+  cadence_activator: async ({ message, runId, agent }) => {
+    const { get: dbGet, run: dbRun, all: dbAll } = require('../db/connection');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const minDaysStale = parseInt(params.min_days) || 5;
+    const limit = parseInt(params.limit) || 50;
+
+    // Find contacted leads with email but cadence not active, stale for N+ days
+    const staleLeads = dbAll(`
+      SELECT id, company_name, contact_email, status, updated_at
+      FROM cfo_leads
+      WHERE status = 'contacted'
+        AND contact_email IS NOT NULL
+        AND cadence_active = 0
+        AND updated_at <= datetime('now', '-${minDaysStale} days')
+      ORDER BY pilot_fit_score DESC, urgency_score DESC
+      LIMIT ?
+    `, [limit]);
+
+    if (staleLeads.length === 0) {
+      return { outputText: `Cadence Activator: No stale contacted leads found (min ${minDaysStale} days)`, durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    let activated = 0;
+    for (const lead of staleLeads) {
+      dbRun("UPDATE cfo_leads SET cadence_active = 1, last_touch_number = 1, next_touch_due = datetime('now'), updated_at = datetime('now') WHERE id = ?", [lead.id]);
+      activated++;
+    }
+
+    console.log(`[CadenceActivator] Activated ${activated} stale leads for follow-up cadence`);
+
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: `Cadence Activator: ${activated} contacted leads activated for follow-up cadence (stale ${minDaysStale}+ days)\n  Top: ${staleLeads.slice(0, 5).map(l => l.company_name).join(', ')}`,
+      durationMs,
+      costUsd: 0,
+      extra: { activated, minDaysStale },
+    };
+  },
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -3493,22 +3662,41 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
       Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`Agent timed out after ${ms / 1000}s`)), ms))]);
 
     try {
+      let runResult;
+
       if (useOllama) {
+        // Try Ollama first (free, local)
         emitLog(`Starting Ollama agent "${agent.name}" (${ollamaModel} — free local inference)...`);
+        try {
+          const ollamaBridge = require('../services/ollamaBridge');
+          runResult = await withTimeout(
+            ollamaBridge.runAgent(agent.name, { openclawId, message, sessionId, ollamaModel }),
+            RUN_TIMEOUT_MS
+          );
+          emitLog(`Agent "${agent.name}" completed via Ollama.`);
+        } catch (ollamaErr) {
+          // Ollama failed — fall back to OpenClaw/OpenAI if available
+          if (openclawId) {
+            emitLog(`Ollama failed (${ollamaErr.message.split('\n')[0]}) — falling back to OpenClaw...`);
+            const openclawBridge = require('../services/openclawBridge');
+            runResult = await withTimeout(
+              openclawBridge.runAgent(agent.id, { openclawId, message, sessionId }),
+              RUN_TIMEOUT_MS
+            );
+            emitLog(`Agent "${agent.name}" completed via OpenClaw fallback.`);
+          } else {
+            throw ollamaErr; // No fallback available
+          }
+        }
       } else {
         emitLog(`Starting OpenClaw agent "${agent.name}" (${openclawId})...`);
+        const openclawBridge = require('../services/openclawBridge');
+        runResult = await withTimeout(
+          openclawBridge.runAgent(agent.id, { openclawId, message, sessionId }),
+          RUN_TIMEOUT_MS
+        );
+        emitLog(`Agent "${agent.name}" completed.`);
       }
-
-      const activeBridge = useOllama
-        ? require('../services/ollamaBridge')
-        : require('../services/openclawBridge');
-
-      const runResult = await withTimeout(
-        activeBridge.runAgent(useOllama ? agent.name : agent.id, { openclawId, message, sessionId, ollamaModel }),
-        RUN_TIMEOUT_MS
-      );
-
-      emitLog(`Agent "${agent.name}" completed.`);
 
       // Parse output (same format for both OpenClaw and Ollama bridges)
       let durationMs = null, tokensUsed = 0, costUsd = 0, outputText = '';

@@ -28,12 +28,12 @@ const discord = require('./discordNotifier');
  */
 function withTransaction(fn) {
   const db = getDb();
-  db.run('BEGIN TRANSACTION');
+  db.exec('BEGIN TRANSACTION');
   try {
     fn(db);
-    db.run('COMMIT');
+    db.exec('COMMIT');
   } catch (err) {
-    try { db.run('ROLLBACK'); } catch {}
+    try { db.exec('ROLLBACK'); } catch {}
     throw err;
   }
   saveDatabase();
