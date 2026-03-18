@@ -15,12 +15,12 @@ export default function Input({ label, error, helpText, className = '', ...props
       )}
       <input
         className={`
-          w-full px-3 py-2 rounded-md
+          w-full px-3 py-2.5 rounded-lg
           bg-bg-primary border border-border
           text-text-primary text-sm font-sans
-          placeholder:text-text-muted
-          focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary/30
-          transition-colors duration-150
+          placeholder:text-text-muted/60
+          focus:outline-none focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20
+          transition-all duration-150
           ${error ? 'border-accent-danger' : ''}
           ${className}
         `}

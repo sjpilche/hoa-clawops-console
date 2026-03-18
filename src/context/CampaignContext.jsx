@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { api } from '../lib/api';
+import { api, getToken } from '../lib/api';
 
 const CampaignContext = createContext();
 
@@ -11,8 +11,10 @@ export function CampaignProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch all campaigns on mount
+  // Fetch all campaigns on mount — skip if not authenticated
   useEffect(() => {
+    if (!getToken()) { setIsLoading(false); return; }
+
     const fetchCampaigns = async () => {
       try {
         setIsLoading(true);

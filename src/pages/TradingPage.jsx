@@ -300,50 +300,68 @@ function DashboardTab() {
         </div>
       )}
 
-      {/* ═══ VERDICT BANNER — Is This Working? ═══ */}
+      {/* ═══ STRATEGY HEALTH BANNER ═══ */}
       {perfSummary && (
-        <div className={`rounded-lg p-4 border ${
-          perfSummary.verdict === 'green' ? 'bg-accent-success/10 border-accent-success/30' :
-          perfSummary.verdict === 'red' ? 'bg-accent-danger/10 border-accent-danger/30' :
-          'bg-accent-warning/10 border-accent-warning/30'
+        <div className={`rounded-lg border ${
+          perfSummary.verdict === 'green' ? 'bg-accent-success/5 border-accent-success/30' :
+          perfSummary.verdict === 'red' ? 'bg-accent-danger/5 border-accent-danger/30' :
+          'bg-bg-secondary border-border'
         }`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`text-3xl font-black ${
-                perfSummary.verdict === 'green' ? 'text-accent-success' :
-                perfSummary.verdict === 'red' ? 'text-accent-danger' :
-                'text-accent-warning'
-              }`}>
-                {perfSummary.verdict === 'green' ? '🟢' : perfSummary.verdict === 'red' ? '🔴' : '🟡'}
-              </div>
+          {/* Header row */}
+          <div className={`px-4 py-2.5 border-b flex items-center justify-between ${
+            perfSummary.verdict === 'green' ? 'border-accent-success/20' :
+            perfSummary.verdict === 'red' ? 'border-accent-danger/20' :
+            'border-border'
+          }`}>
+            <div className="flex items-center gap-2">
+              <Activity size={13} className="text-text-muted" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Strategy Health</span>
+            </div>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+              perfSummary.verdict === 'green' ? 'bg-accent-success/15 text-accent-success' :
+              perfSummary.verdict === 'red' ? 'bg-accent-danger/15 text-accent-danger' :
+              'bg-bg-elevated text-text-muted'
+            }`}>
+              {perfSummary.verdict === 'green' ? 'Profitable' : perfSummary.verdict === 'red' ? 'Underperforming' : 'Warming Up'}
+            </span>
+          </div>
+
+          {/* Stats row */}
+          <div className="px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-4">
               <div>
-                <div className={`text-lg font-bold ${
+                <div className="text-[10px] text-text-muted uppercase tracking-wider mb-0.5">Total P&amp;L</div>
+                <div className={`text-xl font-bold tabular-nums ${
                   perfSummary.totalPnl >= 0 ? 'text-accent-success' : 'text-accent-danger'
                 }`}>
-                  {perfSummary.totalPnl >= 0 ? '+' : ''}${perfSummary.totalPnl?.toFixed(2)} ({perfSummary.totalPnlPercent?.toFixed(2)}%)
+                  {perfSummary.totalPnl >= 0 ? '+' : ''}${perfSummary.totalPnl?.toFixed(2)}
+                  <span className="text-sm font-normal ml-1 opacity-70">({perfSummary.totalPnlPercent?.toFixed(2)}%)</span>
                 </div>
-                <div className="text-xs text-text-muted">{perfSummary.verdictText}</div>
+              </div>
+              <div className="w-px h-8 bg-border/60" />
+              <div className="text-xs text-text-muted leading-relaxed">
+                {perfSummary.verdictText}
               </div>
             </div>
-            <div className="flex items-center gap-6 text-xs text-text-muted">
+            <div className="flex items-center gap-5 text-xs text-text-muted">
               <div className="text-center">
-                <div className="text-sm font-bold text-text-primary">{perfSummary.totalTrades}</div>
+                <div className="text-sm font-bold text-text-primary tabular-nums">{perfSummary.totalTrades}</div>
                 <div>Trades</div>
               </div>
               <div className="text-center">
-                <div className="text-sm font-bold text-text-primary">{(perfSummary.winRate * 100).toFixed(0)}%</div>
+                <div className="text-sm font-bold text-text-primary tabular-nums">{(perfSummary.winRate * 100).toFixed(0)}%</div>
                 <div>Win Rate</div>
               </div>
               <div className="text-center">
-                <div className="text-sm font-bold text-text-primary">{perfSummary.sharpeRatio?.toFixed(2)}</div>
+                <div className="text-sm font-bold text-text-primary tabular-nums">{perfSummary.sharpeRatio?.toFixed(2)}</div>
                 <div>Sharpe</div>
               </div>
               <div className="text-center">
-                <div className="text-sm font-bold text-text-primary">{perfSummary.maxDrawdownPercent?.toFixed(1)}%</div>
+                <div className="text-sm font-bold text-text-primary tabular-nums">{perfSummary.maxDrawdownPercent?.toFixed(1)}%</div>
                 <div>Max DD</div>
               </div>
               <div className="text-center">
-                <div className="text-sm font-bold text-text-primary">{perfSummary.profitFactor?.toFixed(2)}</div>
+                <div className="text-sm font-bold text-text-primary tabular-nums">{perfSummary.profitFactor?.toFixed(2)}</div>
                 <div>Profit Factor</div>
               </div>
             </div>
@@ -2608,6 +2626,378 @@ function KillSwitchTab() {
   );
 }
 
+// ─── Kalshi Auto-Trader Tab ──────────────────────────────────────────────────
+
+function KalshiAutoTab() {
+  const [status, setStatus] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [signals, setSignals] = useState([]);
+  const [markets, setMarkets] = useState([]);
+  const [performance, setPerformance] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [s, p, sig, m, perf, h] = await Promise.all([
+        traderApi.get('/api/kalshi/status'),
+        traderApi.get('/api/kalshi/positions'),
+        traderApi.get('/api/kalshi/signals'),
+        traderApi.get('/api/kalshi/markets'),
+        traderApi.get('/api/kalshi/performance'),
+        traderApi.get('/api/kalshi/history'),
+      ]);
+      setStatus(s);
+      setPositions(p.positions || []);
+      setSignals(sig.signals || []);
+      setMarkets(m.markets || []);
+      setPerformance(perf);
+      setHistory(h.trades || []);
+    } catch (err) {
+      console.error('Kalshi fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); const id = setInterval(refresh, 15000); return () => clearInterval(id); }, [refresh]);
+
+  const toggleBot = async () => {
+    try {
+      if (status?.running) {
+        await traderApi.post('/api/kalshi/stop');
+      } else {
+        await traderApi.post('/api/kalshi/start');
+      }
+      setTimeout(refresh, 1000);
+    } catch (err) {
+      console.error('Toggle error:', err);
+    }
+  };
+
+  if (loading) return <div className="text-text-muted p-8 text-center">Loading Kalshi Bot...</div>;
+  if (!status?.configured) return <div className="text-text-muted p-8 text-center">Kalshi not configured. Set KALSHI_API_KEY and KALSHI_PRIVATE_KEY in .env.trader</div>;
+
+  return (
+    <div className="space-y-5">
+      {/* Status Banner */}
+      <div className={`rounded-lg border p-4 ${status.running ? 'border-green-500/30 bg-green-500/5' : 'border-yellow-500/30 bg-yellow-500/5'}`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full ${status.running ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+            <div>
+              <h3 className="font-semibold text-text-primary">
+                Kalshi Auto-Trader {status.running ? '— LIVE' : '— STOPPED'}
+              </h3>
+              <p className="text-sm text-text-muted">
+                Scan #{status.scanCount} | {status.signalsLastScan} signals last scan
+                {status.lastScan && ` | Last: ${new Date(status.lastScan).toLocaleTimeString()}`}
+                {status.nextScan && ` | Next: ${new Date(status.nextScan).toLocaleTimeString()}`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-xl font-bold text-text-primary">${status.balanceDollars}</div>
+              <div className="text-xs text-text-muted">Balance</div>
+            </div>
+            <div className="text-right">
+              <div className={`text-xl font-bold ${parseFloat(status.totalPnlDollars) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {parseFloat(status.totalPnlDollars) >= 0 ? '+' : ''}${status.totalPnlDollars}
+              </div>
+              <div className="text-xs text-text-muted">Total P&L</div>
+            </div>
+            <button onClick={toggleBot}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${
+                status.running
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                  : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+              }`}>
+              <Power size={14} className="inline mr-1" />
+              {status.running ? 'Stop' : 'Start'}
+            </button>
+            <button onClick={refresh} className="p-2 text-text-muted hover:text-text-primary">
+              <RefreshCw size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      {performance && (
+        <div className="grid grid-cols-6 gap-3">
+          {[
+            { label: 'Win Rate', value: performance.winRateStr || '—', color: parseFloat(performance.winRate) >= 50 ? 'text-green-400' : 'text-text-primary' },
+            { label: 'Trades', value: performance.tradesCompleted, color: 'text-text-primary' },
+            { label: 'Open Positions', value: performance.openPositions, color: 'text-text-primary' },
+            { label: 'Realized P&L', value: `$${performance.realizedPnlDollars}`, color: parseFloat(performance.realizedPnlDollars) >= 0 ? 'text-green-400' : 'text-red-400' },
+            { label: 'Unrealized P&L', value: `$${performance.unrealizedPnlDollars}`, color: parseFloat(performance.unrealizedPnlDollars) >= 0 ? 'text-green-400' : 'text-red-400' },
+            { label: 'Daily P&L', value: `$${status.dailyPnlDollars}`, color: parseFloat(status.dailyPnlDollars) >= 0 ? 'text-green-400' : 'text-red-400' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="bg-bg-secondary rounded-lg border border-border p-3 text-center">
+              <div className={`text-lg font-bold ${color}`}>{value}</div>
+              <div className="text-xs text-text-muted">{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Open Positions */}
+      <div className="bg-bg-secondary rounded-lg border border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <Target size={14} className="text-accent-primary" />
+          <h4 className="font-medium text-text-primary">Open Positions ({positions.length})</h4>
+        </div>
+        {positions.length === 0 ? (
+          <div className="p-6 text-center text-text-muted text-sm">No open positions — bot is scanning for opportunities</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead><tr className="text-text-muted text-xs border-b border-border">
+              <th className="px-4 py-2 text-left">Market</th>
+              <th className="px-3 py-2 text-center">Side</th>
+              <th className="px-3 py-2 text-right">Contracts</th>
+              <th className="px-3 py-2 text-right">Entry</th>
+              <th className="px-3 py-2 text-right">Current</th>
+              <th className="px-3 py-2 text-right">P&L</th>
+              <th className="px-3 py-2 text-right">Signal</th>
+            </tr></thead>
+            <tbody>
+              {positions.map((p) => (
+                <tr key={p.id} className="border-b border-border/50 hover:bg-bg-primary/30">
+                  <td className="px-4 py-2 text-text-primary max-w-xs truncate">{p.title || p.ticker}</td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${p.side === 'yes' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {p.side.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right text-text-primary">{p.contracts}</td>
+                  <td className="px-3 py-2 text-right text-text-muted">{p.entryPriceDollars}</td>
+                  <td className="px-3 py-2 text-right text-text-primary">{p.currentPriceDollars}</td>
+                  <td className={`px-3 py-2 text-right font-medium ${parseFloat(p.unrealizedPnlDollars) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {parseFloat(p.unrealizedPnlDollars) >= 0 ? '+' : ''}{p.unrealizedPnlDollars} ({p.unrealizedPnlPctStr})
+                  </td>
+                  <td className="px-3 py-2 text-right text-text-muted text-xs">{p.signalType}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Active Signals */}
+      <div className="bg-bg-secondary rounded-lg border border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <Zap size={14} className="text-yellow-400" />
+          <h4 className="font-medium text-text-primary">Live Signals ({signals.length})</h4>
+        </div>
+        {signals.length === 0 ? (
+          <div className="p-4 text-center text-text-muted text-sm">No signals — building price history</div>
+        ) : (
+          <div className="divide-y divide-border/50">
+            {signals.map((s) => (
+              <div key={s.signalId} className="px-4 py-3 flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      s.action === 'buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                    }`}>{s.action.toUpperCase()}</span>
+                    <span className="text-text-primary text-sm font-medium">{s.ticker}</span>
+                    <span className="text-text-muted text-xs">@ {s.priceDollars}</span>
+                  </div>
+                  <div className="text-xs text-text-muted mt-1">{s.reason}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-medium text-text-primary">{(s.strength * 100).toFixed(0)}%</div>
+                  <div className="text-xs text-text-muted">{s.type.replace(/_/g, ' ')}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-5">
+        {/* Tracked Markets */}
+        <div className="bg-bg-secondary rounded-lg border border-border">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+            <Eye size={14} className="text-blue-400" />
+            <h4 className="font-medium text-text-primary">Tracked Markets ({markets.length})</h4>
+          </div>
+          <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
+            {markets.map((m) => (
+              <div key={m.ticker} className="px-4 py-2 text-xs">
+                <div className="text-text-primary truncate">{m.title || m.ticker}</div>
+                <div className="text-text-muted mt-0.5">
+                  Bid: {m.yesBidCents}¢ | Ask: {m.yesAskCents}¢ | Spread: {m.spreadCents}¢ | Vol: {m.volume24h}
+                </div>
+              </div>
+            ))}
+            {markets.length === 0 && <div className="p-4 text-center text-text-muted text-xs">Discovering markets...</div>}
+          </div>
+        </div>
+
+        {/* Trade History */}
+        <div className="bg-bg-secondary rounded-lg border border-border">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+            <BookOpen size={14} className="text-purple-400" />
+            <h4 className="font-medium text-text-primary">Trade History ({history.length})</h4>
+          </div>
+          <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
+            {history.map((t, i) => (
+              <div key={i} className="px-4 py-2 flex items-center justify-between text-xs">
+                <div>
+                  <div className="text-text-primary">{t.ticker}</div>
+                  <div className="text-text-muted">{t.exitReason} | {new Date(t.exitTime).toLocaleString()}</div>
+                </div>
+                <div className={`font-medium ${parseFloat(t.pnlDollars) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {parseFloat(t.pnlDollars) >= 0 ? '+' : ''}${t.pnlDollars} ({t.returnPctStr})
+                </div>
+              </div>
+            ))}
+            {history.length === 0 && <div className="p-4 text-center text-text-muted text-xs">No trades yet</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Options Lab Tab ──────────────────────────────────────────────────────────
+
+function OptionsLabTab() {
+  const [status, setStatus] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [history, setHistory] = useState([]);
+
+  const fetchAll = async () => {
+    try {
+      const [s, p, h] = await Promise.all([
+        traderApi.get('/options-lab/status'),
+        traderApi.get('/options-lab/positions'),
+        traderApi.get('/options-lab/history'),
+      ]);
+      setStatus(s);
+      setPositions(p.positions || []);
+      setHistory(h.trades || []);
+    } catch {}
+  };
+
+  useEffect(() => { fetchAll(); const t = setInterval(fetchAll, 15000); return () => clearInterval(t); }, []);
+
+  return (
+    <div className="space-y-5">
+
+      {/* Header Banner */}
+      <div className="bg-bg-secondary border border-border rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-accent-primary/10 flex items-center justify-center">
+              <TrendingUp size={16} className="text-accent-primary" />
+            </div>
+            <div>
+              <div className="font-semibold text-text-primary">Options Lab — Paper Trading</div>
+              <div className="text-xs text-text-muted mt-0.5">Kalshi prediction market signals → SPY/QQQ calls. Real Alpaca paper account. Proving the edge before going live.</div>
+            </div>
+          </div>
+          <div className="text-xs px-3 py-1.5 rounded-full bg-accent-primary/10 text-accent-primary font-medium border border-accent-primary/20">
+            PAPER MODE
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      {status && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <StatCard label="Total P&L" value={`${(status.totalPnlDollars || 0) >= 0 ? '+' : ''}$${(status.totalPnlDollars || 0).toFixed(2)}`} variant={(status.totalPnlDollars || 0) >= 0 ? 'success' : 'danger'} icon={DollarSign} />
+          <StatCard label="Trades" value={status.totalTrades || 0} variant="info" icon={Activity} />
+          <StatCard label="Win Rate" value={`${((status.winRate || 0) * 100).toFixed(0)}%`} variant={(status.winRate || 0) >= 0.5 ? 'success' : 'warning'} icon={TrendingUp} />
+          <StatCard label="Best Trade" value={`+${((status.bestTrade || 0) * 100).toFixed(0)}%`} variant="success" icon={TrendingUp} />
+          <StatCard label="Worst Trade" value={`${((status.worstTrade || 0) * 100).toFixed(0)}%`} variant="danger" icon={Activity} />
+        </div>
+      )}
+
+      {/* How It Works */}
+      <div className="bg-bg-secondary border border-border rounded-lg p-4">
+        <div className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">How It Works</div>
+        <div className="grid grid-cols-3 gap-4 text-xs">
+          <div className="flex gap-2">
+            <div className="w-5 h-5 rounded-full bg-accent-primary/10 text-accent-primary flex items-center justify-center shrink-0 font-bold text-[10px]">1</div>
+            <div><div className="text-text-primary font-medium">Kalshi Signal</div><div className="text-text-muted mt-0.5">Bot detects KXINXPOS momentum oversold — S&P EOY market dips on retail panic</div></div>
+          </div>
+          <div className="flex gap-2">
+            <div className="w-5 h-5 rounded-full bg-accent-primary/10 text-accent-primary flex items-center justify-center shrink-0 font-bold text-[10px]">2</div>
+            <div><div className="text-text-primary font-medium">Options Bridge</div><div className="text-text-muted mt-0.5">Same signal buys ATM SPY CALL on Alpaca paper — 14 DTE, max $300 premium</div></div>
+          </div>
+          <div className="flex gap-2">
+            <div className="w-5 h-5 rounded-full bg-accent-primary/10 text-accent-primary flex items-center justify-center shrink-0 font-bold text-[10px]">3</div>
+            <div><div className="text-text-primary font-medium">Leveraged Return</div><div className="text-text-muted mt-0.5">1% S&P recovery = ~5-10x on the option. Target +50% per trade, stop at -40%</div></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Open Positions */}
+      <div className="bg-bg-secondary rounded-lg border border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <Activity size={14} className="text-accent-primary" />
+          <h4 className="font-medium text-text-primary">Open Paper Positions ({positions.length})</h4>
+        </div>
+        {positions.length === 0 ? (
+          <div className="p-6 text-center text-text-muted text-sm">
+            No open positions — waiting for next Kalshi oversold signal
+          </div>
+        ) : (
+          <div className="divide-y divide-border/50">
+            {positions.map((p, i) => (
+              <div key={i} className="px-4 py-3 flex items-center justify-between text-xs">
+                <div>
+                  <div className="font-medium text-text-primary font-mono">{p.contractSymbol}</div>
+                  <div className="text-text-muted mt-0.5">{p.underlyingSymbol} CALL · {p.daysToExpiry}DTE · Entry: {p.entryPriceDollars}</div>
+                  <div className="text-text-muted">Signal: {p.kalshiSignalTicker?.slice(0, 30)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-text-muted">Premium paid</div>
+                  <div className="font-medium text-text-primary">{p.premiumPaid}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Trade History */}
+      <div className="bg-bg-secondary rounded-lg border border-border">
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <BookOpen size={14} className="text-purple-400" />
+          <h4 className="font-medium text-text-primary">Paper Trade History ({history.length})</h4>
+        </div>
+        {history.length === 0 ? (
+          <div className="p-6 text-center text-text-muted text-sm">No closed trades yet — history builds as positions open and close</div>
+        ) : (
+          <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
+            {history.map((t, i) => (
+              <div key={i} className="px-4 py-2 flex items-center justify-between text-xs">
+                <div>
+                  <div className="font-mono text-text-primary">{t.contractSymbol}</div>
+                  <div className="text-text-muted">{t.exitReason} · {t.exitDate ? new Date(t.exitDate).toLocaleString() : '--'}</div>
+                </div>
+                <div className={`font-medium ${(t.pnlDollars || 0) >= 0 ? 'text-accent-success' : 'text-accent-danger'}`}>
+                  {t.pnlFormatted} ({t.returnFormatted})
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Go Live CTA */}
+      <div className="bg-accent-primary/5 border border-accent-primary/20 rounded-lg p-4 text-center">
+        <div className="text-sm font-medium text-text-primary mb-1">Path to Real Money</div>
+        <div className="text-xs text-text-muted">Paper trade for 30 days · Achieve 40%+ win rate + positive Sharpe · Then fund a real options account and run live</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -2615,6 +3005,8 @@ const TABS = [
   { id: 'ai-panel',    label: 'AI Panel',     icon: Zap },
   { id: 'brain',       label: 'Brain',        icon: Brain },
   { id: 'performance', label: 'Performance',  icon: BarChart3 },
+  { id: 'kalshi',      label: 'Kalshi Bot',   icon: DollarSign },
+  { id: 'options-lab', label: 'Options Lab',  icon: TrendingUp },
   { id: 'polymarket',  label: 'Polymarket',   icon: Target },
   { id: 'copy-trade',  label: 'Copy Trade',   icon: Users },
   { id: 'strategies',  label: 'Strategies',   icon: Activity },
@@ -2664,6 +3056,8 @@ export default function TradingPage() {
         {activeTab === 'ai-panel'    && <AIPanelTab />}
         {activeTab === 'brain'       && <BrainTab />}
         {activeTab === 'performance' && <PerformanceTab />}
+        {activeTab === 'kalshi'      && <KalshiAutoTab />}
+        {activeTab === 'options-lab' && <OptionsLabTab />}
         {activeTab === 'polymarket'  && <PolymarketTab />}
         {activeTab === 'copy-trade'  && <CopyTradeTab />}
         {activeTab === 'strategies'  && <StrategiesTab />}

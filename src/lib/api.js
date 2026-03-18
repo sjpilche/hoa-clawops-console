@@ -74,10 +74,13 @@ async function request(endpoint, options = {}) {
       headers,
     });
 
-    // Handle 401 — token missing or expired, redirect to login
+    // Handle 401 — token missing or expired
     if (response.status === 401) {
       removeToken();
-      window.location.href = '/login';
+      // Only redirect if we're NOT already on the login page (prevents infinite loop)
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
       throw new Error('Authentication required');
     }
 

@@ -54,15 +54,15 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Branding */}
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-accent-primary flex items-center justify-center mx-auto mb-4">
+          <div className="w-14 h-14 rounded-2xl bg-accent-primary flex items-center justify-center mx-auto mb-4 shadow-lg shadow-accent-primary/30">
             <span className="text-bg-primary font-bold text-2xl">C</span>
           </div>
-          <h1 className="text-2xl font-semibold text-text-primary">ClawOps Console</h1>
-          <p className="text-sm text-text-muted mt-1">Browser Automation Command Center</p>
+          <h1 className="text-2xl font-bold text-text-primary tracking-tight">ClawOps</h1>
+          <p className="text-xs text-text-muted mt-1 font-mono tracking-wider uppercase">Console v2</p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-bg-secondary border border-border rounded-xl p-6">
+        <div className="bg-bg-secondary border border-border rounded-xl p-6 shadow-xl shadow-black/20">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <Input
               label="Email"

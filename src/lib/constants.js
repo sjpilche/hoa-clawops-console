@@ -3,43 +3,75 @@
  * @description App-wide constants. Single source of truth for magic values.
  */
 
-/** Navigation items for the sidebar */
-export const NAV_ITEMS = [
-  { path: '/', label: 'Dashboard', icon: 'LayoutDashboard' },
-  { path: '/mission-control', label: 'System Monitor', icon: 'Crosshair' },
-  { path: '/chat', label: 'Agent Chat', icon: 'MessageSquare' },
-  { path: '/domains', label: 'Domains', icon: 'Globe' },
-  { path: '/agents', label: 'Agents', icon: 'Bot' },
-  { path: '/hierarchy', label: 'Hierarchy', icon: 'GitBranch' },
-  { path: '/directory', label: 'Directory', icon: 'Users' },
-  { path: '/extensions', label: 'Extensions', icon: 'Puzzle' },
-  { path: '/tools', label: 'Tools', icon: 'Wrench' },
-  { path: '/schedule', label: 'Scheduler', icon: 'Clock' },
-  { path: '/monitor', label: 'Monitor', icon: 'Activity' },
-  { path: '/results', label: 'Results', icon: 'Database' },
-  { path: '/lead-gen', label: 'Lead Gen', icon: 'Users' },
-  { path: '/discovery', label: 'Discovery', icon: 'MapPin' },
-  { path: '/mgmt-research', label: 'Mgmt Research', icon: 'Building' },
-  { path: '/jake-marketing', label: 'Jake Marketing', icon: 'Zap' },
-  { path: '/owen-marketing', label: 'Owen CFO', icon: 'Zap' },
-  { path: '/data-rehab', label: 'Data Rehab', icon: 'Database' },
-  { path: '/pipeline-health', label: 'Pipeline Health', icon: 'Activity' },
-  { path: '/hoa-leads', label: 'HOA Contacts', icon: 'Building2' },
-  { path: '/livempaint', label: 'Livempaint', icon: 'Users' },
-  { path: '/engagement-queue', label: 'Engagement Queue', icon: 'MessageSquare' },
-  { path: '/facebook-leads', label: 'FB Leads', icon: 'Facebook' },
-  { path: '/content-queue', label: 'Content Queue', icon: 'Send' },
-  { path: '/blitz', label: 'Blitz Mode', icon: 'Zap' },
-  { path: '/pipelines', label: 'Pipelines', icon: 'GitMerge' },
-  { path: '/trading', label: 'Trader', icon: 'TrendingUp' },
-  { path: '/opportunities', label: 'Opportunities', icon: 'Radar' },
-  { path: '/rse', label: 'Signal Engine', icon: 'Radio' },
-  { path: '/audit', label: 'Audit Log', icon: 'Shield' },
-  { path: '/revenue', label: 'Revenue', icon: 'DollarSign' },
-  { path: '/costs', label: 'Costs', icon: 'DollarSign' },
-  { path: '/help', label: 'Help', icon: 'HelpCircle' },
-  { path: '/settings', label: 'Settings', icon: 'Settings' },
+/** Navigation items for the sidebar — grouped by section */
+export const NAV_SECTIONS = [
+  {
+    label: 'Command',
+    items: [
+      { path: '/', label: 'Dashboard', icon: 'LayoutDashboard' },
+      { path: '/mission-control', label: 'System Monitor', icon: 'Crosshair' },
+      { path: '/chat', label: 'Agent Chat', icon: 'MessageSquare' },
+    ],
+  },
+  {
+    label: 'Agents',
+    items: [
+      { path: '/agents', label: 'Agents', icon: 'Bot' },
+      { path: '/directory', label: 'Directory', icon: 'Users' },
+      { path: '/hierarchy', label: 'Hierarchy', icon: 'GitBranch' },
+      { path: '/schedule', label: 'Scheduler', icon: 'Clock' },
+      { path: '/monitor', label: 'Monitor', icon: 'Activity' },
+      { path: '/results', label: 'Results', icon: 'Database' },
+    ],
+  },
+  {
+    label: 'Revenue',
+    items: [
+      { path: '/revenue', label: 'Revenue', icon: 'DollarSign' },
+      { path: '/rse', label: 'Signal Engine', icon: 'Radio' },
+      { path: '/opportunities', label: 'Opportunities', icon: 'Radar' },
+      { path: '/trading', label: 'Trader', icon: 'TrendingUp' },
+    ],
+  },
+  {
+    label: 'Outreach',
+    items: [
+      { path: '/jake-marketing', label: 'Jake Outreach', icon: 'Zap' },
+      { path: '/data-rehab', label: 'Data Rehab', icon: 'Database' },
+      { path: '/hoa-leads', label: 'HOA Contacts', icon: 'Building2' },
+      { path: '/lead-gen', label: 'Lead Gen', icon: 'Users' },
+      { path: '/engagement-queue', label: 'Engagement', icon: 'MessageSquare' },
+      { path: '/content-queue', label: 'Content Queue', icon: 'Send' },
+      { path: '/blitz', label: 'Blitz Mode', icon: 'Zap' },
+    ],
+  },
+  {
+    label: 'Research',
+    items: [
+      { path: '/discovery', label: 'Discovery', icon: 'MapPin' },
+      { path: '/mgmt-research', label: 'Mgmt Research', icon: 'Building2' },
+      { path: '/pipeline-health', label: 'Pipeline Health', icon: 'Activity' },
+      { path: '/pipelines', label: 'Pipelines', icon: 'GitMerge' },
+      { path: '/facebook-leads', label: 'FB Leads', icon: 'Facebook' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { path: '/domains', label: 'Domains', icon: 'Globe' },
+      { path: '/extensions', label: 'Extensions', icon: 'Puzzle' },
+      { path: '/tools', label: 'Tools', icon: 'Wrench' },
+      { path: '/livempaint', label: 'Livempaint', icon: 'Users' },
+      { path: '/audit', label: 'Audit Log', icon: 'Shield' },
+      { path: '/costs', label: 'Costs', icon: 'DollarSign' },
+      { path: '/settings', label: 'Settings', icon: 'Settings' },
+      { path: '/help', label: 'Help', icon: 'HelpCircle' },
+    ],
+  },
 ];
+
+/** Flat list for backward compatibility */
+export const NAV_ITEMS = NAV_SECTIONS.flatMap(s => s.items);
 
 /** Agent status values and their display properties */
 export const AGENT_STATUS = {

@@ -72,7 +72,14 @@ const useSettingsStore = create((set, get) => ({
     }
 
     try {
-      const data = await api.get('/auth/me');
+      // Use raw fetch instead of api.get() to avoid the 401 → redirect loop.
+      // The api client redirects to /login on 401, but checkAuth needs to
+      // handle 401 gracefully (just clear the token, don't redirect).
+      const response = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error('Token invalid');
+      const data = await response.json();
       set({ user: data.user, isAuthenticated: true, isLoading: false });
     } catch (error) {
       // Token is invalid, expired, or server unreachable
