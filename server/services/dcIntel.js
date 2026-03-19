@@ -1895,6 +1895,7 @@ Reply ONLY with valid JSON (no markdown, no explanation):
  */
 async function dcIntelDominionMonitor({ message, runId, agent }) {
   const startTime = Date.now();
+  const MAX_RUNTIME_MS = 3 * 60 * 1000; // 3-minute wall clock limit
 
   let params = {};
   try { params = JSON.parse(message); } catch {}
@@ -1924,6 +1925,11 @@ async function dcIntelDominionMonitor({ message, runId, agent }) {
   const signalsSeen = new Set();
 
   for (const query of SCC_QUERIES) {
+    // Bail out if we've been running too long
+    if (Date.now() - startTime > MAX_RUNTIME_MS) {
+      console.log('[dcIntelDominionMonitor] Reached max runtime — stopping early');
+      break;
+    }
     try {
       const results = await braveSearch(query, 5, 'pm'); // past month
       await sleep(1500);
@@ -1978,18 +1984,8 @@ async function dcIntelDominionMonitor({ message, runId, agent }) {
           isDCSignal ? 'Data center / hyperscaler activity confirmed.' : '',
         ].filter(Boolean).join(' ').slice(0, 500);
 
-        // Find a matching opportunity to attach note to (or post as market note)
-        let opportunityId = null;
-        try {
-          // Look for active opportunities in the same county
-          const opps = await dcGet(`/opportunities?limit=5&county=${encodeURIComponent(county || 'Loudoun')}&state=VA`);
-          if (opps && opps.length > 0) {
-            opportunityId = opps[0].id;
-          }
-        } catch {} // non-fatal — will post without opp link
-
+        // Post as market-level intel (no specific opportunity link required)
         await dcPost('/webhooks/openclaw/intel-note', {
-          opportunity_id: opportunityId,
           note_type: noteType,
           confidence,
           content,
