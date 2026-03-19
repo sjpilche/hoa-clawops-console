@@ -35,50 +35,57 @@ function llm(system, user, maxTokens = 1024) {
 // DREAM TEAM ROSTER + METRICS DEFINITIONS
 // ════════════════════════════════════════════════════════════════════════════
 
+// ── REVENUE-ALIGNED SCORING ──────────────────────────────────────────────────
+// Every agent's #1 dimension ties to revenue. Activity without outcomes = F.
 const DREAM_TEAM = {
   todd: {
     label: 'Todd',
+    role: 'Chief of Staff',
     dims: [
-      { name: 'Routing Accuracy', weight: 0.30, query: (d) => `${d.runs_completed} runs completed, ${d.runs_failed} failed` },
-      { name: 'Briefing Completeness', weight: 0.25, query: (d) => `Morning digest ${d.digest_posted ? 'posted' : 'MISSED'}` },
-      { name: 'Blocker Detection', weight: 0.25, query: (d) => `${d.failed_runs_flagged}/${d.runs_failed} failures flagged` },
-      { name: 'Cost Management', weight: 0.20, query: (d) => `$${d.total_cost.toFixed(4)} spent (budget $5)` },
+      { name: 'Routing Accuracy', weight: 0.20, query: (d) => `${d.runs_completed} runs completed, ${d.runs_failed} failed` },
+      { name: 'Pipeline Velocity', weight: 0.35, query: (d) => `${d.pipeline_advances_today} leads advanced stages today out of ${d.active_leads} active` },
+      { name: 'Revenue Progress', weight: 0.25, query: (d) => `${d.meetings_booked_7d} meetings + ${d.pilots_started_7d} pilots this week` },
+      { name: 'Cost Per Outcome', weight: 0.20, query: (d) => `$${d.total_cost.toFixed(2)} spent / ${d.replies_today + d.meetings_booked_7d} outcomes = $${(d.replies_today + d.meetings_booked_7d) > 0 ? (d.total_cost / (d.replies_today + d.meetings_booked_7d)).toFixed(2) : '∞'}/outcome` },
     ],
   },
   scout: {
     label: 'Scout',
+    role: 'Research & Discovery',
     dims: [
-      { name: 'Lead Volume', weight: 0.25, query: (d) => `${d.leads_discovered} leads found` },
-      { name: 'Enrichment Hit Rate', weight: 0.30, query: (d) => `${d.enrichment_with_email}/${d.enrichment_attempted} emails found (${d.enrichment_rate}%)` },
-      { name: 'Data Quality', weight: 0.25, query: (d) => `${d.leads_complete}/${d.leads_discovered} with full data` },
-      { name: 'Signal Freshness', weight: 0.20, query: (d) => `${d.brain_observations} observations written` },
+      { name: 'Lead Quality', weight: 0.35, query: (d) => `${d.leads_that_replied_30d}/${d.leads_discovered_30d} leads replied in 30d (${d.leads_discovered_30d > 0 ? Math.round(d.leads_that_replied_30d / d.leads_discovered_30d * 100) : 0}% reply rate)` },
+      { name: 'Enrichment Hit Rate', weight: 0.25, query: (d) => `${d.enrichment_with_email}/${d.enrichment_attempted} emails found (${d.enrichment_rate}%)` },
+      { name: 'Market Targeting', weight: 0.25, query: (d) => `${d.top_market_leads} leads from top markets out of ${d.leads_discovered} total (${d.leads_discovered > 0 ? Math.round(d.top_market_leads / d.leads_discovered * 100) : 0}%)` },
+      { name: 'Signal Freshness', weight: 0.15, query: (d) => `${d.brain_observations} observations written` },
     ],
   },
   charlie: {
     label: 'Charlie',
+    role: 'Builder',
     dims: [
-      { name: 'Build Completion', weight: 0.30, query: (d) => `${d.builds_completed}/${d.builds_attempted} builds succeeded` },
-      { name: 'QA Pass Rate', weight: 0.30, query: (d) => `${d.qa_passes}/${d.qa_submissions} passed Ralph first try` },
-      { name: 'Build Speed', weight: 0.20, query: (d) => `avg ${d.avg_build_duration_s}s per build` },
+      { name: 'Build Completion', weight: 0.25, query: (d) => `${d.builds_completed}/${d.builds_attempted} builds succeeded` },
+      { name: 'QA Pass Rate', weight: 0.25, query: (d) => `${d.qa_passes}/${d.qa_submissions} passed Ralph first try` },
+      { name: 'Feature Adoption', weight: 0.30, query: (d) => `${d.content_published_7d} content pieces published + ${d.emails_sent} outreach sent this week using his templates` },
       { name: 'Cost Efficiency', weight: 0.20, query: (d) => `$${d.avg_build_cost.toFixed(3)}/build avg` },
     ],
   },
   ralph: {
     label: 'Ralph',
+    role: 'QA Gate',
     dims: [
-      { name: 'Review Volume', weight: 0.25, query: (d) => `${d.reviews_completed} reviews done` },
-      { name: 'False Pass Rate', weight: 0.25, query: (d) => `${d.false_passes} items passed then failed later` },
-      { name: 'Review Speed', weight: 0.25, query: (d) => `avg ${d.avg_review_duration_s}s per review` },
-      { name: 'Pattern Documentation', weight: 0.25, query: (d) => `${d.brain_observations} observations written` },
+      { name: 'Catch Rate', weight: 0.30, query: (d) => `${d.voice_rejections} items flagged — are these true problems? (${d.false_passes} false passes found later)` },
+      { name: 'False Pass Rate', weight: 0.30, query: (d) => `${d.ralph_approved_bounced}/${d.ralph_approved_total} Ralph-approved emails bounced (${d.ralph_approved_total > 0 ? Math.round(d.ralph_approved_bounced / d.ralph_approved_total * 100) : 0}%)` },
+      { name: 'Review Coverage', weight: 0.20, query: (d) => `${d.qa_submissions}/${d.emails_drafted + d.content_drafted} items reviewed out of total created` },
+      { name: 'Bounce Prevention', weight: 0.20, query: (d) => `Overall bounce rate: ${d.bounce_rate_7d}% — Ralph's approved bounce rate: ${d.ralph_bounce_rate}%` },
     ],
   },
   quill: {
     label: 'Quill',
+    role: 'Content & Outreach',
     dims: [
-      { name: 'Output Volume', weight: 0.20, query: (d) => `${d.content_drafted} pieces drafted` },
-      { name: 'QA Pass Rate', weight: 0.30, query: (d) => `${d.qa_passes}/${d.qa_submissions} passed Ralph` },
-      { name: 'Reply Rate', weight: 0.30, query: (d) => `${d.emails_replied}/${d.emails_sent} got replies (${d.reply_rate}%)` },
-      { name: 'Voice Consistency', weight: 0.20, query: (d) => `${d.voice_rejections} voice rejections` },
+      { name: 'Reply Rate', weight: 0.40, query: (d) => `${d.emails_replied}/${d.emails_sent} got replies (${d.reply_rate}%) — THIS IS THE #1 METRIC` },
+      { name: 'Meeting Rate', weight: 0.25, query: (d) => `${d.meetings_booked_7d} meetings booked from outreach this week` },
+      { name: 'QA Pass Rate', weight: 0.20, query: (d) => `${d.qa_passes}/${d.qa_submissions} passed Ralph` },
+      { name: 'Pilot Offer Inclusion', weight: 0.15, query: (d) => `${d.emails_with_pilot_offer}/${d.emails_total_today} emails include pilot offer CTA (${d.emails_total_today > 0 ? Math.round(d.emails_with_pilot_offer / d.emails_total_today * 100) : 0}%)` },
     ],
   },
 };
@@ -140,13 +147,56 @@ function collectDailyData() {
   data.enrichment_with_email = get("SELECT COUNT(*) c FROM cfo_leads WHERE DATE(enriched_at)=? AND contact_email IS NOT NULL", [today])?.c || 0;
   data.enrichment_rate = data.enrichment_attempted > 0 ? Math.round((data.enrichment_with_email / data.enrichment_attempted) * 100) : 0;
   data.reply_rate = data.emails_sent > 0 ? Math.round((data.emails_replied / data.emails_sent) * 100) : 0;
-  data.failed_runs_flagged = data.runs_failed; // Assume all flagged for now
+  data.failed_runs_flagged = data.runs_failed;
+
+  // ── REVENUE METRICS (the ones that actually matter) ──
+  data.leads_that_replied_30d = get("SELECT COUNT(*) c FROM cfo_leads WHERE status IN ('replied','meeting_booked','pilot','closed_won') AND updated_at > datetime('now', '-30 days')")?.c || 0;
+  data.leads_discovered_30d = get("SELECT COUNT(*) c FROM cfo_leads WHERE created_at > datetime('now', '-30 days')")?.c || 0;
+  data.meetings_booked_7d = get("SELECT COUNT(*) c FROM cfo_leads WHERE status = 'meeting_booked' AND updated_at > datetime('now', '-7 days')")?.c || 0;
+  data.pilots_started_7d = get("SELECT COUNT(*) c FROM cfo_leads WHERE status = 'pilot' AND updated_at > datetime('now', '-7 days')")?.c || 0;
+  data.active_leads = get("SELECT COUNT(*) c FROM cfo_leads WHERE cadence_active = 1")?.c || 0;
+  data.replies_today = get("SELECT COUNT(*) c FROM cfo_leads WHERE status = 'replied' AND DATE(updated_at) = ?", [today])?.c || 0;
+  data.emails_with_pilot_offer = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE pilot_offer IS NOT NULL AND DATE(created_at) = ?", [today])?.c || 0;
+  data.emails_total_today = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(created_at) = ?", [today])?.c || 0;
+  data.content_published_7d = get("SELECT COUNT(*) c FROM cfo_content_pieces WHERE status = 'approved' AND updated_at > datetime('now', '-7 days')")?.c || 0;
+
+  // Pipeline velocity
+  try {
+    data.pipeline_advances_today = get("SELECT COUNT(*) c FROM pipeline_events WHERE DATE(created_at) = ?", [today])?.c || 0;
+  } catch { data.pipeline_advances_today = 0; }
+
+  // Market targeting — leads from top-performing markets
+  try {
+    const topMarkets = all(`
+      SELECT city || ', ' || state as market FROM cfo_leads
+      WHERE status IN ('replied','meeting_booked','pilot','closed_won') AND city IS NOT NULL
+      GROUP BY city, state ORDER BY COUNT(*) DESC LIMIT 5
+    `).map(m => m.market);
+    if (topMarkets.length > 0) {
+      const placeholders = topMarkets.map(() => '?').join(',');
+      data.top_market_leads = get(`SELECT COUNT(*) c FROM cfo_leads WHERE DATE(created_at) = ? AND (city || ', ' || state) IN (${placeholders})`, [today, ...topMarkets])?.c || 0;
+    } else {
+      data.top_market_leads = 0;
+    }
+  } catch { data.top_market_leads = 0; }
+
+  // Ralph QA effectiveness — bounce rate on Ralph-approved emails
+  data.ralph_approved_bounced = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE qa_status = 'passed' AND status = 'bounced'")?.c || 0;
+  data.ralph_approved_total = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE qa_status = 'passed' AND status IN ('sent', 'delivered', 'bounced')")?.c || 0;
+  data.ralph_bounce_rate = data.ralph_approved_total > 0 ? Math.round((data.ralph_approved_bounced / data.ralph_approved_total) * 100) + '%' : '0%';
+
+  // Overall bounce rate (7d)
+  try {
+    const sent7d = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE sent_at > datetime('now', '-7 days') AND status IN ('sent','delivered','bounced')")?.c || 0;
+    const bounced7d = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE sent_at > datetime('now', '-7 days') AND status = 'bounced'")?.c || 0;
+    data.bounce_rate_7d = sent7d > 0 ? Math.round((bounced7d / sent7d) * 100) + '%' : '0%';
+  } catch { data.bounce_rate_7d = '0%'; }
 
   // Build per-agent summaries
   data.builds_attempted = 0;
   data.builds_completed = 0;
 
-  // Ralph QA metrics — pull from real data
+  // Ralph QA metrics
   data.qa_submissions = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(qa_reviewed_at) = ?", [today])?.c || 0;
   data.qa_passes = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(qa_reviewed_at) = ? AND qa_status = 'passed'", [today])?.c || 0;
   data.reviews_completed = data.qa_submissions;

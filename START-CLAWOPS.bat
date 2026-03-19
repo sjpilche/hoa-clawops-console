@@ -15,7 +15,7 @@ start "OpenClaw Gateway" cmd /k "openclaw gateway start"
 timeout /t 3 /nobreak >nul
 
 echo [3/3] Starting ClawOps (Server + Vite + Trader)...
-cd /d "c:\Users\SPilcher\OpenClaw2.0 for linux - Copy"
+cd /d "c:\Users\steve\Code\hoa-clawops-console"
 start "ClawOps Dev" cmd /k "npm run dev"
 
 echo.

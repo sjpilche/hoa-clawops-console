@@ -20,16 +20,19 @@ const discordNotifier     = require('./discordNotifier');
 
 // ── 1. Activate newly enriched leads ────────────────────────────────────────
 
-function activateNewLeads() {
+function activateNewLeads(maxPerCycle = 100) {
+  // Constitution: "Any enriched lead sitting >24h without entering cadence gets forced in."
+  // Cap per cycle to avoid overwhelming sending capacity.
   const leads = all(`
-    SELECT l.id, l.company_name, l.contact_email, l.status
+    SELECT l.id, l.company_name, l.contact_email, l.status, l.urgency_score
     FROM cfo_leads l
     WHERE l.enrichment_status = 'enriched'
       AND l.contact_email IS NOT NULL
       AND (l.cadence_active IS NULL OR l.cadence_active = 0)
       AND (l.status IS NULL OR l.status NOT IN ('interested', 'unsubscribed', 'bounced', 'converted'))
-      AND l.id NOT IN (SELECT DISTINCT lead_id FROM cadence_touches)
-  `);
+    ORDER BY l.urgency_score DESC, l.created_at ASC
+    LIMIT ?
+  `, [maxPerCycle]);
 
   if (!leads || leads.length === 0) {
     return { activated: 0, leads: [] };

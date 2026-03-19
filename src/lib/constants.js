@@ -9,6 +9,7 @@ export const NAV_SECTIONS = [
     label: 'Command',
     items: [
       { path: '/', label: 'Dashboard', icon: 'LayoutDashboard' },
+      { path: '/dream-team', label: 'Dream Team', icon: 'Award' },
       { path: '/mission-control', label: 'System Monitor', icon: 'Crosshair' },
       { path: '/chat', label: 'Agent Chat', icon: 'MessageSquare' },
     ],

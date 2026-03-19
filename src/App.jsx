@@ -108,6 +108,7 @@ import RSEEnginePage from '@/pages/RSEEnginePage';
 import AgentDirectoryPage from '@/pages/AgentDirectoryPage';
 import RevenueDashboard from '@/pages/RevenueDashboard';
 import BrainPage from '@/pages/BrainPage';
+import DreamTeamPage from '@/pages/DreamTeamPage';
 
 /**
  * Protected Route wrapper.
@@ -172,6 +173,7 @@ export default function App() {
         <Route path="/rse" element={<RSEEnginePage />} />
         <Route path="/revenue" element={<RevenueDashboard />} />
         <Route path="/brain" element={<BrainPage />} />
+        <Route path="/dream-team" element={<DreamTeamPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />

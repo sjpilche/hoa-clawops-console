@@ -369,7 +369,7 @@ function DisabledAgentsSection({ scorecards }) {
     },
   });
 
-  const disabledAgents = agents || [];
+  const disabledAgents = Array.isArray(agents) ? agents : agents?.agents || [];
 
   return (
     <div>
@@ -1694,7 +1694,15 @@ export default function RSEEnginePage() {
 
       {/* Tab Content */}
       {activeTab === 'stats' && <StatsTab stats={stats} />}
-      {activeTab === 'dreamteam' && <DreamTeamTab />}
+      {activeTab === 'dreamteam' && (
+        <div className="flex flex-col items-center justify-center py-16 gap-4">
+          <Shield size={40} className="text-amber-400" />
+          <p className="text-sm text-text-secondary">Dream Team has its own command center now</p>
+          <a href="/dream-team" className="px-4 py-2 bg-accent-primary text-white rounded-lg text-sm font-medium hover:bg-accent-primary/90 transition-colors">
+            Open Dream Team →
+          </a>
+        </div>
+      )}
       {activeTab === 'ranked' && <RankedIdeasTab />}
       {activeTab === 'tasks' && <TaskBoardTab />}
       {activeTab === 'sources' && <SourcesTab />}

@@ -4091,6 +4091,8 @@ SPECIAL_HANDLERS.dc_intel_rto_scanner = dcIntel.dcIntelRTOScanner;
 SPECIAL_HANDLERS.dc_intel_planning_scanner = dcIntel.dcIntelPlanningScanner;
 SPECIAL_HANDLERS.dc_intel_distress_scanner = dcIntel.dcIntelDistressScanner;
 SPECIAL_HANDLERS.dc_intel_meta_reviewer = dcIntel.dcIntelMetaReviewer;
+SPECIAL_HANDLERS.dc_intel_weekly_digest = dcIntel.dcIntelWeeklyDigest;
+SPECIAL_HANDLERS.dc_intel_dominion_monitor = dcIntel.dcIntelDominionMonitor;
 
 // ════════════════════════════════════════════════════════════════════════════
 // ROUTES

@@ -1877,6 +1877,189 @@ Reply ONLY with valid JSON (no markdown, no explanation):
 }
 
 
+// ── Handler: dc_intel_dominion_monitor ────────────────────────────────────────
+
+/**
+ * Weekly Mon 8am — scans Virginia SCC docket and Dominion Energy sources for
+ * new large power service filings that signal hyperscaler site-selection activity
+ * in Loudoun and Prince William counties.
+ *
+ * Primary sources:
+ *   1. Virginia SCC docket (Brave Search targeting site:scc.virginia.gov)
+ *      — PUR-YYYY-XXXXX cases for Dominion Energy large power/interconnection
+ *   2. Interconnection.fyi VA large load requests
+ *   3. Dominion Energy ICA / queue updates
+ *   4. SEC 8-K filings (hyperscaler land acquisitions in NoVA)
+ *
+ * Posts utility_intel notes to DC Site Intel when new signals found.
+ */
+async function dcIntelDominionMonitor({ message, runId, agent }) {
+  const startTime = Date.now();
+
+  let params = {};
+  try { params = JSON.parse(message); } catch {}
+  const targetCounties = params.counties || ['Loudoun', 'Prince William'];
+
+  const SCC_QUERIES = [
+    // SCC docket filings — Dominion large power in target counties
+    'site:scc.virginia.gov "Dominion" "large load" OR "large power" OR "transmission" "Loudoun" OR "Prince William" 2025 OR 2026',
+    // SCC PUR case number format search
+    'site:scc.virginia.gov PUR-2025 OR PUR-2026 "Dominion" "Loudoun" OR "Prince William" OR "Northern Virginia"',
+    // Dominion ICA and interconnection capacity news
+    '"Dominion Energy" "interconnection" OR "large load" "Loudoun" OR "Prince William" "data center" 2025 OR 2026',
+    // Virginia SCC + power capacity + hyperscaler signals
+    '"Virginia SCC" OR "State Corporation Commission" "Dominion" "data center" OR "hyperscale" "Northern Virginia" 2025 OR 2026',
+    // SEC 8-K — hyperscaler land acquisitions in NoVA
+    'site:sec.gov 8-K "Loudoun" OR "Prince William" "data center" OR "land" acquisition 2025 OR 2026',
+    // Interconnection.fyi VA large loads
+    'site:interconnection.fyi Virginia "large load" OR "data center" Dominion 2025 OR 2026',
+    // Dominion queue reports and capacity announcements
+    '"Dominion Energy" "queue" OR "ICA" "Northern Virginia" OR "NoVA" "capacity" "megawatt" OR "MW" 2025 OR 2026',
+    // Data center developers filing with SCC
+    '"Prince William" OR "Loudoun" "substation" OR "transmission" "new" 2025 OR 2026 data center site:bizjournals.com OR site:datacenterdynamics.com OR site:datacenterknowledge.com',
+  ];
+
+  let notesCreated = 0;
+  let errors = 0;
+  const signalsSeen = new Set();
+
+  for (const query of SCC_QUERIES) {
+    try {
+      const results = await braveSearch(query, 5, 'pm'); // past month
+      await sleep(1500);
+
+      for (const r of results) {
+        const key = r.url || r.title;
+        if (signalsSeen.has(key)) continue;
+        signalsSeen.add(key);
+
+        const text = `${r.title || ''} ${r.description || ''}`;
+
+        // Filter to only meaningful power/DC signals
+        const isPowerSignal = /dominion|substation|transmission|megawatt|\bMW\b|interconnect|large.?load|power.?service|capacity|kilowatt|\bkV\b/i.test(text);
+        const isDCSignal = /data.?center|hyperscal|colocation|campus|compute|ai.?infra|server.?farm/i.test(text);
+        const isCountySignal = /loudoun|prince.?william|ashburn|manassas|chantilly|northern.?virginia|NoVA/i.test(text);
+        const isSCCSignal = /\bSCC\b|virginia.?state.?corp|PUR-\d{4}|efile\.scc|scc\.virginia/i.test(text);
+
+        // Must match county + (power OR SCC signal)
+        if (!isCountySignal) continue;
+        if (!isPowerSignal && !isSCCSignal) continue;
+
+        // Determine note type and confidence
+        let noteType = 'utility_intel';
+        let confidence = 'medium';
+        let county = null;
+
+        if (/loudoun/i.test(text)) county = 'Loudoun';
+        else if (/prince.?william|manassas|woodbridge/i.test(text)) county = 'Prince William';
+
+        if (isSCCSignal) confidence = 'high'; // official gov source
+        if (r.url && r.url.includes('sec.gov')) {
+          noteType = 'market_intel';
+          confidence = 'high'; // SEC 8-K is primary source
+        }
+        if (r.url && r.url.includes('interconnection.fyi')) {
+          confidence = 'high'; // primary data source
+        }
+
+        // Extract MW signal if present
+        const mwMatch = text.match(/(\d[\d,.]*)\s*(?:MW|megawatt|GW|gigawatt)/i);
+        const mwStr = mwMatch ? ` | ${mwMatch[0]}` : '';
+
+        // Extract SCC case number if present
+        const caseMatch = text.match(/PUR-\d{4}-\d{5}/i);
+        const caseStr = caseMatch ? ` | SCC Case: ${caseMatch[0]}` : '';
+
+        const content = [
+          `[${county || 'Northern VA'}] DOMINION POWER SIGNAL${mwStr}${caseStr}`,
+          `data_center_land power_infrastructure utility_intel`,
+          `Source: ${r.title}.`,
+          (r.description || '').slice(0, 280),
+          isDCSignal ? 'Data center / hyperscaler activity confirmed.' : '',
+        ].filter(Boolean).join(' ').slice(0, 500);
+
+        // Find a matching opportunity to attach note to (or post as market note)
+        let opportunityId = null;
+        try {
+          // Look for active opportunities in the same county
+          const opps = await dcGet(`/opportunities?limit=5&county=${encodeURIComponent(county || 'Loudoun')}&state=VA`);
+          if (opps && opps.length > 0) {
+            opportunityId = opps[0].id;
+          }
+        } catch {} // non-fatal — will post without opp link
+
+        await dcPost('/webhooks/openclaw/intel-note', {
+          opportunity_id: opportunityId,
+          note_type: noteType,
+          confidence,
+          content,
+          source: 'dominion_monitor',
+          source_url: r.url || null,
+          authored_by: 'openclaw',
+        });
+
+        notesCreated++;
+        console.log(`[dcIntelDominionMonitor] Posted: ${r.title?.slice(0, 60)}`);
+        await sleep(800);
+      }
+    } catch (err) {
+      console.error(`[dcIntelDominionMonitor] Query failed:`, err.message);
+      errors++;
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  const outputText = `DC Intel Dominion Monitor: ${notesCreated} signals posted, ${errors} errors, ${signalsSeen.size} URLs scanned in ${(durationMs / 1000).toFixed(1)}s`;
+
+  try {
+    const brain = require('./collectiveBrain');
+    brain.observe(
+      `dc-intel-${new Date().toISOString().slice(0, 10)}`,
+      'dc-intel-dominion-monitor', 'market_insight',
+      {
+        subject: 'Dominion Energy + SCC power filing scan',
+        content: outputText,
+        confidence: 0.8,
+        metadata: { notes_created: notesCreated, urls_scanned: signalsSeen.size },
+      }
+    );
+  } catch {}
+
+  return { outputText, durationMs, costUsd: 0, extra: { notesCreated, errors, urlsScanned: signalsSeen.size } };
+}
+
+
+// ── Handler: dc_intel_weekly_digest ───────────────────────────────────────────
+
+/**
+ * Monday 7am — fires the weekly digest email (Call 5 Now + pipeline summary).
+ * Calls the DC Site Intel /webhooks/openclaw/trigger-digest endpoint which
+ * runs scripts/weekly_digest.py inside the container.
+ */
+async function dcIntelWeeklyDigest({ message, runId, agent }) {
+  const startTime = Date.now();
+
+  const resp = await dcPost('/webhooks/openclaw/trigger-digest', {});
+  const durationMs = Date.now() - startTime;
+
+  const status = resp?.status || 'unknown';
+  const output = resp?.output || '';
+  const leadsMatch = output.match(/Call 5 Now leads:\s*(\d+)/);
+  const leadCount = leadsMatch ? parseInt(leadsMatch[1]) : '?';
+
+  const outputText = status === 'sent'
+    ? `DC Intel Weekly Digest: sent ✓ — ${leadCount} call leads included (${(durationMs / 1000).toFixed(1)}s)`
+    : `DC Intel Weekly Digest: ${status} — ${output.slice(-300)}`;
+
+  return {
+    outputText,
+    durationMs,
+    costUsd: 0,
+    extra: { status, leadCount },
+  };
+}
+
+
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -1891,4 +2074,6 @@ module.exports = {
   dcIntelPlanningScanner,
   dcIntelDistressScanner,
   dcIntelMetaReviewer,
+  dcIntelWeeklyDigest,
+  dcIntelDominionMonitor,
 };

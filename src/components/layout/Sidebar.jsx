@@ -34,6 +34,7 @@ import {
   Radar,
   Radio,
   Brain,
+  Award,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { NAV_SECTIONS } from '@/lib/constants';
@@ -66,6 +67,7 @@ const iconMap = {
   Radar,
   Radio,
   Brain,
+  Award,
 };
 
 export default function Sidebar() {

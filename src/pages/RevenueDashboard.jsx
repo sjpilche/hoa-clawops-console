@@ -71,13 +71,13 @@ export default function RevenueDashboard() {
         fetch('/api/revenue/cycle-time', { headers }).then(r => r.json()),
         fetch('/api/revenue/content', { headers }).then(r => r.json()),
       ]);
-      setFunnel(f);
-      setHoaFunnel(hf);
-      setAgents(a);
-      setVariants(v);
-      setEngagement(e);
-      setCycleTime(ct);
-      setContentPerf(cp);
+      setFunnel(f?.counts ? f : null);
+      setHoaFunnel(hf?.counts ? hf : null);
+      setAgents(Array.isArray(a) ? a : a?.agents || []);
+      setVariants(Array.isArray(v) ? v : v?.variants || []);
+      setEngagement(Array.isArray(e) ? e : e?.leads || []);
+      setCycleTime(Array.isArray(ct) ? ct : ct?.stages || []);
+      setContentPerf(cp?.error ? null : cp);
     } catch (err) {
       console.error('Revenue fetch failed:', err);
     } finally {
@@ -103,7 +103,7 @@ export default function RevenueDashboard() {
     );
   }
 
-  const funnelData = funnel ? [
+  const funnelData = funnel?.counts ? [
     { name: 'Discovered', value: funnel.counts.discovered || 0, fill: STAGE_COLORS.discovered },
     { name: 'Contacted', value: funnel.counts.contacted || 0, fill: STAGE_COLORS.contacted },
     { name: 'Replied', value: funnel.counts.replied || 0, fill: STAGE_COLORS.replied },
@@ -152,8 +152,8 @@ export default function RevenueDashboard() {
         <KpiCard
           icon={Users}
           label="Total Leads"
-          value={funnel ? Object.values(funnel.counts).reduce((a, b) => a + b, 0) : 0}
-          sub={`+ ${hoaFunnel ? Object.values(hoaFunnel.counts).reduce((a, b) => a + b, 0) : 0} HOA`}
+          value={funnel?.counts ? Object.values(funnel.counts).reduce((a, b) => a + b, 0) : 0}
+          sub={`+ ${hoaFunnel?.counts ? Object.values(hoaFunnel.counts).reduce((a, b) => a + b, 0) : 0} HOA`}
           color="text-blue-400"
         />
         <KpiCard
@@ -275,7 +275,7 @@ function FunnelTab({ data, funnel, hoaFunnel }) {
       )}
 
       {/* HOA Funnel Summary */}
-      {hoaFunnel && (
+      {hoaFunnel?.counts && (
         <div className="bg-bg-secondary border border-border rounded-xl p-6">
           <h2 className="text-sm font-semibold text-text-primary mb-3">HOA Pipeline</h2>
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
