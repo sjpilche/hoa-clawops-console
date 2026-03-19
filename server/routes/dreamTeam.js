@@ -75,6 +75,45 @@ router.get('/scorecards/latest', (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// TODD — PIPELINE COMMANDER
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/dream-team/todd/monitor
+ * Run Todd's pipeline monitoring cycle (every 2 hours normally).
+ */
+router.post('/todd/monitor', (req, res, next) => {
+  try {
+    const { toddPipelineMonitor } = require('../services/toddPipelineCheck');
+    const result = toddPipelineMonitor();
+    res.json({ success: true, ...result });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /api/dream-team/todd/briefing
+ * Run Todd's morning briefing (7 AM normally). Posts to Discord.
+ */
+router.post('/todd/briefing', (req, res, next) => {
+  try {
+    const { toddMorningBriefing } = require('../services/toddPipelineCheck');
+    const result = toddMorningBriefing();
+    res.json({ success: true, ...result });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/dream-team/kpis
+ * The 5 core KPIs from the Operating Constitution.
+ */
+router.get('/kpis', (req, res, next) => {
+  try {
+    const { getCorKPIs } = require('../services/toddPipelineCheck');
+    res.json(getCorKPIs());
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // TODD — PIPELINE ACTIONS (manual triggers)
 // ═══════════════════════════════════════════════════════════════════════════
 

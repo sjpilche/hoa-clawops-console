@@ -23,7 +23,7 @@ import OfficeScene from '@/components/dreamteam/OfficeScene';
 const AGENT_META = {
   todd:    { icon: Star,   color: 'text-amber-400',   role: 'Chief of Staff' },
   scout:   { icon: Search, color: 'text-blue-400',    role: 'Research & Discovery' },
-  charlie: { icon: Code,   color: 'text-emerald-400', role: 'Builder' },
+  revops:  { icon: TrendingUp, color: 'text-emerald-400', role: 'Economics & Capital' },
   ralph:   { icon: Shield, color: 'text-red-400',     role: 'QA Gate' },
   quill:   { icon: Pen,    color: 'text-purple-400',  role: 'Content & Outreach' },
 };
@@ -94,8 +94,26 @@ export default function DreamTeamPage() {
   const latestReport = (Array.isArray(reports) ? reports : [])[0];
   const recentActions = Array.isArray(actions) ? actions.slice(0, 20) : [];
 
+  // 5 Core KPIs
+  const { data: kpis } = useQuery({
+    queryKey: ['dt-kpis'],
+    queryFn: () => api.get('/dream-team/kpis'),
+    refetchInterval: 30000,
+  });
+
   return (
     <div className="space-y-6">
+      {/* 5 Core KPIs — THE ONLY NUMBERS THAT MATTER */}
+      {kpis && (
+        <div className="grid grid-cols-5 gap-3">
+          <KpiCard label="Activation (24h)" value={`${kpis.activationRate}%`} target=">80%" hit={kpis.activationRate >= 80} />
+          <KpiCard label="Reply Rate (7d)" value={`${kpis.replyRate}%`} target=">2%" hit={kpis.replyRate >= 2} />
+          <KpiCard label="Meetings (14d)" value={kpis.meetingsBooked} target="3+" hit={kpis.meetingsBooked >= 3} />
+          <KpiCard label="Cost / Meeting" value={kpis.costPerMeeting} target="track" hit={null} />
+          <KpiCard label="Stalled >48h" value={kpis.stalledLeads} target="<10" hit={kpis.stalledLeads < 10} />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -104,7 +122,7 @@ export default function DreamTeamPage() {
             Dream Team
           </h1>
           <p className="text-sm text-text-muted mt-1">
-            5 AI agents — self-grading, self-improving, self-governing
+            5 AI agents — revenue-aligned, self-governing
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -395,6 +413,24 @@ function PatternForm({ onClose, onSuccess }) {
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
       </div>
     </form>
+  );
+}
+
+function KpiCard({ label, value, target, hit }) {
+  return (
+    <div className={`border-2 rounded-lg p-3 text-center transition-all ${
+      hit === true ? 'border-accent-success/40 bg-accent-success/5' :
+      hit === false ? 'border-accent-danger/40 bg-accent-danger/5' :
+      'border-border bg-bg-secondary'
+    }`}>
+      <div className={`text-2xl font-black font-data ${
+        hit === true ? 'text-accent-success' :
+        hit === false ? 'text-accent-danger' :
+        'text-text-primary'
+      }`}>{value}</div>
+      <div className="text-xs text-text-muted mt-1">{label}</div>
+      <div className="text-[10px] text-text-muted/60">target: {target}</div>
+    </div>
   );
 }
 

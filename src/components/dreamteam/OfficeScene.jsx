@@ -15,7 +15,7 @@ import React from 'react';
 const AGENTS = {
   todd:    { emoji: '👔', name: 'Todd', role: 'Chief of Staff', color: 'amber' },
   scout:   { emoji: '🕵️', name: 'Scout', role: 'Lead Hunter', color: 'blue' },
-  charlie: { emoji: '🤓', name: 'Charlie', role: 'Builder Nerd', color: 'emerald' },
+  revops:  { emoji: '📊', name: 'RevOps', role: 'Economics', color: 'emerald' },
   ralph:   { emoji: '👮', name: 'Ralph', role: 'Quality Police', color: 'red' },
   quill:   { emoji: '🦚', name: 'Quill', role: 'Word Wizard', color: 'purple' },
 };
@@ -206,7 +206,7 @@ export default function OfficeScene({ scorecards }) {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <AgentDesk agentKey="todd" scorecard={cardMap.todd} />
         <AgentDesk agentKey="scout" scorecard={cardMap.scout} />
-        <AgentDesk agentKey="charlie" scorecard={cardMap.charlie} />
+        <AgentDesk agentKey="revops" scorecard={cardMap.charlie} />
         <AgentDesk agentKey="ralph" scorecard={cardMap.ralph} />
         <AgentDesk agentKey="quill" scorecard={cardMap.quill} />
       </div>

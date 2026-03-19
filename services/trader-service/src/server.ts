@@ -172,7 +172,7 @@ async function initializeStrategies() {
   const maStrategy = new MovingAverageCrossoverStrategy({
     fastPeriod: 10,
     slowPeriod: 30,
-    positionSize: 500,
+    positionSize: 5000,
     symbols: ['AAPL', 'MSFT'],
   });
 
@@ -183,7 +183,7 @@ async function initializeStrategies() {
     rsiPeriod: 14,
     oversoldThreshold: 30,
     overboughtThreshold: 70,
-    positionSize: 500,
+    positionSize: 5000,
     symbols: ['AAPL', 'MSFT', 'SPY'],
   });
 
@@ -194,7 +194,7 @@ async function initializeStrategies() {
   const rsrStrategy = new RelativeStrengthRotationStrategy({
     topN: 2,
     momentumDays: 20,
-    positionSize: 500,
+    positionSize: 5000,
     symbols: ['SPY', 'QQQ', 'IWM', 'XLK', 'XLE', 'XLF', 'GLD', 'TLT'],
   });
 
@@ -202,32 +202,32 @@ async function initializeStrategies() {
   await registry.enableStrategy(rsrStrategy.getId());
 
   // VIX Fear Spike — buy SPY when VIX spikes 20%+ above 10d avg
-  const vixStrategy = new VixFearSpikeStrategy({ positionSize: 500 });
+  const vixStrategy = new VixFearSpikeStrategy({ positionSize: 5000 });
   await registry.register(vixStrategy);
   await registry.enableStrategy(vixStrategy.getId());
 
   // Turn of Month — buy last day of month, sell 3rd trading day of new month
-  const tomStrategy = new TurnOfMonthStrategy({ positionSize: 500 });
+  const tomStrategy = new TurnOfMonthStrategy({ positionSize: 5000 });
   await registry.register(tomStrategy);
   await registry.enableStrategy(tomStrategy.getId());
 
   // Post-Earnings Drift — buy on 3%+ gap with volume, hold 10 days
-  const peadStrategy = new PostEarningsDriftStrategy({ positionSize: 500 });
+  const peadStrategy = new PostEarningsDriftStrategy({ positionSize: 5000 });
   await registry.register(peadStrategy);
   await registry.enableStrategy(peadStrategy.getId());
 
   // Overnight Premium — buy at close, sell at open (daily)
-  const overnightStrategy = new OvernightPremiumStrategy({ positionSize: 500 });
+  const overnightStrategy = new OvernightPremiumStrategy({ positionSize: 5000 });
   await registry.register(overnightStrategy);
   await registry.enableStrategy(overnightStrategy.getId());
 
   // Oversold Large Cap Snap-Back — buy 7%+ weekly drops in mega-caps
-  const oversoldStrategy = new OversoldLargeCapStrategy({ positionSize: 500 });
+  const oversoldStrategy = new OversoldLargeCapStrategy({ positionSize: 5000 });
   await registry.register(oversoldStrategy);
   await registry.enableStrategy(oversoldStrategy.getId());
 
   // Holiday Effect — buy 2 days before major US holidays
-  const holidayStrategy = new HolidayEffectStrategy({ positionSize: 500 });
+  const holidayStrategy = new HolidayEffectStrategy({ positionSize: 5000 });
   await registry.register(holidayStrategy);
   await registry.enableStrategy(holidayStrategy.getId());
 

@@ -3987,6 +3987,34 @@ const SPECIAL_HANDLERS = {
     };
   },
 
+  // ── Todd — Pipeline Commander ────────────────────────────────────────────
+  // Runs every 2 hours: force-activates stuck leads, escalates hot leads,
+  // monitors agent health. Morning briefing at 7 AM posts to Discord.
+  // $0/run — pure SQL, no LLM.
+  todd_pipeline_commander: async ({ message, runId, agent }) => {
+    const { toddPipelineMonitor, toddMorningBriefing } = require('../services/toddPipelineCheck');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    if (params.briefing === true || params.briefing === 'true') {
+      const result = toddMorningBriefing();
+      return {
+        outputText: result.briefingText,
+        durationMs: Date.now() - startTime,
+        costUsd: 0,
+        extra: { kpis: result.kpis, monitor: result.monitor },
+      };
+    }
+
+    const result = toddPipelineMonitor();
+    return {
+      outputText: `Todd Pipeline Check: ${result.activated} activated, ${result.hotLeads} hot leads, ${result.stalledLeads} stalled, ${result.failedRuns} failures`,
+      durationMs: Date.now() - startTime,
+      costUsd: 0,
+      extra: result,
+    };
+  },
+
   // ── Pending Run Executor — fires cadence follow-ups that were queued ──
   pending_run_executor: async ({ message, runId, agent }) => {
     const { all: dbAll, get: dbGet, run: dbRun } = require('../db/connection');

@@ -58,14 +58,14 @@ const DREAM_TEAM = {
       { name: 'Signal Freshness', weight: 0.15, query: (d) => `${d.brain_observations} observations written` },
     ],
   },
-  charlie: {
-    label: 'Charlie',
-    role: 'Builder',
+  revops: {
+    label: 'RevOps',
+    role: 'Economics & Capital',
     dims: [
-      { name: 'Build Completion', weight: 0.25, query: (d) => `${d.builds_completed}/${d.builds_attempted} builds succeeded` },
-      { name: 'QA Pass Rate', weight: 0.25, query: (d) => `${d.qa_passes}/${d.qa_submissions} passed Ralph first try` },
-      { name: 'Feature Adoption', weight: 0.30, query: (d) => `${d.content_published_7d} content pieces published + ${d.emails_sent} outreach sent this week using his templates` },
-      { name: 'Cost Efficiency', weight: 0.20, query: (d) => `$${d.avg_build_cost.toFixed(3)}/build avg` },
+      { name: 'Cost Per Meeting', weight: 0.30, query: (d) => `$${d.total_cost.toFixed(2)} spent, ${d.meetings_booked_7d} meetings → ${d.meetings_booked_7d > 0 ? '$' + (d.total_cost / d.meetings_booked_7d).toFixed(2) + '/meeting' : 'no meetings yet'}` },
+      { name: 'Cost Per Reply', weight: 0.25, query: (d) => `${d.replies_today} replies today, cost $${d.total_cost.toFixed(2)} → ${d.replies_today > 0 ? '$' + (d.total_cost / d.replies_today).toFixed(2) + '/reply' : 'no replies yet'}` },
+      { name: 'Compute Efficiency', weight: 0.25, query: (d) => `${d.runs_completed} runs at $${d.total_cost.toFixed(2)} = $${d.runs_completed > 0 ? (d.total_cost / d.runs_completed).toFixed(4) : '0'}/run` },
+      { name: 'Reporting Timeliness', weight: 0.20, query: (d) => `Daily scorecard ${d.digest_posted ? 'delivered' : 'MISSED'}` },
     ],
   },
   ralph: {
