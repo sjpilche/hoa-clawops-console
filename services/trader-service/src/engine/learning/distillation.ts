@@ -12,12 +12,15 @@
 // =============================================================================
 
 import { BrainStore, TradeEpisode, KBEntry, DistillationResult } from './brain-store';
+import { AttributionStore } from '../allocation/attribution-store';
 
 export class DistillationEngine {
   private brain: BrainStore;
+  private attrStore: AttributionStore | null;
 
-  constructor(brain: BrainStore) {
+  constructor(brain: BrainStore, attrStore?: AttributionStore | null) {
     this.brain = brain;
+    this.attrStore = attrStore || null;
   }
 
   /**
@@ -42,6 +45,13 @@ export class DistillationEngine {
 
       // Step 3: Promote best theses
       result.promoted += this.promoteBestTheses();
+
+      // Step 4: Rebuild daily performance attribution
+      if (this.attrStore) {
+        const today = new Date().toISOString().split('T')[0];
+        this.attrStore.rebuildAttribution(today);
+        console.log(`📊 Attribution rebuilt for ${today}`);
+      }
 
       console.log(`🧪 Distillation complete: ${result.promoted} winning, ${result.avoidPatterns} avoid patterns`);
     } catch (err: any) {

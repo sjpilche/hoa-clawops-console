@@ -23,6 +23,10 @@ const pool = require('./playwrightPool');
 const { run, get } = require('../db/connection');
 const { getNextMarket, markMarketScouted } = require('./jakeLeadRotation');
 
+// Apollo enrichment — safe import (additive, non-breaking)
+let apollo;
+try { apollo = require('./apolloEnricher'); } catch {}
+
 // ── Search query templates ────────────────────────────────────────────────────
 
 const SEARCH_QUERIES = [
@@ -290,6 +294,7 @@ async function runConstructionDiscovery(params = {}) {
 
   // Dedup within this run (same query may surface same company)
   const seenNames = new Set();
+  const newlyInserted = []; // Track for Apollo enrichment
 
   for (const query of queries) {
     if (stats.inserted >= maxLeads) break;
@@ -360,6 +365,11 @@ async function runConstructionDiscovery(params = {}) {
       );
 
       stats.inserted++;
+
+      // Track for Apollo enrichment
+      const insertedLead = get('SELECT id, company_name, city, state FROM cfo_leads WHERE LOWER(company_name) = LOWER(?)', [name]);
+      if (insertedLead) newlyInserted.push(insertedLead);
+
       console.log(`[ConstructionDiscovery]   + ${name} (${city || fallbackCity}, ${state || fallbackState}) score:${score}`);
     }
 
@@ -367,6 +377,28 @@ async function runConstructionDiscovery(params = {}) {
     if (stats.inserted < maxLeads && queries.indexOf(query) < queries.length - 1) {
       await new Promise(r => setTimeout(r, 3000));
     }
+  }
+
+  // ── Apollo inline enrichment for top 10 newly inserted leads ──────────────
+  if (apollo && newlyInserted.length > 0) {
+    const enrichBatch = newlyInserted.slice(0, 10);
+    console.log(`[ConstructionDiscovery] Apollo enriching top ${enrichBatch.length} of ${newlyInserted.length} new leads...`);
+    let enriched = 0;
+    for (const lead of enrichBatch) {
+      try {
+        const result = await apollo.enrichLead(lead);
+        if (result.success && !result.skipped) {
+          enriched++;
+          console.log(`[ConstructionDiscovery] Apollo enriched: ${lead.company_name} → ${result.email || 'no email'} (${result.title || 'no title'})`);
+        }
+      } catch (err) {
+        console.warn(`[ConstructionDiscovery] Apollo enrichment failed for ${lead.company_name}: ${err.message}`);
+      }
+      // 300ms delay between Apollo calls
+      await new Promise(r => setTimeout(r, 300));
+    }
+    stats.apollo_enriched = enriched;
+    console.log(`[ConstructionDiscovery] Apollo enriched ${enriched}/${enrichBatch.length} leads`);
   }
 
   // Mark this market as scouted in rotation
@@ -379,6 +411,7 @@ async function runConstructionDiscovery(params = {}) {
     `  ${stats.inserted} new companies inserted`,
     `  ${stats.queries_run} queries, ${stats.results_scraped} raw results, ${stats.filtered} filtered (non-GC), ${stats.skipped} dupes`,
     stats.captcha_hits > 0 ? `  ⚠️  ${stats.captcha_hits} CAPTCHA hits` : null,
+    stats.apollo_enriched > 0 ? `  Apollo enriched: ${stats.apollo_enriched} leads` : null,
     `  Cost: $0.00`,
   ].filter(Boolean).join('\n');
 

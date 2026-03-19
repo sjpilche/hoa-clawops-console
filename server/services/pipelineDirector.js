@@ -32,6 +32,10 @@ const discord = require('./discordNotifier');
 const { computeAllStates } = require('./pipelineStateTracker');
 const approvalEngine = require('./approvalEngine');
 
+// Apollo enrichment — safe import (additive, non-breaking)
+let apollo;
+try { apollo = require('./apolloEnricher'); } catch {}
+
 const MAX_ACTIONS_PER_CYCLE = 20;
 const MAX_LLM_DISPATCHES    = 5;    // LLM runs per cycle (cost guard)
 
@@ -127,6 +131,23 @@ async function dispatchAction(lead, product, action, plan, userId, budgetOk) {
       }
 
       case 'send_outreach': {
+        // Auto-enrich if lead has no contact email and hasn't been enriched via Apollo
+        if (apollo && !lead.contact_email && lead.enrichment_status !== 'enriched') {
+          try {
+            console.log(`[Director] Auto-enriching ${label} before outreach...`);
+            const enrichResult = await apollo.enrichLead(lead);
+            if (enrichResult.success && enrichResult.email) {
+              lead.contact_email = enrichResult.email;
+              plan.enriched.push(`${label} (pre-outreach)`);
+              console.log(`[Director] Auto-enriched ${label}: ${enrichResult.email}`);
+            } else {
+              console.log(`[Director] Auto-enrich ${label}: no email found — routing anyway`);
+            }
+          } catch (err) {
+            console.warn(`[Director] Auto-enrich failed for ${label}: ${err.message} — routing anyway`);
+          }
+        }
+
         if (!budgetOk) { plan.skipped_budget.push(label); break; }
         if (plan.llm_dispatched >= MAX_LLM_DISPATCHES) { plan.skipped_limit.push(label); break; }
 

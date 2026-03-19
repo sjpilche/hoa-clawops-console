@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 async function fetchApi(path, opts = {}) {
   if (opts.method === 'PUT' || opts.method === 'put') {
@@ -55,11 +56,42 @@ function ErpChip({ erp }) {
 }
 
 function SourceBadge({ source }) {
-  const colors = { jake: { color: '#818cf8', border: '#312e81' }, cfo: { color: '#4ade80', border: '#166534' } };
+  const colors = { jake: { color: '#818cf8', border: '#312e81' }, cfo: { color: '#4ade80', border: '#166534' }, 'data-rehab': { color: '#c4391a', border: '#7f1d1d' } };
   const s = colors[source] || { color: '#888', border: '#333' };
   return (
     <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', background: s.color + '15', color: s.color, border: `1px solid ${s.border}` }}>
       {source || '?'}
+    </span>
+  );
+}
+
+// ── Data Rehab Tier Badge ─────────────────────────────────────────
+const TIER_COLORS = {
+  autopsy: { color: '#f59e0b', border: '#92400e', label: 'Autopsy $5K' },
+  lite: { color: '#60a5fa', border: '#1e3a5f', label: 'Lite $15K' },
+  core: { color: '#8b5cf6', border: '#4c1d95', label: 'Core $25K' },
+  complex: { color: '#ec4899', border: '#831843', label: 'Complex $40K' },
+};
+
+function classifyTier(lead) {
+  // Tier based on company signals: system count, entity count, employee count, pain keywords
+  const systems = (lead.erp_type || '').split(/[,+\/&]/).filter(Boolean).length || 1;
+  const employees = parseInt(lead.employee_count) || 0;
+  const pain = (lead.pain_signals || lead.notes || '').toLowerCase();
+  const multiEntity = pain.includes('multi-entity') || pain.includes('multiple entities') || pain.includes('multi-location');
+
+  if (systems >= 4 || multiEntity || employees > 200) return 'complex';
+  if (systems >= 2 || employees > 50 || pain.includes('reconciliation') || pain.includes('migration')) return 'core';
+  if (lead.status === 'new' || !lead.contact_email) return 'autopsy';
+  return 'lite';
+}
+
+function TierBadge({ lead }) {
+  const tier = classifyTier(lead);
+  const t = TIER_COLORS[tier];
+  return (
+    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: t.color + '15', color: t.color, border: `1px solid ${t.border}` }}>
+      {t.label}
     </span>
   );
 }
@@ -296,6 +328,172 @@ function btnStyle(bg, color, border) {
   return { padding: '6px 14px', background: bg, color, border: `1px solid ${border}`, borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' };
 }
 
+// ── Classification colors ────────────────────────────────────────
+
+const CLASSIFICATION_COLORS = {
+  INTERESTED: { bg: '#0d2818', color: '#4ade80', border: '#14532d' },
+  NOT_NOW: { bg: '#2a2a1a', color: '#f59e0b', border: '#92400e' },
+  WRONG_PERSON: { bg: '#2a1a1a', color: '#ef4444', border: '#991b1b' },
+  UNSUBSCRIBE: { bg: '#2a1a1a', color: '#f87171', border: '#7f1d1d' },
+  BOUNCE: { bg: '#1a1a1a', color: '#6b7280', border: '#374151' },
+  OOO: { bg: '#1a1a2e', color: '#60a5fa', border: '#1e3a5f' },
+  UNKNOWN: { bg: '#1a1a1a', color: '#555', border: '#333' },
+};
+
+// ── Replies & Escalation Section ─────────────────────────────────
+
+function RepliesEscalationSection({ pendingRuns, replies, onRefresh }) {
+  const [open, setOpen] = useState(false);
+  const [actionStatus, setActionStatus] = useState({});
+
+  async function confirmRun(runId) {
+    setActionStatus(prev => ({ ...prev, [runId]: 'confirming...' }));
+    try {
+      await fetchApi(`/runs/${runId}/confirm`, { method: 'POST' });
+      setActionStatus(prev => ({ ...prev, [runId]: 'confirmed' }));
+      setTimeout(() => onRefresh(), 1000);
+    } catch (e) {
+      setActionStatus(prev => ({ ...prev, [runId]: 'error: ' + e.message }));
+    }
+  }
+
+  async function cancelRun(runId) {
+    setActionStatus(prev => ({ ...prev, [runId]: 'cancelling...' }));
+    try {
+      await fetchApi(`/runs/${runId}/cancel`, { method: 'POST' });
+      setActionStatus(prev => ({ ...prev, [runId]: 'cancelled' }));
+      setTimeout(() => onRefresh(), 1000);
+    } catch (e) {
+      setActionStatus(prev => ({ ...prev, [runId]: 'error: ' + e.message }));
+    }
+  }
+
+  function parseRunData(run) {
+    try {
+      const resultData = typeof run.result_data === 'string' ? JSON.parse(run.result_data) : run.result_data;
+      const message = typeof resultData?.message === 'string' ? JSON.parse(resultData.message) : resultData?.message;
+      return { companyName: message?.company_name || message?.lead_id ? `Lead #${message.lead_id}` : 'Unknown', replyText: message?.reply_text || '' };
+    } catch {
+      return { companyName: 'Unknown', replyText: '' };
+    }
+  }
+
+  const interestedCount = replies.filter(r => r.classification === 'INTERESTED').length;
+  const notNowCount = replies.filter(r => r.classification === 'NOT_NOW').length;
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: open ? 16 : 0 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#ccc', margin: 0 }}>
+          Replies &amp; Escalation
+        </h2>
+        {pendingRuns.length > 0 && (
+          <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: '#f59e0b22', color: '#f59e0b', border: '1px solid #92400e' }}>
+            {pendingRuns.length} pending
+          </span>
+        )}
+        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: '#1a1a1a', color: '#888', border: '1px solid #333' }}>
+          {replies.length} replies
+        </span>
+        <span style={{ fontSize: 12, color: '#555' }}>{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div>
+          {/* Summary bar */}
+          {replies.length > 0 && (
+            <div style={{ display: 'flex', gap: 16, marginBottom: 16, padding: '10px 14px', background: '#0d0d0d', border: '1px solid #1a1a1a', borderRadius: 8, fontSize: 12 }}>
+              <span style={{ color: '#888' }}>Total: <span style={{ color: '#ccc', fontWeight: 600 }}>{replies.length}</span></span>
+              <span style={{ color: '#888' }}>Interested: <span style={{ color: '#4ade80', fontWeight: 600 }}>{interestedCount}</span></span>
+              <span style={{ color: '#888' }}>Not now: <span style={{ color: '#f59e0b', fontWeight: 600 }}>{notNowCount}</span></span>
+            </div>
+          )}
+
+          {/* Pending meeting booker runs */}
+          {pendingRuns.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', margin: '0 0 10px 0', textTransform: 'uppercase', letterSpacing: 1 }}>
+                Pending Confirmation ({pendingRuns.length})
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {pendingRuns.map(run => {
+                  const { companyName, replyText } = parseRunData(run);
+                  const status = actionStatus[run.id];
+                  return (
+                    <div key={run.id} style={{ background: '#0d0d0d', border: '1px solid #92400e33', borderRadius: 8, padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                            <span style={{ fontWeight: 600, color: '#ddd', fontSize: 13 }}>{companyName}</span>
+                            <span style={{ fontSize: 10, color: '#555' }}>{new Date(run.created_at).toLocaleString()}</span>
+                          </div>
+                          {replyText && (
+                            <div style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 600 }}>
+                              {replyText.slice(0, 200)}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 12, flexShrink: 0 }}>
+                          {!status && (
+                            <>
+                              <button onClick={() => confirmRun(run.id)} style={btnStyle('#0d2818', '#22c55e', '#14532d')}>Confirm</button>
+                              <button onClick={() => cancelRun(run.id)} style={btnStyle('#2a1a1a', '#ef4444', '#991b1b')}>Cancel</button>
+                            </>
+                          )}
+                          {status && <span style={{ fontSize: 11, color: '#888' }}>{status}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Classified replies */}
+          <div>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#888', margin: '0 0 10px 0', textTransform: 'uppercase', letterSpacing: 1 }}>
+              Classified Replies
+            </h3>
+            {replies.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#444', background: '#0d0d0d', borderRadius: 8, border: '1px solid #1a1a1a' }}>
+                No classified replies yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {replies.map((reply, idx) => {
+                  const cls = CLASSIFICATION_COLORS[reply.classification] || CLASSIFICATION_COLORS.UNKNOWN;
+                  return (
+                    <div key={reply.id || idx} style={{ background: '#0d0d0d', border: '1px solid #1a1a1a', borderRadius: 8, padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontWeight: 600, color: '#ccc', fontSize: 13 }}>{reply.from_email || reply.from || '(unknown sender)'}</span>
+                          <span style={{
+                            display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                            background: cls.bg, color: cls.color, border: `1px solid ${cls.border}`,
+                          }}>
+                            {reply.classification || 'UNKNOWN'}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 10, color: '#555' }}>{reply.created_at ? new Date(reply.created_at).toLocaleString() : ''}</span>
+                      </div>
+                      {(reply.body || reply.body_preview) && (
+                        <div style={{ fontSize: 12, color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                          {(reply.body || reply.body_preview || '').slice(0, 200)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Content Library (collapsible) ─────────────────────────────────
 
 function ContentSection({ pieces, onRefresh }) {
@@ -348,10 +546,13 @@ function ContentSection({ pieces, onRefresh }) {
 // ── Main Page ─────────────────────────────────────────────────────
 
 export default function CfoMarketingPage({ defaultSource = '' }) {
+  const { activeWorkspaceId, activeWorkspaceSlug, setFromSource } = useWorkspace();
   const [leads, setLeads] = useState([]);
   const [funnel, setFunnel] = useState(null);
   const [content, setContent] = useState([]);
   const [outreach, setOutreach] = useState([]);
+  const [pendingRuns, setPendingRuns] = useState([]);
+  const [replies, setReplies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sourceFilter, setSourceFilter] = useState(defaultSource);
   const [tone, setTone] = useState('ai-curious-cfo');
@@ -362,26 +563,38 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
   const [enrichStatus, setEnrichStatus] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Sync route-based defaultSource → workspace context on mount
+  useEffect(() => {
+    if (defaultSource) setFromSource(defaultSource);
+  }, [defaultSource, setFromSource]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const sq = sourceFilter ? `&source_agent=${sourceFilter}` : '';
-      const sqp = sourceFilter ? `?source_agent=${sourceFilter}` : '';
-      const [leadsData, funnelData, contentData, outreachData] = await Promise.all([
+      // Prefer workspace_id filter, fall back to source_agent for backwards compat
+      const wsParam = activeWorkspaceId ? `&workspace_id=${activeWorkspaceId}` : '';
+      const wsParamFirst = activeWorkspaceId ? `?workspace_id=${activeWorkspaceId}` : '';
+      const sq = wsParam || (sourceFilter ? `&source_agent=${sourceFilter}` : '');
+      const sqp = wsParamFirst || (sourceFilter ? `?source_agent=${sourceFilter}` : '');
+      const [leadsData, funnelData, contentData, outreachData, pendingRunsData, repliesData] = await Promise.all([
         fetchApi(`/cfo-marketing/leads?limit=200${sq}`),
         fetchApi(`/cfo-marketing/leads/funnel${sqp}`),
         fetchApi(`/cfo-marketing/content?limit=50${sq}`),
         fetchApi(`/cfo-marketing/outreach?limit=100${sq}`),
+        fetchApi('/runs?status=pending&limit=20').catch(() => ({ runs: [] })),
+        fetchApi('/cfo-marketing/replies?limit=20').catch(() => ({ replies: [] })),
       ]);
       setLeads(leadsData.leads || []);
       setFunnel(funnelData);
       setContent(contentData.pieces || []);
       setOutreach(outreachData.sequences || []);
+      setPendingRuns(pendingRunsData.runs || pendingRunsData || []);
+      setReplies(repliesData.replies || repliesData || []);
     } catch (e) {
       console.error('Pipeline load error:', e);
     }
     setLoading(false);
-  }, [sourceFilter]);
+  }, [sourceFilter, activeWorkspaceId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -418,7 +631,8 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
     setEnrichRunning(false);
   }
 
-  // Draft emails for enriched leads
+  // Draft emails for enriched leads — workspace-aware outreach agent
+  const outreachAgentName = activeWorkspaceSlug === 'data-rehab' ? 'data-rehab-outreach' : 'jake-outreach-agent';
   async function draftAll() {
     const targets = leads.filter(l => l.enrichment_status === 'enriched' && l.status === 'new' && l.contact_email).slice(0, 20);
     if (targets.length === 0) {
@@ -431,7 +645,7 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
     for (const lead of targets) {
       setBulkStatus(`Drafting ${done + 1}/${targets.length}: ${lead.company_name}...`);
       try {
-        const startRes = await fetchApi('/agents/jake-outreach-agent/run', {
+        const startRes = await fetchApi(`/agents/${outreachAgentName}/run`, {
           method: 'POST',
           body: JSON.stringify({ message: JSON.stringify({
             lead_id: lead.id, company_name: lead.company_name,
@@ -452,6 +666,41 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
     setBulkRunning(false);
     setBulkStatus(`Done: ${done} drafts queued.`);
     setTimeout(() => { setBulkStatus(''); loadAll(); }, 3000);
+  }
+
+  // One-button pipeline: Discover → Enrich → Draft (workspace-aware)
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState('');
+  async function runFullPipeline() {
+    setPipelineRunning(true);
+    try {
+      // Step 1: Discover
+      const discoverAgent = activeWorkspaceSlug === 'data-rehab' ? 'data-rehab-discovery'
+        : activeWorkspaceSlug === 'hoa' ? 'hoa-discovery'
+        : 'jake-construction-discovery';
+      setPipelineStatus('1/3 — Finding leads...');
+      const discRes = await fetchApi(`/agents/${discoverAgent}/run`, {
+        method: 'POST', body: JSON.stringify({ message: JSON.stringify({ limit: 50 }) }),
+      });
+      if (discRes.runId) await fetchApi(`/runs/${discRes.runId}/confirm`, { method: 'POST' });
+
+      // Step 2: Enrich
+      setPipelineStatus('2/3 — Enriching contacts...');
+      await fetchApi('/cfo-marketing/leads/bulk-enrich', {
+        method: 'POST', body: JSON.stringify({ limit: 20, min_score: 0 }),
+      });
+
+      // Step 3: Draft outreach
+      setPipelineStatus('3/3 — Drafting outreach...');
+      await loadAll(); // refresh to get new leads
+      // Don't auto-draft — user should review leads first
+      setPipelineStatus('Done — leads discovered + enriched. Review and draft when ready.');
+      setTimeout(() => { setPipelineStatus(''); loadAll(); }, 5000);
+    } catch (e) {
+      setPipelineStatus('Error: ' + e.message);
+      setTimeout(() => setPipelineStatus(''), 5000);
+    }
+    setPipelineRunning(false);
   }
 
   // Single lead enrichment
@@ -480,46 +729,41 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, color: '#fff', margin: 0 }}>
-              {defaultSource === 'owen' ? 'Owen CFO — Property Management' : defaultSource === 'data-rehab' ? 'Data Rehab — AI Readiness' : 'Jake CFO — Construction Finance'}
+              {activeWorkspaceSlug === 'owen' ? 'Owen CFO — Property Management'
+                : activeWorkspaceSlug === 'data-rehab' ? 'Data Rehab — AI Readiness'
+                : activeWorkspaceSlug === 'hoa' ? 'HOA — Project Funding'
+                : activeWorkspaceSlug === 'jake' ? 'Jake CFO — Construction Finance'
+                : defaultSource === 'owen' ? 'Owen CFO — Property Management'
+                : defaultSource === 'data-rehab' ? 'Data Rehab — AI Readiness'
+                : 'Jake CFO — Construction Finance'}
             </h1>
-            <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>Discover → Enrich → Draft → Send → Track</div>
+            <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>
+              {activeWorkspaceSlug === 'data-rehab' ? 'Discover → Enrich → Pitch Autopsy → Close → Upsell Sprint' : 'Discover → Enrich → Draft → Send → Track'}
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {(defaultSource === 'owen'
-              ? ['owen']
-              : defaultSource === 'data-rehab'
-              ? ['data-rehab']
-              : ['', 'jake', 'cfo']
-            ).map(src => (
-              <button key={src || 'all'} onClick={() => setSourceFilter(src)} style={{
-                padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'monospace',
-                border: `1px solid ${sourceFilter === src ? '#f97316' : '#333'}`,
-                background: sourceFilter === src ? '#f9731622' : '#111',
-                color: sourceFilter === src ? '#f97316' : '#666',
-              }}>
-                {src === '' ? 'All' : src === 'jake' ? 'Jake' : src === 'cfo' ? 'Steve' : src === 'owen' ? 'Owen' : 'Data Rehab'}
-              </button>
-            ))}
             <button onClick={loadAll} style={{ padding: '5px 12px', background: '#111', border: '1px solid #333', borderRadius: 6, color: '#666', fontSize: 12, cursor: 'pointer', fontFamily: 'monospace' }}>
               Refresh
             </button>
           </div>
         </div>
 
-        {/* Tone selector — page-level, visible before drafting */}
-        <div style={{ display: 'flex', gap: 6, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: '#555', fontWeight: 600 }}>TONE:</span>
-          {TONE_OPTIONS.map(t => (
-            <button key={t.value} onClick={() => setTone(t.value)} title={t.desc} style={{
-              padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'monospace',
-              border: `1px solid ${tone === t.value ? '#f97316' : '#222'}`,
-              background: tone === t.value ? '#f9731622' : 'transparent',
-              color: tone === t.value ? '#f97316' : '#555',
-            }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {/* Tone selector — only for Jake/Owen (Data Rehab uses August voice, not selectable) */}
+        {activeWorkspaceSlug !== 'data-rehab' && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#555', fontWeight: 600 }}>TONE:</span>
+            {TONE_OPTIONS.map(t => (
+              <button key={t.value} onClick={() => setTone(t.value)} title={t.desc} style={{
+                padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'monospace',
+                border: `1px solid ${tone === t.value ? '#f97316' : '#222'}`,
+                background: tone === t.value ? '#f9731622' : 'transparent',
+                color: tone === t.value ? '#f97316' : '#555',
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Main Content ── */}
@@ -536,13 +780,21 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
 
             {/* ── Actions Bar ── */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-              <RunAgentButton agentId="cfo-lead-scout" agentName="Discover (FL)" message={{ erp_type: 'all', limit: 30 }} onComplete={loadAll} />
+              {/* One-button pipeline */}
+              <button onClick={runFullPipeline} disabled={pipelineRunning} style={{
+                padding: '8px 20px', background: pipelineRunning ? '#1a1a1a' : '#1a2a1a', color: pipelineRunning ? '#555' : '#4ade80',
+                border: `1px solid ${pipelineRunning ? '#333' : '#166534'}`, borderRadius: 6, fontSize: 13, fontWeight: 700,
+                cursor: pipelineRunning ? 'not-allowed' : 'pointer',
+              }}>
+                {pipelineRunning ? 'Running...' : activeWorkspaceSlug === 'data-rehab' ? 'Run Pipeline' : 'Discover + Enrich'}
+              </button>
+
               <button onClick={enrichAll} disabled={enrichRunning} style={{
                 padding: '8px 16px', background: enrichRunning ? '#1a1a1a' : '#1a1a2e', color: enrichRunning ? '#555' : '#60a5fa',
                 border: `1px solid ${enrichRunning ? '#333' : '#1e3a5f'}`, borderRadius: 6, fontSize: 13, fontWeight: 600,
                 cursor: enrichRunning ? 'not-allowed' : 'pointer',
               }}>
-                {enrichRunning ? 'Enriching...' : `Enrich All (${funnel?.needs_enrichment || 0} need email)`}
+                {enrichRunning ? 'Enriching...' : `Enrich (${funnel?.needs_enrichment || 0})`}
               </button>
               <button onClick={draftAll} disabled={bulkRunning || enrichedReadyCount === 0} style={{
                 padding: '8px 16px', background: bulkRunning ? '#1a1a1a' : enrichedReadyCount > 0 ? '#1a1a3a' : '#111',
@@ -551,8 +803,9 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
                 borderRadius: 6, fontSize: 13, fontWeight: 600,
                 cursor: bulkRunning || enrichedReadyCount === 0 ? 'not-allowed' : 'pointer',
               }}>
-                {bulkRunning ? 'Drafting...' : `Draft All (${enrichedReadyCount} ready)`}
+                {bulkRunning ? 'Drafting...' : `Draft (${enrichedReadyCount} ready)`}
               </button>
+              {pipelineStatus && <span style={{ fontSize: 12, color: '#4ade80', fontWeight: 600 }}>{pipelineStatus}</span>}
               {enrichStatus && <span style={{ fontSize: 12, color: '#60a5fa' }}>{enrichStatus}</span>}
               {bulkStatus && <span style={{ fontSize: 12, color: '#818cf8' }}>{bulkStatus}</span>}
             </div>
@@ -589,7 +842,10 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
                             {lead.city && <div style={{ fontSize: 11, color: '#555' }}>{lead.city}, {lead.state}</div>}
                           </td>
                           <td style={{ padding: '8px 10px' }}><ErpChip erp={lead.erp_type} /></td>
-                          <td style={{ padding: '8px 10px' }}><SourceBadge source={lead.source_agent} /></td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <SourceBadge source={lead.source_agent} />
+                            {activeWorkspaceSlug === 'data-rehab' && <span style={{ marginLeft: 4 }}><TierBadge lead={lead} /></span>}
+                          </td>
                           <td style={{ padding: '8px 10px', color: '#888' }}>
                             {lead.contact_name ? (
                               <div>
@@ -637,6 +893,13 @@ export default function CfoMarketingPage({ defaultSource = '' }) {
               sequences={outreach}
               onRefresh={loadAll}
               onSendError={msg => { setErrorMsg(msg); setTimeout(() => setErrorMsg(''), 5000); }}
+            />
+
+            {/* ── Replies & Escalation ── */}
+            <RepliesEscalationSection
+              pendingRuns={pendingRuns}
+              replies={replies}
+              onRefresh={loadAll}
             />
 
             {/* ── Content Library ── */}

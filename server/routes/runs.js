@@ -311,45 +311,142 @@ const SPECIAL_HANDLERS = {
   },
 
   hoa_contact_enricher: async ({ message, runId, agent, agentConfig }) => {
-    const { enrichMultipleLeads } = require('../services/hoaContactEnricher');
     const startTime = Date.now();
+    const crypto = require('crypto');
 
     let params = parseMessageParams(message);
     if (!params.limit) {
       const text = parseTextParams(message, {
         limit: /limit[:\s]+(\d+)/i,
-        tier: /tier[:\s]+(HOT|WARM|WATCH)/i,
       });
       params = { ...params, ...text };
     }
 
     const defaults = agentConfig.default_params || {};
-    const enrichParams = {
-      limit: parseInt(params.limit || defaults.limit || 10),
-      tier: params.tier || defaults.tier || null,
-    };
+    const parsedLimit = parseInt(params.limit || defaults.limit || 15);
 
-    const result = await enrichMultipleLeads(enrichParams);
+    // ── Enrich HOA communities via Apollo searchPeople on management companies ──
+    // The 182 hoa_communities have management_company names but 0 contacts.
+    // We search Apollo for property manager contacts at each mgmt company.
+    const apollo = require('../services/apolloEnricher');
+
+    // Find communities needing enrichment (contact_enrichment_status = 'pending')
+    const communities = all(`
+      SELECT id, name, management_company, city, state
+      FROM hoa_communities
+      WHERE contact_enrichment_status = 'pending'
+        AND management_company IS NOT NULL
+      ORDER BY id
+      LIMIT ?
+    `, [parsedLimit]);
+
+    console.log(`[hoa_contact_enricher] Found ${communities.length} communities to enrich via Apollo`);
+
+    let successCount = 0;
+    let failedCount = 0;
+    const results = [];
+    const HOA_TITLES = ['Property Manager', 'Community Manager', 'HOA Manager', 'General Manager', 'Regional Manager', 'Community Association Manager', 'President'];
+
+    for (let i = 0; i < communities.length; i++) {
+      const comm = communities[i];
+      try {
+        // Mark in-progress
+        run(`UPDATE hoa_communities SET contact_enrichment_status = 'in_progress' WHERE id = ?`, [comm.id]);
+
+        const location = [comm.city, comm.state || 'Florida'].filter(Boolean).join(', ') || undefined;
+        const people = await apollo.searchAndReveal({
+          companyName: comm.management_company,
+          location,
+          titles: HOA_TITLES,
+          limit: 3,
+        });
+
+        let contactsInserted = 0;
+        for (const person of people) {
+          if (!person.email && !person.name) continue;
+
+          const fingerprint = crypto.createHash('md5')
+            .update(`${(person.name || '').toLowerCase()}|${(person.email || '').toLowerCase()}|${comm.management_company.toLowerCase()}`)
+            .digest('hex');
+
+          // Check for duplicate
+          const existing = get(`SELECT id FROM hoa_contacts WHERE fingerprint = ?`, [fingerprint]);
+          if (existing) continue;
+
+          run(`
+            INSERT INTO hoa_contacts (
+              hoa_name, contact_person, title, email, phone,
+              city, state, management_company,
+              source_url, source_type, confidence_score, status,
+              fingerprint, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            comm.name,
+            person.name || null,
+            person.title || null,
+            person.email || null,
+            person.phone || null,
+            comm.city || 'Unknown',
+            comm.state || 'FL',
+            comm.management_company,
+            person.linkedin_url || 'apollo',
+            'apollo',
+            person.email ? 80 : 40,
+            'new',
+            fingerprint,
+            person.organization?.name ? `Org: ${person.organization.name}` : null,
+          ]);
+          contactsInserted++;
+        }
+
+        // Mark complete or failed
+        const newStatus = contactsInserted > 0 ? 'complete' : 'failed';
+        run(`UPDATE hoa_communities SET contact_enrichment_status = ?, needs_contact_enrichment = 0 WHERE id = ?`, [newStatus, comm.id]);
+
+        if (contactsInserted > 0) {
+          successCount++;
+          console.log(`[hoa_contact_enricher] ${comm.name} (${comm.management_company}): ${contactsInserted} contacts found`);
+        } else {
+          failedCount++;
+          console.log(`[hoa_contact_enricher] ${comm.name} (${comm.management_company}): no contacts found`);
+        }
+
+        results.push({ community: comm.name, mgmt: comm.management_company, contacts: contactsInserted });
+
+      } catch (err) {
+        failedCount++;
+        run(`UPDATE hoa_communities SET contact_enrichment_status = 'failed' WHERE id = ?`, [comm.id]);
+        console.error(`[hoa_contact_enricher] Error enriching ${comm.name}: ${err.message}`);
+        results.push({ community: comm.name, error: err.message });
+      }
+
+      // Rate limit: 200ms between Apollo calls
+      if (i < communities.length - 1) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+    }
+
     const durationMs = Date.now() - startTime;
-    const outputText = `Contact Enrichment: ${result.success_count}/${result.enriched_count} enriched (${enrichParams.tier || 'all tiers'}) in ${(durationMs / 1000).toFixed(1)}s`;
+    const totalContacts = get(`SELECT COUNT(*) as cnt FROM hoa_contacts`).cnt;
+    const outputText = `HOA Contact Enrichment: ${successCount}/${communities.length} communities enriched (${failedCount} failed), ${totalContacts} total contacts in ${(durationMs / 1000).toFixed(1)}s`;
 
-    // ── HOA Enrichment quality trending ──
-    const hoaHitRate = result.enriched_count > 0 ? Math.round((result.success_count / result.enriched_count) * 100) : 0;
+    // ── Quality trending ──
+    const hoaHitRate = communities.length > 0 ? Math.round((successCount / communities.length) * 100) : 0;
     try {
       run(
         `INSERT INTO audit_log (id, action, resource, details, outcome) VALUES (lower(hex(randomblob(16))), 'enricher_quality', ?, ?, ?)`,
-        ['agent:hoa-contact-enricher', JSON.stringify({ run_id: runId, total: result.enriched_count, enriched: result.success_count, hit_rate: hoaHitRate, tier: enrichParams.tier }), hoaHitRate >= 50 ? 'success' : 'failure']
+        ['agent:hoa-contact-enricher', JSON.stringify({ run_id: runId, total: communities.length, enriched: successCount, hit_rate: hoaHitRate }), hoaHitRate >= 50 ? 'success' : 'failure']
       );
     } catch {}
 
-    if (result.enriched_count >= 5 && hoaHitRate < 50) {
+    if (communities.length >= 5 && hoaHitRate < 50) {
       try {
         const discord = require('../services/discordNotifier');
-        discord.sendEmbed({ title: 'HOA Enricher Quality Alert', description: `HOA enricher hit rate: ${hoaHitRate}% (${result.success_count}/${result.enriched_count}). Below 50% threshold.`, color: 0xff9500, footer: { text: 'hoa-contact-enricher' } });
+        discord.sendEmbed({ title: 'HOA Enricher Quality Alert', description: `HOA enricher hit rate: ${hoaHitRate}% (${successCount}/${communities.length}). Below 50% threshold.`, color: 0xff9500, footer: { text: 'hoa-contact-enricher' } });
       } catch {}
     }
 
-    return { outputText, durationMs, extra: { enrichResult: result, hitRate: hoaHitRate } };
+    return { outputText, durationMs, extra: { enrichResult: { enriched_count: communities.length, success_count: successCount, failed_count: failedCount, total_contacts: totalContacts, results }, hitRate: hoaHitRate } };
   },
 
   hoa_outreach_drafter: async ({ message, runId, agent, agentConfig }) => {
@@ -720,16 +817,45 @@ const SPECIAL_HANDLERS = {
   },
 
   jake_contact_enricher: async ({ message, runId, agent }) => {
-    const { enrichMultipleLeads } = require('../services/jakeContactEnricher');
     const brain = require('../services/collectiveBrain');
     const startTime = Date.now();
     const params = parseMessageParams(message);
-    const result = await enrichMultipleLeads({
-      limit: parseInt(params.limit) || 20,
+    const parsedLimit = parseInt(params.limit) || 20;
+    const enrichParams = {
+      limit: parsedLimit,
       min_score: parseInt(params.min_score) || 0,
       status_filter: params.status_filter || 'pending',
       source: params.source || null,
-    });
+    };
+
+    // Try Apollo first
+    let apolloResults = { enriched: 0, total: 0, results: [] };
+    try {
+      const apollo = require('../services/apolloEnricher');
+      apolloResults = await apollo.enrichMultipleLeads({ limit: parsedLimit, workspace_id: enrichParams.workspace_id || null, min_score: enrichParams.min_score, status_filter: enrichParams.status_filter, source: enrichParams.source });
+      console.log(`[jake_contact_enricher] Apollo enriched ${apolloResults.enriched}/${parsedLimit}`);
+    } catch (apolloErr) {
+      console.warn('[jake_contact_enricher] Apollo failed, falling back to Playwright:', apolloErr.message);
+    }
+
+    // Fall back to Playwright if Apollo enriched < 50% of requested limit
+    let result;
+    if (apolloResults.enriched >= Math.ceil(parsedLimit * 0.5)) {
+      result = apolloResults;
+    } else {
+      const remainingLimit = parsedLimit - apolloResults.enriched;
+      const { enrichMultipleLeads } = require('../services/jakeContactEnricher');
+      const playwrightResult = await enrichMultipleLeads({
+        ...enrichParams,
+        limit: remainingLimit,
+      });
+      // Merge results
+      result = {
+        enriched: apolloResults.enriched + playwrightResult.enriched,
+        total: apolloResults.total + playwrightResult.total,
+        results: [...apolloResults.results, ...playwrightResult.results],
+      };
+    }
     const durationMs = Date.now() - startTime;
     const outputText = [
       `Contact Enricher: ${result.enriched}/${result.total} enriched in ${(durationMs / 1000).toFixed(1)}s`,
@@ -1354,7 +1480,29 @@ const SPECIAL_HANDLERS = {
     const product = params.product || 'both';
     const isConfirmed = params.confirmed === true || params.confirmed === 'true';
 
+    // ── BOUNCE RATE GUARD — prevent further domain damage ─────────────────
+    // Check bounce rate over last 100 sends. If > 10%, pause all sending.
+    const recentSends = dbAll(`
+      SELECT status, delivery_status FROM cfo_outreach_sequences
+      WHERE sent_at IS NOT NULL AND status NOT IN ('cancelled', 'draft')
+      ORDER BY sent_at DESC LIMIT 100
+    `);
+    if (recentSends.length >= 20) { // need at least 20 sends for meaningful rate
+      const bounced = recentSends.filter(r => r.status === 'bounced' || r.delivery_status === 'bounced').length;
+      const bounceRate = (bounced / recentSends.length * 100).toFixed(1);
+      if (bounceRate > 10) {
+        const msg = `Outreach Sender: PAUSED — bounce rate ${bounceRate}% on last ${recentSends.length} sends exceeds 10% safety threshold. Fix email quality before resuming.`;
+        console.warn(`[OutreachSender] ${msg}`);
+        try {
+          const discord = require('../services/discordNotifier');
+          discord.postWebhook({ embeds: [{ title: '🚨 Outreach PAUSED — High Bounce Rate', color: 0xff0000, description: msg, timestamp: new Date().toISOString() }] });
+        } catch {}
+        return { outputText: msg, durationMs: Date.now() - startTime, costUsd: 0, extra: { paused: true, bounceRate: parseFloat(bounceRate) } };
+      }
+    }
+
     // Find approved sequences with contact emails, ordered by urgency score
+    // Support both cfo_leads (Jake/DataRehab) and hoa_contacts (HOA)
     let query = `
       SELECT s.id, s.lead_id, s.email_subject, s.email_body, s.sequence_position, s.source_agent,
              l.contact_email, l.contact_name, l.company_name, l.erp_type, l.city, l.state,
@@ -1369,7 +1517,28 @@ const SPECIAL_HANDLERS = {
     else if (product === 'cfo') query += " AND s.source_agent = 'cfo'";
     query += ` ORDER BY COALESCE(l.urgency_score, 0) DESC, s.created_at ASC LIMIT ?`;
 
-    const sequences = dbAll(query, [dailyLimit]);
+    let sequences = dbAll(query, [dailyLimit]);
+
+    // Also check HOA contacts (hoa_contacts table) for HOA-sourced sequences
+    if (sequences.length < dailyLimit) {
+      const hoaQuery = `
+        SELECT s.id, s.lead_id, s.email_subject, s.email_body, s.sequence_position, s.source_agent,
+               h.email AS contact_email, h.contact_person AS contact_name, h.management_company AS company_name,
+               NULL AS erp_type, h.city, h.state, 0 AS urgency_score, 0 AS pilot_fit_score
+        FROM cfo_outreach_sequences s
+        JOIN hoa_contacts h ON h.id = s.lead_id
+        WHERE s.status = 'approved'
+          AND s.source_agent = 'hoa'
+          AND h.email IS NOT NULL AND h.email != ''
+        ORDER BY s.created_at ASC
+        LIMIT ?
+      `;
+      const hoaSeqs = dbAll(hoaQuery, [dailyLimit - sequences.length]);
+      console.log(`[OutreachSender] HOA query found ${hoaSeqs.length} sequences`);
+      sequences = sequences.concat(hoaSeqs);
+    }
+
+    console.log(`[OutreachSender] Total sequences to send: ${sequences.length} (cfo_leads: ${sequences.filter(s => s.source_agent !== 'hoa').length}, hoa: ${sequences.filter(s => s.source_agent === 'hoa').length})`);
 
     if (sequences.length === 0) {
       return { outputText: 'Outreach Sender: No approved sequences with contact emails ready to send', durationMs: Date.now() - startTime, costUsd: 0 };
@@ -1472,7 +1641,7 @@ const SPECIAL_HANDLERS = {
 
     // SendGrid daily send cap — safety net
     const todaySent = dbGet("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(sent_at)=DATE('now') AND status='sent'")?.c || 0;
-    const dailySendCap = 100; // SendGrid free tier
+    const dailySendCap = parseInt(process.env.SENDGRID_DAILY_CAP) || 2000; // Paid plan — override via SENDGRID_DAILY_CAP env var
     if (todaySent + sequences.length > dailySendCap) {
       const allowed = Math.max(0, dailySendCap - todaySent);
       if (allowed === 0) {
@@ -3010,6 +3179,419 @@ const SPECIAL_HANDLERS = {
     return { outputText, durationMs, costUsd: 0, extra: result };
   },
 
+  // ── Data Rehab Reply Classifier — classifies inbound replies, updates lead status ($0) ──
+  data_rehab_reply_classifier: async ({ message, runId, agent }) => {
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const { lead_id, reply_text } = params;
+
+    if (!lead_id || !reply_text) {
+      throw new Error('Message must be JSON: {"lead_id": 123, "reply_text": "..."}');
+    }
+
+    const lead = get('SELECT * FROM cfo_leads WHERE id = ?', [lead_id]);
+    if (!lead) throw new Error(`Lead ${lead_id} not found`);
+
+    const text = reply_text.toLowerCase();
+
+    let classification = 'NEUTRAL';
+    let newLeadStatus  = null;
+    let newSeqStatus   = null;
+    let nextAction     = 'No action needed — monitor for future re-engagement';
+
+    if (/\b(yes|interested|tell me more|let'?s? talk|schedule|call|would like|sounds good|love to|set up|book|connect)\b/.test(text)) {
+      classification = 'INTERESTED';  newLeadStatus = 'replied';      newSeqStatus = 'replied';
+      nextAction = 'Run data-rehab-meeting-booker to draft an Autopsy kickoff email';
+    } else if (/\b(not right now|maybe later|reach out in|try (me |us )?(again|in|next)|busy|not a (good|right) time|few months|next (quarter|year))\b/.test(text)) {
+      classification = 'NOT_NOW';     newLeadStatus = 'nurture';      newSeqStatus = 'replied';
+      nextAction = 'Move to nurture sequence — re-engage in 60 days';
+    } else if (/\b(wrong person|not my area|not my department|forward(ed)? to|try [A-Z][a-z]|reach out to|you want|should contact)\b/.test(text)) {
+      classification = 'WRONG_PERSON'; newLeadStatus = 'bad_contact'; newSeqStatus = 'replied';
+      nextAction = 'Update contact info — find correct decision maker';
+    } else if (/\b(unsubscribe|remove me|take me off|stop (emailing|contacting)|don'?t (contact|email)|opt out|no more)\b/.test(text)) {
+      classification = 'UNSUBSCRIBE'; newLeadStatus = 'unsubscribed'; newSeqStatus = 'replied';
+      nextAction = 'Do not contact again — marked unsubscribed';
+    } else if (/\b(delivery failed|no such user|mailbox full|undeliverable|bounce|does not exist|invalid address)\b/.test(text)) {
+      classification = 'BOUNCED';     newLeadStatus = 'bounced';      newSeqStatus = 'bounced';
+      nextAction = 'Find correct email address — lead enrichment needed';
+    }
+
+    if (newLeadStatus) {
+      run("UPDATE cfo_leads SET status=?, updated_at=datetime('now') WHERE id=?", [newLeadStatus, lead_id]);
+    }
+    if (newSeqStatus) {
+      run(
+        "UPDATE cfo_outreach_sequences SET status=?, replied_at=datetime('now') WHERE lead_id=? AND status='sent'",
+        [newSeqStatus, lead_id]
+      );
+    }
+
+    // Brain feedback signal
+    brain.recordFeedback('data-rehab-outreach', 'outreach', String(lead_id), classification === 'INTERESTED' ? 'converted' : 'rejected', {
+      notes: `Data Rehab reply classifier: ${classification}. Reply: "${reply_text.slice(0, 100)}"`,
+      metadata: { classification, company: lead.company_name },
+    });
+
+    brain.recordEpisode('data-rehab-reply-classifier', {
+      actionTaken: `Classified reply for lead ${lead_id} (${lead.company_name})`,
+      outcome: `${classification} — ${nextAction}`,
+      outcomeType: classification === 'INTERESTED' ? 'replied' : 'lost',
+      outcomeScore: classification === 'INTERESTED' ? 0.9 : classification === 'NOT_NOW' ? 0.3 : 0.1,
+      signalSource: 'data_rehab_reply',
+    });
+
+    // Deactivate cadence on terminal replies
+    if (['INTERESTED', 'UNSUBSCRIBE', 'BOUNCED'].includes(classification)) {
+      try {
+        const cadence = require('../services/tenacityCadenceEngine');
+        cadence.deactivateCadence(lead_id, 'data-rehab');
+      } catch { /* service may not be seeded yet */ }
+    }
+
+    const outputText = `Data Rehab Reply Classifier: Lead #${lead_id} (${lead.company_name}) → ${classification}\n  Next action: ${nextAction}`;
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: { classification, nextAction, lead_id } };
+  },
+
+  // ── Data Rehab Follow-Up — generates follow-up drafts for contacted leads with no reply ──
+  data_rehab_follow_up: async ({ message, runId, agent }) => {
+    const { all: dbAll } = require('../db/connection');
+    const openclawBridge = require('../services/openclawBridge');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+
+    const params = parseMessageParams(message);
+    const limit  = parseInt(params.limit) || 10;
+    const minDays = parseInt(params.min_days_since_last) || 5;
+
+    // Find Data Rehab leads (workspace_id=4) with no reply after minDays
+    const leads = dbAll(`
+      SELECT l.id, l.company_name, l.contact_name, l.contact_title, l.erp_type, l.city, l.state,
+             s.id AS seq_id, s.email_subject, s.sent_at
+      FROM cfo_leads l
+      JOIN cfo_outreach_sequences s ON s.lead_id = l.id
+      WHERE l.status = 'contacted'
+        AND l.workspace_id = 4
+        AND s.status = 'sent'
+        AND s.sequence_position = 1
+        AND DATE(s.sent_at) <= DATE('now', '-' || ? || ' days')
+        AND NOT EXISTS (
+          SELECT 1 FROM cfo_outreach_sequences s2
+          WHERE s2.lead_id = l.id AND s2.sequence_position = 2
+        )
+      ORDER BY s.sent_at ASC
+      LIMIT ?
+    `, [minDays, limit]);
+
+    if (leads.length === 0) {
+      return { outputText: 'Data Rehab Follow-Up: No leads due for follow-up (all replied or too recent)', durationMs: Date.now() - startTime, costUsd: 0 };
+    }
+
+    let drafted = 0;
+    let failed  = 0;
+    for (const lead of leads) {
+      try {
+        const daysSince = Math.floor((Date.now() - new Date(lead.sent_at).getTime()) / 86400000);
+        const msg = JSON.stringify({
+          lead_id: lead.id,
+          company_name: lead.company_name,
+          contact_name: lead.contact_name,
+          contact_title: lead.contact_title,
+          original_subject: lead.email_subject,
+          days_since_send: daysSince,
+          erp_type: lead.erp_type,
+          city: lead.city,
+          state: lead.state,
+          product: 'data-rehab',
+        });
+
+        const result = await openclawBridge.runAgent('data-rehab-follow-up', {
+          openclawId: 'data-rehab-follow-up',
+          message: msg,
+          sessionId: `data-rehab-followup-${lead.id}-${new Date().toISOString().slice(0,10)}`,
+        });
+
+        const parsed = openclawBridge.constructor.parseOutput(result.output);
+        let data = null;
+        try { data = JSON.parse(parsed.text || result.output || '{}'); } catch {}
+        const body = data?.body_text;
+        if (body) {
+          const subject = data.subject || `Re: ${lead.email_subject}`;
+          const angleType = data.follow_up_angle || 'data_audit';
+
+          // Content guard
+          const { checkContent } = require('../services/contentGuard');
+          const guard = checkContent(body, subject);
+          const status = guard.safe ? 'draft' : 'flagged';
+          if (!guard.safe) {
+            console.warn(`[ContentGuard] data-rehab-follow-up flagged for lead ${lead.id}: ${guard.flags.map(f => `${f.type}:${f.match}`).join(', ')}`);
+          }
+
+          run(
+            `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, source_agent, status, sequence_position, qa_status, angle_type) VALUES (?, 'follow_up', ?, ?, 'data-rehab', ?, 2, 'pending', ?)`,
+            [lead.id, subject, body, status, angleType]
+          );
+
+          // Ralph QA auto-review
+          try {
+            const ralphQA = require('../services/ralphQA');
+            const inserted = get('SELECT id FROM cfo_outreach_sequences WHERE lead_id = ? AND sequence_position = 2 ORDER BY id DESC LIMIT 1', [lead.id]);
+            if (inserted) {
+              const qaResult = ralphQA.reviewSingleOutreach(inserted.id);
+              console.log(`[RalphQA] DR Follow-up #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+            }
+          } catch {}
+
+          brain.observe(
+            `data-rehab-followup-${new Date().toISOString().slice(0,10)}`,
+            'data-rehab-follow-up', 'follow_up_queued',
+            { subject: lead.company_name, content: `Data Rehab follow-up drafted for ${lead.company_name} (${daysSince} days since first touch). Angle: ${angleType}.`, confidence: 0.9,
+              metadata: { lead_id: lead.id, angle: angleType, days_since: daysSince } }
+          );
+          drafted++;
+        } else {
+          failed++;
+        }
+      } catch (e) {
+        console.error(`[data_rehab_follow_up] Failed for lead ${lead.id}:`, e.message);
+        failed++;
+      }
+    }
+
+    const outputText = `Data Rehab Follow-Up: ${drafted} follow-ups drafted, ${failed} failed (of ${leads.length} eligible leads)`;
+    return { outputText, durationMs: Date.now() - startTime, costUsd: 0, extra: { drafted, failed } };
+  },
+
+  // ── Data Rehab Meeting Booker — drafts Autopsy kickoff scheduling email ──
+  data_rehab_meeting_booker: async ({ message, runId, agent }) => {
+    const openclawBridge = require('../services/openclawBridge');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const { lead_id } = params;
+    if (!lead_id) throw new Error('Message must be JSON: {"lead_id": 123}');
+
+    const lead = get('SELECT * FROM cfo_leads WHERE id = ?', [lead_id]);
+    if (!lead) throw new Error(`Lead ${lead_id} not found`);
+    if (lead.status !== 'replied') throw new Error(`Lead status is "${lead.status}" — must be "replied" to book a meeting`);
+
+    const replyText = params.reply_text || 'Interested in learning more about the data audit';
+
+    const msg = JSON.stringify({
+      lead_id, company_name: lead.company_name, contact_name: lead.contact_name,
+      contact_email: lead.contact_email, reply_text: replyText,
+      erp_type: lead.erp_type, city: lead.city, state: lead.state,
+      product: 'data-rehab',
+    });
+
+    const result = await openclawBridge.runAgent('data-rehab-meeting-booker', {
+      openclawId: 'data-rehab-meeting-booker',
+      message: msg,
+      sessionId: `data-rehab-meeting-${lead_id}-${new Date().toISOString().slice(0,10)}`,
+    });
+
+    const parsed = openclawBridge.constructor.parseOutput(result.output);
+    let data = null;
+    try { data = JSON.parse(parsed.text || result.output || '{}'); } catch {}
+
+    const body = data?.body_text;
+    if (!body) throw new Error('Meeting booker returned no email body');
+
+    const calendlyUrl = process.env.CALENDLY_URL || '[INSERT CALENDLY LINK]';
+    const finalBody = body.replace(/\[CALENDLY_URL\]/g, calendlyUrl);
+    const meetingSubject = data.subject || `Data Autopsy Kickoff — ${lead.company_name}`;
+
+    // Content guard — meeting emails reach highest-value contacts
+    const { checkContent } = require('../services/contentGuard');
+    const guard = checkContent(finalBody, meetingSubject);
+    const meetingStatus = guard.safe ? 'draft' : 'flagged';
+    if (!guard.safe) {
+      console.warn(`[ContentGuard] data-rehab-meeting-booker flagged for lead ${lead_id}: ${guard.flags.map(f => `${f.type}:${f.match}`).join(', ')}`);
+    }
+
+    run(
+      `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, source_agent, status, sequence_position, qa_status) VALUES (?, 'meeting', ?, ?, 'data-rehab', ?, 3, 'pending')`,
+      [lead_id, meetingSubject, finalBody, meetingStatus]
+    );
+
+    // Ralph QA auto-review
+    try {
+      const ralphQA = require('../services/ralphQA');
+      const inserted = get('SELECT id FROM cfo_outreach_sequences WHERE lead_id = ? AND sequence_position = 3 ORDER BY id DESC LIMIT 1', [lead_id]);
+      if (inserted) {
+        const qaResult = ralphQA.reviewSingleOutreach(inserted.id);
+        console.log(`[RalphQA] DR Meeting #${inserted.id}: ${qaResult.passed ? 'PASSED' : 'FAILED'} (${qaResult.score}/100)`);
+      }
+    } catch {}
+
+    brain.observe(
+      `data-rehab-meeting-${new Date().toISOString().slice(0,10)}`,
+      'data-rehab-meeting-booker', 'meeting_booked',
+      { subject: lead.company_name, content: `Data Rehab Autopsy kickoff drafted for ${lead.company_name} — ${lead.contact_name}. QA: ${meetingStatus}.`, confidence: 1.0,
+        metadata: { lead_id, company: lead.company_name, city: lead.city, qa_status: meetingStatus } }
+    );
+
+    brain.recordEpisode('data-rehab-meeting-booker', {
+      actionTaken: `Autopsy kickoff email drafted for ${lead.company_name}`,
+      outcome: `Meeting booked — ${lead.company_name}, ${lead.contact_name || 'contact'}`,
+      outcomeType: 'booked',
+      outcomeScore: 1.0,
+      leadId: String(lead_id),
+      signalSource: 'data_rehab',
+    });
+
+    const outputText = `Data Rehab Meeting Booker: Autopsy kickoff draft created for ${lead.contact_name} at ${lead.company_name} | Subject: "${meetingSubject}"`;
+    return { outputText, durationMs: Date.now() - startTime, costUsd: parsed.costUsd || 0, extra: { lead_id, meetingStatus } };
+  },
+
+  // ── Data Rehab Contact Enricher — reuses jakeContactEnricher for workspace_id=4 leads ──
+  data_rehab_enricher: async ({ message, runId, agent }) => {
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+    const parsedLimit = parseInt(params.limit) || 15;
+    const enrichParams = {
+      limit: parsedLimit,
+      min_score: parseInt(params.min_score) || 0,
+      status_filter: params.status_filter || 'pending',
+      workspace_id: 4,
+    };
+
+    // Try Apollo first
+    let apolloResults = { enriched: 0, total: 0, results: [] };
+    try {
+      const apollo = require('../services/apolloEnricher');
+      apolloResults = await apollo.enrichMultipleLeads({ limit: parsedLimit, workspace_id: 4, min_score: enrichParams.min_score, status_filter: enrichParams.status_filter });
+      console.log(`[data_rehab_enricher] Apollo enriched ${apolloResults.enriched}/${parsedLimit}`);
+    } catch (apolloErr) {
+      console.warn('[data_rehab_enricher] Apollo failed, falling back to Playwright:', apolloErr.message);
+    }
+
+    // Fall back to Playwright if Apollo enriched < 50% of requested limit
+    let result;
+    if (apolloResults.enriched >= Math.ceil(parsedLimit * 0.5)) {
+      result = apolloResults;
+    } else {
+      const remainingLimit = parsedLimit - apolloResults.enriched;
+      const { enrichMultipleLeads } = require('../services/jakeContactEnricher');
+      const playwrightResult = await enrichMultipleLeads({
+        ...enrichParams,
+        limit: remainingLimit,
+      });
+      // Merge results
+      result = {
+        enriched: apolloResults.enriched + playwrightResult.enriched,
+        total: apolloResults.total + playwrightResult.total,
+        results: [...apolloResults.results, ...playwrightResult.results],
+      };
+    }
+    const durationMs = Date.now() - startTime;
+    const outputText = [
+      `Data Rehab Enricher: ${result.enriched}/${result.total} enriched in ${(durationMs / 1000).toFixed(1)}s`,
+      ...result.results.slice(0, 10).map(r => `  ${r.company}: ${r.email || 'no email found'} (${r.method || 'failed'})`),
+    ].join('\n');
+
+    // Brain observations for enriched contacts
+    if (result.enriched > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const enrichedLeads = result.results.filter(r => r.email);
+      for (const r of enrichedLeads.slice(0, 20)) {
+        const cityState = [r.city, r.state].filter(Boolean).join(', ');
+        const region = cityState || 'Unknown market';
+        const sessionId = `data-rehab-pipeline-${region.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${today}`;
+        brain.observe(sessionId, 'data-rehab-enricher', 'contact_found', {
+          subject: r.company,
+          content: `${r.company} (${region}): Contact found via ${r.method}. Email: ${r.email}${r.contactName ? '. Name: ' + r.contactName : ''}${r.phone ? '. Phone: ' + r.phone : ''}.`,
+          confidence: r.method === 'pattern_guess' ? 0.6 : 0.9,
+          metadata: { email: r.email, name: r.contactName || null, method: r.method, company_id: r.id },
+        });
+      }
+    }
+
+    const hitRate = result.total > 0 ? Math.round((result.enriched / result.total) * 100) : 0;
+    const methodDist = {};
+    for (const r of result.results) { methodDist[r.method || 'failed'] = (methodDist[r.method || 'failed'] || 0) + 1; }
+
+    brain.recordEpisode('data-rehab-enricher', {
+      actionTaken: `Data Rehab contact enrichment: ${result.total} leads processed`,
+      outcome: `Enriched ${result.enriched}/${result.total} (${hitRate}% hit rate)`,
+      outcomeType: 'enrichment',
+      outcomeScore: hitRate >= 25 ? 0.8 : hitRate >= 15 ? 0.6 : 0.3,
+      signalSource: 'data_rehab_enrichment',
+    });
+
+    return { outputText, durationMs, costUsd: 0, extra: { enrichResult: result, hitRate, methodDist } };
+  },
+
+  // ── Data Rehab Analytics — daily pipeline health for workspace_id=4 ──
+  data_rehab_analytics: async ({ message, runId, agent }) => {
+    const { get: dbGet, all: dbAll } = require('../db/connection');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+
+    // Lead stats by status
+    const leadStats = dbAll("SELECT status, COUNT(*) AS cnt FROM cfo_leads WHERE workspace_id = 4 GROUP BY status ORDER BY cnt DESC") || [];
+    const totalLeads = leadStats.reduce((sum, r) => sum + r.cnt, 0);
+
+    // Outreach stats by status
+    const outreachStats = dbAll(`
+      SELECT s.status, COUNT(*) AS cnt
+      FROM cfo_outreach_sequences s
+      JOIN cfo_leads l ON l.id = s.lead_id
+      WHERE l.workspace_id = 4
+      GROUP BY s.status ORDER BY cnt DESC
+    `) || [];
+    const totalOutreach = outreachStats.reduce((sum, r) => sum + r.cnt, 0);
+
+    // Recent activity (last 7 days)
+    const newLeads7d = dbGet("SELECT COUNT(*) c FROM cfo_leads WHERE workspace_id = 4 AND created_at >= datetime('now', '-7 days')")?.c || 0;
+    const sent7d = dbGet(`
+      SELECT COUNT(*) c FROM cfo_outreach_sequences s
+      JOIN cfo_leads l ON l.id = s.lead_id
+      WHERE l.workspace_id = 4 AND s.status = 'sent' AND s.sent_at >= datetime('now', '-7 days')
+    `)?.c || 0;
+    const replied7d = dbGet(`
+      SELECT COUNT(*) c FROM cfo_outreach_sequences s
+      JOIN cfo_leads l ON l.id = s.lead_id
+      WHERE l.workspace_id = 4 AND s.status = 'replied' AND s.replied_at >= datetime('now', '-7 days')
+    `)?.c || 0;
+
+    const replyRate = sent7d > 0 ? Math.round((replied7d / sent7d) * 100) : 0;
+
+    const leadBreakdown = leadStats.map(r => `${r.status}: ${r.cnt}`).join(' | ');
+    const outreachBreakdown = outreachStats.map(r => `${r.status}: ${r.cnt}`).join(' | ');
+
+    const outputText = [
+      `Data Rehab Analytics — Pipeline Health`,
+      `  Total leads: ${totalLeads} | ${leadBreakdown}`,
+      `  Total outreach: ${totalOutreach} | ${outreachBreakdown}`,
+      `  Last 7 days: ${newLeads7d} new leads, ${sent7d} sent, ${replied7d} replied (${replyRate}% reply rate)`,
+    ].join('\n');
+
+    // Post to Discord
+    try {
+      const discord = require('../services/discordNotifier');
+      await discord.sendEmbed({
+        title: 'Data Rehab — Pipeline Health',
+        description: outputText,
+        color: 0x9C27B0,
+        footer: { text: `${new Date().toISOString().slice(0, 10)} | data-rehab-analytics` },
+      });
+    } catch {}
+
+    brain.recordEpisode('data-rehab-analytics', {
+      actionTaken: 'Daily Data Rehab pipeline health report',
+      outcome: `${totalLeads} leads, ${totalOutreach} outreach sequences, ${replyRate}% 7d reply rate`,
+      outcomeType: 'report',
+      outcomeScore: 0.7,
+      signalSource: 'data_rehab_analytics',
+    });
+
+    const durationMs = Date.now() - startTime;
+    return { outputText, durationMs, costUsd: 0, extra: { totalLeads, totalOutreach, leadStats, outreachStats, replyRate } };
+  },
+
   // ── Pain Signal Monitor — escalation handler ─────────────────────────────
   // Parses LLM output JSON, creates/boosts leads, posts Discord alerts.
   pain_signal_monitor: async ({ message, runId, agent }) => {
@@ -3496,6 +4078,20 @@ const SPECIAL_HANDLERS = {
   },
 };
 
+// ── DC Site Intel handlers (injected after SPECIAL_HANDLERS definition) ──────
+const dcIntel = require('../services/dcIntel');
+SPECIAL_HANDLERS.dc_intel_deal_monitor = dcIntel.dcIntelDealMonitor;
+SPECIAL_HANDLERS.dc_intel_owner_research = dcIntel.dcIntelOwnerResearch;
+SPECIAL_HANDLERS.dc_intel_research_queue = dcIntel.dcIntelResearchQueue;
+SPECIAL_HANDLERS.dc_intel_opportunity_scout = dcIntel.dcIntelOpportunityScout;
+SPECIAL_HANDLERS.dc_intel_daily_scorecard = dcIntel.dcIntelDailyScorecard;
+SPECIAL_HANDLERS.dc_intel_learning_loop = dcIntel.dcIntelLearningLoop;
+SPECIAL_HANDLERS.dc_intel_auto_generate = dcIntel.dcIntelAutoGenerate;
+SPECIAL_HANDLERS.dc_intel_rto_scanner = dcIntel.dcIntelRTOScanner;
+SPECIAL_HANDLERS.dc_intel_planning_scanner = dcIntel.dcIntelPlanningScanner;
+SPECIAL_HANDLERS.dc_intel_distress_scanner = dcIntel.dcIntelDistressScanner;
+SPECIAL_HANDLERS.dc_intel_meta_reviewer = dcIntel.dcIntelMetaReviewer;
+
 // ════════════════════════════════════════════════════════════════════════════
 // ROUTES
 // ════════════════════════════════════════════════════════════════════════════
@@ -3745,7 +4341,7 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
 
       // Post-process LLM output into unified marketing pipeline
       const { postProcessLLMOutput } = require('../services/postProcessor');
-      postProcessLLMOutput(agent, outputText, message);
+      postProcessLLMOutput(agent, outputText, message, { runId });
 
       // WebSocket events
       try {

@@ -1,87 +1,43 @@
 import { useState, useEffect, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
 
 const API_BASE = "/api/discovery";
 
-// ── Status badge colors ──────────────────────────────────────────
-const STATUS_COLORS = {
-  success: { bg: "#0d2818", text: "#22c55e", border: "#166534" },
-  running: { bg: "#1a1a2e", text: "#60a5fa", border: "#1e3a5f" },
-  failed: { bg: "#2d1215", text: "#ef4444", border: "#7f1d1d" },
-  pending: { bg: "#1c1917", text: "#a3a3a3", border: "#404040" },
+// ── Status badge ─────────────────────────────────────────────────
+const STATUS_CLASSES = {
+  success: "bg-accent-success/10 text-accent-success border-accent-success/30",
+  running: "bg-accent-info/10 text-accent-info border-accent-info/30",
+  failed: "bg-accent-danger/10 text-accent-danger border-accent-danger/30",
+  pending: "bg-bg-secondary text-text-muted border-border",
 };
 
 function StatusBadge({ status }) {
-  const colors = STATUS_COLORS[status] || STATUS_COLORS.pending;
+  const cls = STATUS_CLASSES[status] || STATUS_CLASSES.pending;
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 10px",
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 600,
-        letterSpacing: "0.5px",
-        textTransform: "uppercase",
-        background: colors.bg,
-        color: colors.text,
-        border: `1px solid ${colors.border}`,
-      }}
-    >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: colors.text,
-          animation: status === "running" ? "pulse 1.5s infinite" : "none",
-        }}
-      />
+    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider border ${cls}`}>
+      <span className={`w-1.5 h-1.5 rounded-full bg-current ${status === "running" ? "animate-pulse" : ""}`} />
       {status}
     </span>
   );
 }
 
 // ── Stat card ────────────────────────────────────────────────────
+const ACCENT_CLASSES = {
+  "#f97316": "text-accent-warning",
+  "#22c55e": "text-accent-success",
+  "#60a5fa": "text-accent-info",
+  "#8b5cf6": "text-purple-400",
+};
+
 function StatCard({ label, value, sub, accent = "#f97316" }) {
+  const accentClass = ACCENT_CLASSES[accent] || "text-accent-warning";
   return (
-    <div
-      style={{
-        background: "#111",
-        border: "1px solid #222",
-        borderRadius: 10,
-        padding: "20px 24px",
-        minWidth: 160,
-        flex: 1,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.8px",
-          color: "#666",
-          marginBottom: 8,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 32,
-          fontWeight: 700,
-          color: accent,
-          lineHeight: 1,
-          fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
-        }}
-      >
+    <div className="bg-bg-elevated border border-border rounded-lg p-4 min-w-[160px] flex-1">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-2">{label}</div>
+      <div className={`text-3xl font-bold leading-none font-mono ${accentClass}`}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </div>
-      {sub && (
-        <div style={{ fontSize: 12, color: "#555", marginTop: 6 }}>{sub}</div>
-      )}
+      {sub && <div className="text-xs text-text-muted mt-1.5">{sub}</div>}
     </div>
   );
 }
@@ -303,18 +259,8 @@ export default function DiscoveryDashboard() {
 
   if (loading) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "#0a0a0a",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#666",
-          fontFamily: "'Inter', system-ui, sans-serif",
-        }}
-      >
-        Loading pipeline data...
+      <div className="min-h-screen bg-bg-primary flex items-center justify-center text-text-muted text-sm gap-2">
+        <RefreshCw size={16} className="animate-spin" /> Loading pipeline data...
       </div>
     );
   }
@@ -376,21 +322,12 @@ export default function DiscoveryDashboard() {
   ];
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0a0a0a",
-        color: "#e5e5e5",
-        fontFamily: "'Inter', system-ui, sans-serif",
-        padding: "24px 32px",
-      }}
-    >
+    <div className="min-h-screen bg-bg-primary text-text-primary px-8 py-6">
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
         }
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
       `}</style>
 
       {/* Header */}

@@ -70,6 +70,8 @@ const leadCaptureRoutes      = require('./routes/leadCapture');
 const dataAuditRoutes        = require('./routes/dataAudit');
 const stripeWebhookRoutes    = require('./routes/stripeWebhook');
 const commandCenterRoutes    = require('./routes/commandCenter');
+const dreamTeamRoutes        = require('./routes/dreamTeam');
+const autoApprovalRoutes     = require('./routes/autoApproval');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -288,6 +290,8 @@ async function startServer() {
     app.use('/api/data-audit', dataAuditRoutes);
     app.use('/api/stripe', stripeWebhookRoutes);
     app.use('/api/command-center', commandCenterRoutes);
+    app.use('/api/dream-team', dreamTeamRoutes);
+    app.use('/api/auto-approval', autoApprovalRoutes);
 
     // Workspaces API (lightweight inline route)
     const { Router: WsRouter } = require('express');

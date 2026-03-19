@@ -22,6 +22,7 @@ export const NAV_SECTIONS = [
       { path: '/schedule', label: 'Scheduler', icon: 'Clock' },
       { path: '/monitor', label: 'Monitor', icon: 'Activity' },
       { path: '/results', label: 'Results', icon: 'Database' },
+      { path: '/brain', label: 'Brain', icon: 'Brain' },
     ],
   },
   {

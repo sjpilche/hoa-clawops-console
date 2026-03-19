@@ -67,6 +67,9 @@ async function initDatabase() {
   db.run(schema);
   console.log('[Database] Schema applied successfully');
 
+  // Step 4.1: Enable foreign key enforcement
+  db.run('PRAGMA foreign_keys = ON');
+
   // Step 4.5: Run SQL migrations
   const migrationsDir = path.join(__dirname, 'migrations');
   if (fs.existsSync(migrationsDir)) {

@@ -49,6 +49,17 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 // 1. EVENT WEBHOOK — bounce, delivered, open, click, spamreport
 // ════════════════════════════════════════════════════════════════════════════
 
+// Helper: trace outreach sequence back to source run and retro-update the episode
+function retroUpdateFromSequence(seqId, outcomeType, outcomeScore, outcome) {
+  try {
+    const seq = get('SELECT source_run_id FROM cfo_outreach_sequences WHERE id = ?', [seqId]);
+    if (seq?.source_run_id) {
+      const brain = require('../services/collectiveBrain');
+      brain.retroUpdateEpisode(seq.source_run_id, { outcomeType, outcomeScore, outcome });
+    }
+  } catch {} // non-fatal
+}
+
 router.post('/sendgrid', (req, res) => {
   const events = Array.isArray(req.body) ? req.body : [req.body];
 
@@ -85,6 +96,7 @@ router.post('/sendgrid', (req, res) => {
               const cadence = require('../services/tenacityCadenceEngine');
               cadence.deactivateCadence(seq.lead_id, 'jake');
             } catch {}
+            retroUpdateFromSequence(seq.id, 'bounced', 0.0, `Email bounced: ${event.reason || eventType}`);
             bounced++;
           }
           break;
@@ -107,6 +119,7 @@ router.post('/sendgrid', (req, res) => {
               const cadence = require('../services/tenacityCadenceEngine');
               cadence.deactivateCadence(seq.lead_id, 'jake');
             } catch {}
+            retroUpdateFromSequence(seq.id, 'spam_report', 0.0, 'Marked as spam');
             complained++;
           }
           break;
@@ -124,6 +137,7 @@ router.post('/sendgrid', (req, res) => {
               revenue.recordEvent(seq.lead_id, 'contacted', { agent: 'outreach-sender', sequenceId: seq.id, channel: 'email' });
               revenue.updateVariantOutcome(seq.id, 'delivered', 1);
             }
+            retroUpdateFromSequence(seq.id, 'delivered', 0.4, 'Email delivered');
             delivered++;
           }
           break;
@@ -153,6 +167,8 @@ router.post('/sendgrid', (req, res) => {
                 revenue.updateVariantOutcome(seq2.id, 'first_click_at', new Date().toISOString());
               }
             }
+            // Retro-update: open = 0.5, click = 0.6 (higher engagement signal)
+            retroUpdateFromSequence(seq2.id, eventType === 'open' ? 'opened' : 'clicked', eventType === 'open' ? 0.5 : 0.6, `Email ${eventType}`);
           }
           break;
         }
@@ -353,6 +369,15 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
         daysToOutcome,
         leadId: String(lead.id),
       });
+
+      // Retro-update the original episode that generated this outreach
+      if (lastSeq) {
+        retroUpdateFromSequence(lastSeq.id,
+          outcomeTypes[classification.type] || 'replied',
+          outcomeScores[classification.type] ?? 0.5,
+          outcomeTexts[classification.type] || 'Reply received'
+        );
+      }
     } catch (brainErr) {
       console.warn('[Inbound] Brain update failed (non-fatal):', brainErr.message);
     }
@@ -420,10 +445,12 @@ router.post('/sendgrid/inbound', upload.any(), async (req, res) => {
         console.warn('[Inbound] Discord alert failed (non-fatal):', discordErr.message);
       }
 
-      // Auto-queue meeting booker run
+      // Auto-queue meeting booker run (workspace-aware)
       try {
         const systemUser = get("SELECT id FROM users LIMIT 1");
-        const meetingAgent = get("SELECT id FROM agents WHERE name='jake-meeting-booker'");
+        const bookerName = lead.workspace_id === 4 ? 'data-rehab-meeting-booker' : 'jake-meeting-booker';
+        const meetingAgent = get("SELECT id FROM agents WHERE name=?", [bookerName])
+          || get("SELECT id FROM agents WHERE name='jake-meeting-booker'"); // fallback
         if (meetingAgent && systemUser) {
           const runId = uuidv4();
           run(

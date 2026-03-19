@@ -73,8 +73,10 @@ function detectAngleType(body) {
  * @param {object} agent  - Agent record { id, name, config }
  * @param {string} outputText - Raw text output from the agent
  * @param {string} message - The prompt/message sent to the agent
+ * @param {object} [opts] - Optional metadata
+ * @param {string} [opts.runId] - Run ID for outcome attribution tracing
  */
-function postProcessLLMOutput(agent, outputText, message) {
+async function postProcessLLMOutput(agent, outputText, message, { runId } = {}) {
   if (!outputText || !agent?.name) return;
 
   try {
@@ -128,9 +130,14 @@ function postProcessLLMOutput(agent, outputText, message) {
           }
         } catch {}
 
-        // Auto-queue social amplification for QA-passed blog content
+        // Auto-approve QA-passed content + queue social amplification
         try {
-          const inserted = get('SELECT id, title, qa_status, channel FROM cfo_content_pieces WHERE source_agent = ? ORDER BY id DESC LIMIT 1', [source]);
+          const inserted = get('SELECT id, title, qa_status, qa_score, channel FROM cfo_content_pieces WHERE source_agent = ? ORDER BY id DESC LIMIT 1', [source]);
+          // Auto-approve content that passes QA with score >= 85
+          if (inserted && inserted.qa_status === 'passed' && (inserted.qa_score || 0) >= 85) {
+            run("UPDATE cfo_content_pieces SET status = 'approved' WHERE id = ? AND status = 'draft'", [inserted.id]);
+            console.log(`[PostProcessor] Auto-approved content #${inserted.id} "${inserted.title}" (QA: ${inserted.qa_score})`);
+          }
           if (inserted && inserted.qa_status === 'passed' && inserted.channel === 'blog') {
             // Queue social derivatives spread across the week
             const title = inserted.title || 'New post';
@@ -174,8 +181,8 @@ function postProcessLLMOutput(agent, outputText, message) {
         const angleType = detectAngleType(body);
 
         run(
-          `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, source_agent, status, qa_status, angle_type, workspace_id) VALUES (?, 'blitz', ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-          [leadId, subject, body, p.pilot_offer || null, source, status, angleType, wsId]
+          `INSERT INTO cfo_outreach_sequences (lead_id, sequence_type, email_subject, email_body, pilot_offer, source_agent, status, qa_status, angle_type, workspace_id, source_run_id) VALUES (?, 'blitz', ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+          [leadId, subject, body, p.pilot_offer || null, source, status, angleType, wsId, runId || null]
         );
 
         // Auto-trigger Ralph QA on the newly inserted draft
@@ -196,6 +203,17 @@ function postProcessLLMOutput(agent, outputText, message) {
                 metadata: { lead_id: leadId, qa_score: qaResult.score, qa_passed: qaResult.passed, angle_type: angleType, source_agent: source },
               });
             } catch {}
+
+            // Auto-approval: if QA passed, evaluate for autonomous send
+            if (qaResult.passed) {
+              try {
+                const autoApproval = require('./autoApprovalEngine');
+                const decision = await autoApproval.processNewDraft(inserted.id);
+                console.log(`[AutoApproval] Outreach #${inserted.id}: ${decision.decision} — ${decision.reason}`);
+              } catch (autoErr) {
+                console.warn('[AutoApproval] Non-fatal:', autoErr.message);
+              }
+            }
           }
         } catch (qaErr) {
           console.warn('[RalphQA] Auto-review failed (non-fatal):', qaErr.message);

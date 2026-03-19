@@ -25,6 +25,45 @@ import React from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { getToken } from '@/lib/api';
 
+/**
+ * Error Boundary — catches any React render crash and shows a fallback
+ * instead of killing the entire UI.
+ */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('[ErrorBoundary] Uncaught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '2rem', fontFamily: 'monospace', maxWidth: '600px', margin: '4rem auto' }}>
+          <h1 style={{ color: '#ef4444', fontSize: '1.5rem' }}>Something went wrong</h1>
+          <pre style={{ background: '#1e1e1e', color: '#f5f5f5', padding: '1rem', borderRadius: '8px', overflow: 'auto', marginTop: '1rem', fontSize: '0.85rem' }}>
+            {this.state.error?.message || 'Unknown error'}
+          </pre>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+            style={{ marginTop: '1rem', padding: '0.5rem 1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Layout
 import AppShell from '@/components/layout/AppShell';
 
@@ -68,6 +107,7 @@ import OpportunityEnginePage from '@/pages/OpportunityEnginePage';
 import RSEEnginePage from '@/pages/RSEEnginePage';
 import AgentDirectoryPage from '@/pages/AgentDirectoryPage';
 import RevenueDashboard from '@/pages/RevenueDashboard';
+import BrainPage from '@/pages/BrainPage';
 
 /**
  * Protected Route wrapper.
@@ -83,6 +123,7 @@ function ProtectedRoute({ children }) {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <Routes>
       {/* Public route — login page */}
       <Route path="/login" element={<LoginPage />} />
@@ -130,6 +171,7 @@ export default function App() {
         <Route path="/opportunities" element={<OpportunityEnginePage />} />
         <Route path="/rse" element={<RSEEnginePage />} />
         <Route path="/revenue" element={<RevenueDashboard />} />
+        <Route path="/brain" element={<BrainPage />} />
         <Route path="/audit" element={<AuditLogPage />} />
         <Route path="/costs" element={<CostDashboardPage />} />
         <Route path="/help" element={<HelpPage />} />
@@ -145,5 +187,6 @@ export default function App() {
       {/* Catch-all — redirect unknown routes to dashboard */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </ErrorBoundary>
   );
 }

@@ -736,6 +736,17 @@ CREATE INDEX IF NOT EXISTS idx_blitz_results_status ON blitz_results(status);
 CREATE INDEX IF NOT EXISTS idx_blitz_runs_status ON blitz_runs(status);
 
 -- ==============================================================================
+-- Additional performance indexes (added 2026-03-18)
+-- ==============================================================================
+CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
+CREATE INDEX IF NOT EXISTS idx_schedules_agent ON schedules(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_skills_agent ON agent_skills(agent_id);
+CREATE INDEX IF NOT EXISTS idx_training_benchmarks_agent ON training_benchmarks(agent_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_status_created ON lg_engagement_queue(status, created_at DESC);
+-- idx_outreach_queue_status removed — outreach_queue table merged into mgmt_outreach_queue
+CREATE INDEX IF NOT EXISTS idx_runs_agent_status ON runs(agent_id, status);
+
+-- ==============================================================================
 -- Verify Migration
 -- ==============================================================================
 -- Check that tables were created successfully

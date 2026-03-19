@@ -286,6 +286,23 @@ async function buildCadenceMessage(leadId, product = 'jake', touchNumber) {
     `  Previous touches:\n${touchHistory}`,
   ].join('\n');
 
+  // Select pilot offer based on lead signals + touch number
+  let pilotOffer = null;
+  let pilotContext = '';
+  if (product === 'jake' || product === 'cfo') {
+    pilotOffer = 'spend_leak'; // Default: $490 Spend Leak Finder (lowest friction)
+    if (lead.erp_type && /Vista|Sage/i.test(lead.erp_type) && touchNumber >= 4) {
+      pilotOffer = 'close_acceleration'; // Upsell for known ERP users on later touches
+    }
+    const offerDetails = {
+      spend_leak: { name: 'Spend Leak Finder', price: '$490', duration: '7 days', hook: 'We find duplicate payments, recurring overcharges, and vendor consolidation opportunities' },
+      close_acceleration: { name: 'Close Acceleration', price: '$950', duration: '10 days', hook: 'Streamline your month-end close — most clients cut 3-5 days off their cycle' },
+      get_paid_faster: { name: 'Get Paid Faster', price: '$750', duration: '14 days', hook: 'AR analysis that identifies stuck invoices and accelerates cash collection' },
+    };
+    const offer = offerDetails[pilotOffer];
+    pilotContext = `\n\nPILOT OFFER — Include this naturally in the email:\n  Offer: ${offer.name} (${offer.price}, ${offer.duration})\n  Hook: "${offer.hook}"\n  Tone: Position as a low-risk diagnostic, not a sales pitch. Make it feel like a favor, not an ask.`;
+  }
+
   // Assemble the full agent message payload
   const payload = {
     lead_id:      leadId,
@@ -301,7 +318,8 @@ async function buildCadenceMessage(leadId, product = 'jake', touchNumber) {
     channel:      step.channel,
     is_first:     isFirst,
     auto_queued:  true,
-    cadence_context: cadenceContext + dossierText + brainExamples + chromaPatterns,
+    pilot_offer:  pilotOffer,
+    cadence_context: cadenceContext + dossierText + brainExamples + chromaPatterns + pilotContext,
   };
 
   return JSON.stringify(payload);

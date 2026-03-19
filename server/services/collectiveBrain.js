@@ -590,7 +590,8 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
  * @param {object} opts
  * @returns {Promise<object[]>}
  */
-async function getSimilarEpisodes({ market, erpContext, companyType, outcomeType, minScore = 0.5, limit = 5 } = {}) {
+async function getSimilarEpisodes({ market, erpContext, companyType, outcomeType, minScore = 0.5, limit = 5, productLine } = {}) {
+  // Try Azure SQL first (structured query)
   try {
     const pool = await getPool();
     const req = pool.request().input('min_score', sql.Float, minScore).input('limit', sql.Int, limit);
@@ -610,8 +611,30 @@ async function getSimilarEpisodes({ market, erpContext, companyType, outcomeType
     `);
     return result.recordset;
   } catch (err) {
-    console.warn('[CollectiveBrain] getSimilarEpisodes error:', err.message);
-    return [];
+    // Azure failed — fall back to ChromaBrain semantic search
+    console.warn('[CollectiveBrain] getSimilarEpisodes Azure failed, trying ChromaBrain:', err.message);
+    try {
+      const query = [market, erpContext, companyType, outcomeType].filter(Boolean).join(' ');
+      if (!query) return [];
+      const chromaResults = await chromaBrain.queryRelevant(query, limit, {
+        collection: 'episodes',
+        product: productLine || null,
+        outcome_score_min: minScore,
+      });
+      return chromaResults.map(r => ({
+        market: r.metadata?.market || '',
+        company_type: '',
+        erp_context: r.metadata?.erp || '',
+        contact_title: r.metadata?.contact_title || '',
+        action_taken: r.content?.split('Approach: ')[1]?.split('\n')[0] || r.content?.slice(0, 200) || '',
+        outcome: r.content?.split('Result: ')[1]?.split('\n')[0] || '',
+        outcome_type: r.metadata?.outcome_type || 'unknown',
+        outcome_score: r.metadata?.outcome_score || 0.5,
+        days_to_outcome: r.metadata?.days_to_outcome || null,
+      }));
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -697,16 +720,16 @@ async function addToKnowledgeBase({ sourceAgent, contentType, title, content, qu
  * @param {object} opts
  * @returns {Promise<object[]>}
  */
-async function getKnowledgeExamples(contentType, { market, erpContext, limit = 3 } = {}) {
+async function getKnowledgeExamples(contentType, { market, erpContext, limit = 3, productLine } = {}) {
   try {
     const pool = await getPool();
     const req = pool.request()
-      .input('content_type', sql.NVarChar, contentType)
-      .input('limit',        sql.Int,      limit);
+      .input('limit', sql.Int, limit);
 
-    let where = 'WHERE content_type = @content_type';
-    if (market)     { req.input('market', sql.NVarChar, market);     where += ' AND (market = @market OR market IS NULL)'; }
-    if (erpContext) { req.input('erp',    sql.NVarChar, erpContext);  where += ' AND (erp_context = @erp OR erp_context IS NULL)'; }
+    let where = 'WHERE quality_score > 0';
+    if (contentType) { req.input('content_type', sql.NVarChar, contentType); where += ' AND content_type = @content_type'; }
+    if (market)      { req.input('market', sql.NVarChar, market);            where += ' AND (market = @market OR market IS NULL)'; }
+    if (erpContext)  { req.input('erp',    sql.NVarChar, erpContext);         where += ' AND (erp_context = @erp OR erp_context IS NULL)'; }
 
     const result = await req.query(`
       SELECT TOP (@limit) source_agent, title, content, quality_score, market, erp_context, tags, use_count
@@ -777,7 +800,8 @@ async function runDistillation() {
   const outreach = all(`
     SELECT id, email_subject, email_body, source_agent, status
     FROM cfo_outreach_sequences
-    WHERE status = 'approved'
+    WHERE status IN ('approved', 'sent')
+      AND (qa_status = 'passed' OR status = 'approved')
       AND email_body IS NOT NULL AND email_body != ''
     ORDER BY created_at DESC
     LIMIT 50
@@ -926,8 +950,40 @@ async function runDistillation() {
     } else skipped++;
   }
 
-  console.log(`[CollectiveBrain] Distillation: ${inserted} new, ${skipped} already in KB`);
-  return { inserted, skipped };
+  // ── KB Quality Decay — downgrade patterns that led to bounces/losses ──
+  let decayed = 0;
+  try {
+    const pool = await getPool();
+    // Find recent negative outcomes (bounced, lost, no_response)
+    const badOutcomes = await pool.request().query(`
+      SELECT DISTINCT action_taken FROM agent_episodes
+      WHERE outcome_type IN ('bounced', 'lost', 'no_response')
+        AND created_at > DATEADD(day, -7, GETDATE())
+        AND outcome_score < 0.3
+    `);
+
+    // Decay quality_score of KB entries whose content matches bad approach patterns
+    for (const row of badOutcomes.recordset) {
+      if (!row.action_taken || row.action_taken.length < 20) continue;
+      // Extract key phrases (first 100 chars) to match against KB
+      const snippet = row.action_taken.slice(0, 100).replace(/'/g, "''");
+      const decay = await pool.request().query(`
+        UPDATE agent_knowledge_base
+        SET quality_score = quality_score * 0.9
+        WHERE content LIKE '%${snippet.slice(0, 50)}%'
+          AND quality_score > 0.1
+      `);
+      if (decay.rowsAffected[0] > 0) decayed += decay.rowsAffected[0];
+    }
+
+    if (decayed > 0) console.log(`[CollectiveBrain] KB decay: ${decayed} entries downgraded from negative outcomes`);
+  } catch (err) {
+    // Non-fatal — decay is an optimization, not critical
+    console.warn('[CollectiveBrain] KB decay error (non-fatal):', err.message);
+  }
+
+  console.log(`[CollectiveBrain] Distillation: ${inserted} new, ${skipped} already in KB, ${decayed} decayed`);
+  return { inserted, skipped, decayed };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -979,11 +1035,13 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
     : agentName.startsWith('data-rehab') ? 'data_rehab'
     : 'jake');
 
+  // Always fetch episodes and KB — not just when market/contentType are provided.
+  // Agents learn from ALL outcomes, not just market-specific ones.
   const [obsBlock, feedbackBlock, episodesBlock, knowledgeBlock] = await Promise.all([
     getObservationsPromptBlock(sessionId, opts.obsTypes || []),
     getFeedbackPromptBlock(agentName, 6),
-    opts.market ? getEpisodesPromptBlock({ market: opts.market, erpContext: opts.erpContext, limit: 3, productLine }) : Promise.resolve(''),
-    opts.contentType ? getKnowledgePromptBlock(opts.contentType, { market: opts.market, erpContext: opts.erpContext, currentAgent: agentName, productLine }) : Promise.resolve(''),
+    getEpisodesPromptBlock({ market: opts.market || null, erpContext: opts.erpContext || null, limit: 3, productLine }),
+    getKnowledgePromptBlock(opts.contentType || null, { market: opts.market || null, erpContext: opts.erpContext || null, currentAgent: agentName, productLine }),
   ]);
 
   const blocks = [obsBlock, feedbackBlock, episodesBlock, knowledgeBlock].filter(b => b.trim());
@@ -1035,7 +1093,13 @@ async function buildAgentContext(agentName, sessionId, opts = {}) {
     }
   } catch {} // Non-fatal if Dream Team tables don't exist yet
 
-  return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + assembled + signalBlock + learnedBlock + '━━━ END CONTEXT ━━━\n\n';
+  // ── Market Intelligence: Inject conversion rates by market ──
+  let marketBlock = '';
+  try {
+    marketBlock = getMarketIntelligenceBlock();
+  } catch {} // Non-fatal
+
+  return '\n\n━━━ COLLECTIVE BRAIN CONTEXT ━━━' + assembled + signalBlock + learnedBlock + marketBlock + '━━━ END CONTEXT ━━━\n\n';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1177,6 +1241,85 @@ function autoFeedbackStaleDrafts() {
   }
 }
 
+/**
+ * Retroactively update an episode when a real outcome arrives (e.g. SendGrid webhook).
+ * The original episode was recorded at run time with a placeholder score (output length).
+ * This replaces it with the REAL outcome: replied, bounced, opened, etc.
+ *
+ * @param {string} runId - Original run_id stored on the episode
+ * @param {object} update
+ * @param {string} update.outcomeType - e.g. 'replied', 'bounced', 'opened', 'delivered'
+ * @param {number} update.outcomeScore - 0.0 to 1.0
+ * @param {string} [update.outcome] - Human-readable description
+ */
+function retroUpdateEpisode(runId, { outcomeType, outcomeScore, outcome }) {
+  if (!runId) return;
+  const { run: dbRun } = require('../db/connection');
+
+  try {
+    dbRun(
+      `UPDATE brain_fallback_episodes
+       SET outcome_type = ?, outcome_score = ?, outcome = ?
+       WHERE run_id = ?`,
+      [outcomeType, outcomeScore, outcome || outcomeType, runId]
+    );
+    console.log(`[CollectiveBrain] Retro-updated episode for run ${runId}: ${outcomeType} (${outcomeScore})`);
+  } catch (err) {
+    console.warn('[CollectiveBrain] retroUpdateEpisode fallback error:', err.message);
+  }
+
+  // Also update Azure (fire-and-forget)
+  (async () => {
+    try {
+      const pool = await getPool();
+      const sql = require('mssql');
+      await pool.request()
+        .input('run_id', sql.NVarChar, runId)
+        .input('outcome_type', sql.NVarChar, outcomeType)
+        .input('outcome_score', sql.Float, outcomeScore)
+        .input('outcome', sql.NVarChar, outcome || outcomeType)
+        .query(`UPDATE agent_episodes
+                SET outcome_type = @outcome_type, outcome_score = @outcome_score, outcome = @outcome
+                WHERE run_id = @run_id`);
+    } catch {} // Azure may be unavailable — non-fatal
+  })();
+}
+
+/**
+ * Get market intelligence — conversion rates by market for agent context injection.
+ * Returns a formatted prompt block showing which markets are performing.
+ */
+function getMarketIntelligenceBlock() {
+  try {
+    const { all: dbAll } = require('../db/connection');
+    const markets = dbAll(`
+      SELECT market,
+        COUNT(*) as total,
+        ROUND(AVG(outcome_score), 2) as avg_score,
+        SUM(CASE WHEN outcome_type IN ('replied', 'booked', 'converted') THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN outcome_type IN ('bounced', 'failed') THEN 1 ELSE 0 END) as losses
+      FROM brain_fallback_episodes
+      WHERE market IS NOT NULL AND market != ''
+      GROUP BY market
+      HAVING COUNT(*) >= 3
+      ORDER BY avg_score DESC
+      LIMIT 10
+    `);
+
+    if (!markets || markets.length === 0) return '';
+
+    let block = '\n--- MARKET INTELLIGENCE (from real outcomes) ---\n';
+    for (const m of markets) {
+      const winRate = m.total > 0 ? Math.round((m.wins / m.total) * 100) : 0;
+      block += `• ${m.market}: ${m.total} episodes, avg score ${m.avg_score}, ${winRate}% win rate (${m.wins}W/${m.losses}L)\n`;
+    }
+    block += 'Focus on high-performing markets. Adjust approach for low-scoring markets.\n---\n';
+    return block;
+  } catch {
+    return '';
+  }
+}
+
 module.exports = {
   ensureTables,
   // Layer 1
@@ -1191,6 +1334,7 @@ module.exports = {
   recordEpisode,
   getSimilarEpisodes,
   getEpisodesPromptBlock,
+  retroUpdateEpisode,
   // Layer 4
   addToKnowledgeBase,
   getKnowledgeExamples,
@@ -1200,6 +1344,7 @@ module.exports = {
   brainCouncilSummary,
   // Composite
   buildAgentContext,
+  getMarketIntelligenceBlock,
   getStats,
   // Fallback
   drainFallback,

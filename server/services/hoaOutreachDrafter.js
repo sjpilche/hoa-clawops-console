@@ -390,9 +390,9 @@ function personalizeTemplate(template, lead, hoa, contact, scan) {
     '{{similar_hoa_example}}': `${hoa.city} ${['Estates', 'Gardens', 'Village', 'Shores'][Math.floor(Math.random() * 4)]} HOA`,
     '{{min_loan}}': '$' + minLoan,
     '{{max_loan}}': '$' + maxLoan,
-    '{{sender_name}}': 'Steve Pilcher', // TODO: Make configurable
-    '{{sender_title}}': 'Senior Project Funding Advisor',
-    '{{sender_phone}}': '(954) 555-0123', // TODO: Make configurable
+    '{{sender_name}}': process.env.OUTREACH_SENDER_NAME || 'Steve Pilcher',
+    '{{sender_title}}': process.env.OUTREACH_SENDER_TITLE || 'Senior Project Funding Advisor',
+    '{{sender_phone}}': process.env.OUTREACH_SENDER_PHONE || '(954) 555-0123',
   };
 
   let personalized = template;

@@ -77,17 +77,14 @@ router.post('/login', validateBody(loginSchema), (req, res, next) => {
  */
 router.get('/me', authenticate, (req, res, next) => {
   try {
-    console.log('[Auth] /me request - user ID:', req.user?.id);
     const user = get('SELECT id, email, name, role FROM users WHERE id = ?', [req.user.id]);
     if (!user) {
-      console.log('[Auth] /me failed - user not found in database');
       throw new AppError(
         'User not found. Your account may have been deleted.',
         'AUTH_USER_NOT_FOUND',
         404
       );
     }
-    console.log('[Auth] /me success - returning user:', user.email);
     res.json({ user });
   } catch (error) {
     console.error('[Auth] /me error:', error.message);

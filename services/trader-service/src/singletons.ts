@@ -9,6 +9,8 @@ import type { TradingScheduler } from './engine/ai-panel/scheduler';
 import type { PanelRunner } from './engine/ai-panel/panel-runner';
 import type { CopyTradeEngine } from './engine/copy-trade/copy-trade-engine';
 import type { ExecStore } from './db/exec-store';
+import type { AttributionStore } from './engine/allocation/attribution-store';
+import type { CapitalAllocator } from './engine/allocation/capital-allocator';
 
 let _brain: BrainStore | null = null;
 let _scheduler: TradingScheduler | null = null;
@@ -16,6 +18,8 @@ let _outcomeTracker: OutcomeTracker | null = null;
 let _panelRunner: PanelRunner | null = null;
 let _copyEngine: CopyTradeEngine | null = null;
 let _execStore: ExecStore | null = null;
+let _attributionStore: AttributionStore | null = null;
+let _capitalAllocator: CapitalAllocator | null = null;
 
 export function setBrain(b: BrainStore | null) { _brain = b; }
 export function setScheduler(s: TradingScheduler | null) { _scheduler = s; }
@@ -23,6 +27,8 @@ export function setOutcomeTracker(t: OutcomeTracker | null) { _outcomeTracker = 
 export function setPanelRunner(p: PanelRunner | null) { _panelRunner = p; }
 export function setCopyEngine(c: CopyTradeEngine | null) { _copyEngine = c; }
 export function setExecStore(e: ExecStore | null) { _execStore = e; }
+export function setAttributionStore(a: AttributionStore | null) { _attributionStore = a; }
+export function setCapitalAllocator(a: CapitalAllocator | null) { _capitalAllocator = a; }
 
 export function getBrain(): BrainStore | null { return _brain; }
 export function getScheduler(): TradingScheduler | null { return _scheduler; }
@@ -30,3 +36,5 @@ export function getOutcomeTracker(): OutcomeTracker | null { return _outcomeTrac
 export function getPanelRunner(): PanelRunner | null { return _panelRunner; }
 export function getCopyEngine(): CopyTradeEngine | null { return _copyEngine; }
 export function getExecStore(): ExecStore | null { return _execStore; }
+export function getAttributionStore(): AttributionStore | null { return _attributionStore; }
+export function getCapitalAllocator(): CapitalAllocator | null { return _capitalAllocator; }

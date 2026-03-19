@@ -141,6 +141,7 @@ export default function AgentsPage() {
           <Input
             type="text"
             placeholder="Search agents..."
+            aria-label="Search agents"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"

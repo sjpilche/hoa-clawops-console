@@ -33,7 +33,6 @@ export default function SchedulePage() {
   const fetchSchedules = async () => {
     setIsLoading(true);
     try {
-      // TODO: Replace with real cron API when implemented
       const data = await api.get('/schedules');
       setSchedules(data.schedules || []);
     } catch (error) {
@@ -142,6 +141,7 @@ export default function SchedulePage() {
           <Input
             type="text"
             placeholder="Search schedules..."
+            aria-label="Search schedules"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -182,6 +182,21 @@ export default function SchedulePage() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
+            {/* Performance summary */}
+            {(() => {
+              const paused = filteredSchedules.filter(s => s.autoPaused).length;
+              const red = filteredSchedules.filter(s => s.performanceHealth === 'red' && !s.autoPaused).length;
+              const yellow = filteredSchedules.filter(s => s.performanceHealth === 'yellow').length;
+              if (paused === 0 && red === 0) return null;
+              return (
+                <div className="flex items-center gap-3 px-4 py-2 text-xs text-text-muted bg-bg-elevated rounded-lg mb-1">
+                  <span>{filteredSchedules.length} schedules</span>
+                  {paused > 0 && <span className="text-accent-warning font-medium">{paused} auto-paused</span>}
+                  {red > 0 && <span className="text-accent-danger font-medium">{red} underperforming</span>}
+                  {yellow > 0 && <span className="text-amber-400 font-medium">{yellow} marginal</span>}
+                </div>
+              );
+            })()}
             {/* Column headers */}
             <div className="flex items-center gap-4 px-4 py-1.5 text-xs text-text-muted uppercase tracking-wider">
               <div className="w-2.5 shrink-0" />
@@ -198,6 +213,7 @@ export default function SchedulePage() {
                 onDelete={handleDeleteSchedule}
                 onEdit={() => console.log('Edit schedule:', schedule)}
                 onRunNow={handleRunNow}
+                onRefresh={fetchSchedules}
               />
             ))}
           </div>

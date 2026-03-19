@@ -113,10 +113,11 @@ router.patch('/sources/:id', (req, res, next) => {
 router.get('/transcripts', (req, res, next) => {
   try {
     const status = req.query.status || null;
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const limit = parseInt(req.query.limit) || 1000;
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
 
     const where = status ? 'WHERE t.status = ?' : '';
-    const params = status ? [status, limit] : [limit];
+    const params = status ? [status, limit, offset] : [limit, offset];
 
     const transcripts = all(`
       SELECT t.id, t.video_id, t.video_url, t.title, t.published_at, t.duration_secs,
@@ -125,7 +126,7 @@ router.get('/transcripts', (req, res, next) => {
       FROM rse_transcripts t
       JOIN rse_sources s ON s.id = t.source_id
       ${where}
-      ORDER BY t.created_at DESC LIMIT ?
+      ORDER BY t.created_at DESC LIMIT ? OFFSET ?
     `, params);
 
     res.json(transcripts);
@@ -136,7 +137,8 @@ router.get('/transcripts', (req, res, next) => {
 
 router.get('/signals', (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const limit = parseInt(req.query.limit) || 1000;
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     const minScore = parseFloat(req.query.min_score) || 0;
 
     const signals = all(`
@@ -146,8 +148,8 @@ router.get('/signals', (req, res, next) => {
       JOIN rse_transcripts t ON t.id = sig.transcript_id
       WHERE sig.composite_score >= ?
       ORDER BY sig.composite_score DESC, sig.created_at DESC
-      LIMIT ?
-    `, [minScore, limit]);
+      LIMIT ? OFFSET ?
+    `, [minScore, limit, offset]);
 
     res.json(signals);
   } catch (err) { next(err); }

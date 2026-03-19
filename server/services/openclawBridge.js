@@ -60,13 +60,19 @@ class OpenClawBridge extends EventEmitter {
     console.log('[OpenClawBridge] Ready (openclaw-cli mode)');
   }
 
-  /** Run an agent. Returns { sessionId, output }. */
+  /** Run an agent. Returns { sessionId, output }. config.workspaceSlug injects workspace mandate. */
   async runAgent(agentId, config = {}) {
     const id = config.openclawId || agentId;
     const message = config.message || 'Start agent task';
     const sessionId = config.sessionId || `session-${Date.now()}-${id}`;
 
-    const fullMessage = message + loadFounderMandate();
+    // Inject workspace mandate if provided, else detect from agent name prefix
+    const wsSlug = config.workspaceSlug
+      || (id.startsWith('data-rehab') ? 'data-rehab' : null)
+      || (id.startsWith('owen') ? 'owen' : null)
+      || (id.startsWith('hoa-') ? 'hoa' : null)
+      || (id.startsWith('jake') ? 'jake' : null);
+    const fullMessage = message + loadWorkspaceMandate(wsSlug);
     let cmd = `openclaw agent --local --json --agent ${esc(id)} --message ${esc(fullMessage)}`;
     if (config.sessionId) cmd += ` --session-id ${esc(config.sessionId)}`;
 

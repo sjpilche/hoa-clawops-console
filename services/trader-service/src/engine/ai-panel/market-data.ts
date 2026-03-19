@@ -13,6 +13,12 @@
 
 import { SkillsContext } from './skills-fetcher';
 import { PortfolioSnapshot } from './index';
+import { RegimeInput } from '../allocation/types';
+
+export interface MarketDataResult {
+  skillsContext: SkillsContext;
+  regimeInput: RegimeInput;
+}
 
 const YAHOO_QUOTE_URL = 'https://query1.finance.yahoo.com/v7/finance/quote';
 const YAHOO_TRENDING_URL = 'https://query1.finance.yahoo.com/v1/finance/trending/US';
@@ -99,8 +105,53 @@ async function fetchYahooQuotes(symbols: string[]): Promise<string> {
 
     return lines.join('\n\n');
   } catch (error: any) {
-    console.warn('[market-data] Yahoo quotes failed:', error.message);
-    return `(Yahoo Finance unavailable: ${error.message})`;
+    console.warn('[market-data] Yahoo quotes failed:', error.message, '— falling back to Alpaca snapshots');
+    return fetchAlpacaQuotes(symbols);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Alpaca Snapshots — fallback when Yahoo Finance is down (401, rate-limited, etc.)
+// ---------------------------------------------------------------------------
+
+async function fetchAlpacaQuotes(symbols: string[]): Promise<string> {
+  try {
+    // Filter out index symbols (Alpaca doesn't support ^GSPC etc.)
+    const stockSymbols = symbols.filter(s => !s.startsWith('^'));
+    if (stockSymbols.length === 0) return '(No stock symbols to quote)';
+
+    const params = new URLSearchParams({ symbols: stockSymbols.join(','), feed: 'iex' });
+    const url = `https://data.alpaca.markets/v2/stocks/snapshots?${params}`;
+
+    const resp = await fetch(url, {
+      headers: alpacaHeaders,
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!resp.ok) throw new Error(`Alpaca snapshots ${resp.status}`);
+    const snapshots: Record<string, any> = await resp.json();
+
+    if (Object.keys(snapshots).length === 0) return '(No Alpaca snapshot data)';
+
+    const lines = Object.entries(snapshots).map(([symbol, snap]) => {
+      const price = snap.latestTrade?.p || snap.minuteBar?.c || 0;
+      const prevClose = snap.prevDailyBar?.c || 0;
+      const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+      const volume = snap.dailyBar?.v || 0;
+
+      return [
+        `${symbol}`,
+        `  Price: $${price.toFixed(2)}  Chg: ${change.toFixed(2)}%`,
+        `  Volume: ${formatNumber(volume)}`,
+        `  (via Alpaca fallback — fundamentals unavailable)`,
+      ].join('\n');
+    });
+
+    console.log(`[market-data] Alpaca snapshot fallback: got ${Object.keys(snapshots).length} quotes`);
+    return lines.join('\n\n');
+  } catch (error: any) {
+    console.warn('[market-data] Alpaca quotes fallback also failed:', error.message);
+    return `(Quotes unavailable — Yahoo and Alpaca both failed: ${error.message})`;
   }
 }
 
@@ -180,7 +231,46 @@ async function fetchIndices(): Promise<string> {
 
     return 'Market Indices:\n' + lines.join('\n');
   } catch (error: any) {
-    console.warn('[market-data] Indices failed:', error.message);
+    console.warn('[market-data] Indices failed:', error.message, '— falling back to Alpaca ETF proxies');
+    return fetchAlpacaIndices();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Alpaca ETF Indices fallback — SPY/QQQ/IWM/GLD as index proxies
+// ---------------------------------------------------------------------------
+
+async function fetchAlpacaIndices(): Promise<string> {
+  try {
+    const etfProxies = ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT'];
+    const params = new URLSearchParams({ symbols: etfProxies.join(','), feed: 'iex' });
+    const url = `https://data.alpaca.markets/v2/stocks/snapshots?${params}`;
+
+    const resp = await fetch(url, {
+      headers: alpacaHeaders,
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!resp.ok) throw new Error(`Alpaca indices ${resp.status}`);
+    const snapshots: Record<string, any> = await resp.json();
+
+    const nameMap: Record<string, string> = {
+      SPY: 'S&P 500 (SPY)', QQQ: 'NASDAQ (QQQ)', IWM: 'Russell 2000 (IWM)',
+      GLD: 'Gold (GLD)', TLT: '20Y Treasury (TLT)',
+    };
+
+    const lines = Object.entries(snapshots).map(([symbol, snap]) => {
+      const price = snap.latestTrade?.p || snap.minuteBar?.c || 0;
+      const prevClose = snap.prevDailyBar?.c || 0;
+      const change = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+      const dir = change >= 0 ? '+' : '';
+      return `  ${nameMap[symbol] || symbol}: ${price.toFixed(2)} (${dir}${change.toFixed(2)}%)`;
+    });
+
+    console.log('[market-data] Alpaca ETF index fallback succeeded');
+    return 'Market Indices (ETF proxies via Alpaca):\n' + lines.join('\n');
+  } catch (error: any) {
+    console.warn('[market-data] Alpaca indices fallback also failed:', error.message);
     return `(Market indices unavailable: ${error.message})`;
   }
 }
@@ -325,7 +415,7 @@ export function getDefaultWatchlist(): string[] {
 // Main: fetch all real market data → SkillsContext
 // ---------------------------------------------------------------------------
 
-export async function fetchRealMarketData(symbols: string[]): Promise<SkillsContext> {
+export async function fetchRealMarketData(symbols: string[]): Promise<SkillsContext & { regimeInput: RegimeInput }> {
   console.log(`[market-data] Fetching real market data for ${symbols.length} symbols...`);
   const start = Date.now();
 
@@ -347,6 +437,9 @@ export async function fetchRealMarketData(symbols: string[]): Promise<SkillsCont
   if (indices.startsWith('(')) errors.push('indices');
   if (movers.startsWith('(')) errors.push('movers');
 
+  // Extract structured regime data from the text we already fetched
+  const regimeInput = parseRegimeInputFromText(indices, fearGreed, quotes);
+
   return {
     technicals: `${indices}\n\n20-Day Price History:\n${barsText}`,
     polymarket: '(Replaced by Fear & Greed regime detection)',
@@ -357,7 +450,47 @@ export async function fetchRealMarketData(symbols: string[]): Promise<SkillsCont
     accountState: '(Account state fetched directly via Alpaca API)',
     fetchedAt: new Date(),
     errors,
+    regimeInput,
   };
+}
+
+/**
+ * Extract structured regime inputs from the text output of our fetchers.
+ * Since we generate the text, we know the exact format.
+ */
+function parseRegimeInputFromText(indicesText: string, fearGreedText: string, quotesText: string): RegimeInput {
+  const input: RegimeInput = {};
+
+  // VIX: from indices text → "  VIX: 18.42 (+1.23%)"
+  const vixMatch = indicesText.match(/VIX:\s*([0-9]+\.?[0-9]*)/);
+  if (vixMatch) input.vix = parseFloat(vixMatch[1]);
+
+  // Fear & Greed: "Fear & Greed Index: 62 (Greed)"
+  const fgMatch = fearGreedText.match(/Fear & Greed Index:\s*([0-9]+)/);
+  if (fgMatch) input.fearGreedScore = parseFloat(fgMatch[1]);
+
+  // S&P 500: "  S&P 500: 5234.18 (+0.45%)"
+  const spyMatch = indicesText.match(/S&P 500:\s*([0-9,]+\.?[0-9]*)/);
+  if (spyMatch) input.spyPrice = parseFloat(spyMatch[1].replace(/,/g, ''));
+
+  // 10Y: "  10Y Yield: 4.23 (+0.03%)"
+  const tnxMatch = indicesText.match(/10Y Yield:\s*([0-9]+\.?[0-9]*)/);
+  if (tnxMatch) input.tenYearYield = parseFloat(tnxMatch[1]);
+
+  // SPY 50d/200d MA: from quotes text → "SPY (SPDR S&P 500 ETF Trust)\n...50d MA: ABOVE  200d MA: ABOVE"
+  // or from individual stock data → "50d MA: ABOVE"
+  // We also get actual MA values from Yahoo: "fiftyDayAverage" in the raw quote
+  // For now, extract from the per-stock format: "SPY...50d MA: ABOVE"
+  const spyBlock = quotesText.match(/SPY[^]*?50d MA:\s*(ABOVE|BELOW)/);
+  if (spyBlock && input.spyPrice != null) {
+    // We don't have the exact 50d MA value from text, but we can infer trend
+    // Set spy50dMA to a synthetic value that gives us the correct above/below result
+    input.spy50dMA = spyBlock[1] === 'ABOVE'
+      ? input.spyPrice * 0.99  // below current price → above_50d
+      : input.spyPrice * 1.01; // above current price → below_50d
+  }
+
+  return input;
 }
 
 /** Format portfolio for LLM prompt consumption (used by analyst-runner) */

@@ -17,6 +17,8 @@
 
 import { PanelRunner, PanelRunOptions, PanelRunResult } from './panel-runner';
 import { DistillationEngine } from '../learning/distillation';
+import { DistillationV2Engine } from '../learning/distillation-v2';
+import { OptionsEngine } from '../options/options-engine';
 
 // ---------------------------------------------------------------------------
 // Timezone helper — ET extraction without toLocaleString parse bug
@@ -59,6 +61,7 @@ const DISTILLATION_MINUTE = 15;       // 4:15 PM ET
 export class TradingScheduler {
   private panelRunner: PanelRunner;
   private distillation: DistillationEngine | null;
+  private optionsEngine: OptionsEngine | null;
   private intervalMs: number;
   private dryRun: boolean;
 
@@ -86,6 +89,7 @@ export class TradingScheduler {
   ) {
     this.panelRunner = panelRunner;
     this.distillation = distillation || null;
+    this.optionsEngine = process.env.OPTIONS_ENABLED !== 'false' ? new OptionsEngine() : null;
     this.intervalMs = intervalMs || parseInt(process.env.PANEL_INTERVAL_MS || '') || DEFAULT_INTERVAL_MS;
     this.dryRun = process.env.PANEL_DRY_RUN === 'true';
   }
@@ -108,6 +112,7 @@ export class TradingScheduler {
     console.log(`🦞 Interval: ${this.intervalMs / 1000}s (${(this.intervalMs / 60000).toFixed(1)} min)`);
     console.log(`🦞 Dry Run: ${this.dryRun}`);
     console.log(`🦞 Distillation: ${this.distillation ? 'enabled (4:15 PM ET)' : 'disabled'}`);
+    console.log(`🦞 Options: ${this.optionsEngine ? 'enabled (VIX calls + CSPs + TOM calls)' : 'disabled'}`);
     console.log(`🦞 Market hours: 9:30 AM - 4:00 PM ET, Mon-Fri`);
     console.log(`${'🦞'.repeat(20)}\n`);
 
@@ -185,6 +190,15 @@ export class TradingScheduler {
         console.log(`✅ Panel run #${this.totalRuns} complete: ${result.trades.length} trade(s), executed=${result.executed}`);
       }
 
+      // Run options strategies after equity panel
+      if (this.optionsEngine && !this.dryRun) {
+        try {
+          await this.optionsEngine.run();
+        } catch (err: any) {
+          console.error(`⚠️ Options engine error (non-fatal): ${err.message}`);
+        }
+      }
+
       return result;
     } catch (err: any) {
       this.totalErrors++;
@@ -236,8 +250,14 @@ export class TradingScheduler {
       this.lastDistillationDate = dateKey;
 
       try {
-        const result = this.distillation.runDistillation();
-        console.log(`🧪 Distillation: ${result.promoted} promoted, ${result.avoidPatterns} avoid patterns`);
+        // Use V2 distillation if available (source profiles + calibration + attribution)
+        if (this.distillation instanceof DistillationV2Engine) {
+          const result = this.distillation.runDistillationV2();
+          console.log(`🧪 Distillation V2: ${result.promoted} promoted, ${result.avoidPatterns} avoid, ${result.profilesUpdated} profiles, ${result.calibrationReports} calibrations`);
+        } else {
+          const result = this.distillation.runDistillation();
+          console.log(`🧪 Distillation: ${result.promoted} promoted, ${result.avoidPatterns} avoid patterns`);
+        }
       } catch (err: any) {
         console.error('🧪 Distillation error:', err.message);
       }

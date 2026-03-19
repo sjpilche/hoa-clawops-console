@@ -12,12 +12,15 @@
 // =============================================================================
 
 import { BrainStore } from './brain-store';
+import { SourceProfiler } from './source-profiles';
 
 export class BrainContextBuilder {
   private brain: BrainStore;
+  private profiler: SourceProfiler | null;
 
-  constructor(brain: BrainStore) {
+  constructor(brain: BrainStore, profiler?: SourceProfiler | null) {
     this.brain = brain;
+    this.profiler = profiler || null;
   }
 
   /**
@@ -48,6 +51,12 @@ export class BrainContextBuilder {
     const losingPatterns = this.brain.getKnowledgePromptBlock('losing_pattern', { limit: 3 });
     if (winningPatterns) blocks.push(winningPatterns);
     if (losingPatterns) blocks.push(losingPatterns);
+
+    // Layer 5 (Sprint 3): Analyst reliability profile
+    if (this.profiler) {
+      const profileBlock = this.buildProfileBlock(analystId);
+      if (profileBlock) blocks.push(profileBlock);
+    }
 
     if (blocks.length === 0) return '';
 
@@ -90,6 +99,52 @@ export class BrainContextBuilder {
     }
 
     return allLines.join('\n\n');
+  }
+
+  /**
+   * Build a reliability profile block for the analyst.
+   * Tells the LLM how well it's been performing and where to be more/less confident.
+   */
+  private buildProfileBlock(analystId: string): string | null {
+    if (!this.profiler) return null;
+
+    const profile = this.profiler.getProfile(analystId);
+    if (profile.tradeCount < 5) return null; // Not enough data
+
+    const lines = [
+      '--- YOUR RELIABILITY PROFILE ---',
+      `Trades: ${profile.tradeCount}`,
+      `Win Rate: ${(profile.trailingWinRate * 100).toFixed(0)}%`,
+      `Trailing Expectancy: $${profile.trailingExpectancy.toFixed(2)}/trade`,
+      `Reliability Score: ${(profile.reliabilityScore * 100).toFixed(0)}/100`,
+      `Calibration: ${(profile.calibrationScore * 100).toFixed(0)}% (how well your conviction predicts outcomes)`,
+    ];
+
+    // Regime-specific guidance
+    const regimes = Object.entries(profile.regimeStats);
+    if (regimes.length > 0) {
+      lines.push('');
+      lines.push('Your performance by market regime:');
+      for (const [regime, stats] of regimes) {
+        if (stats.tradeCount < 3) continue;
+        const emoji = stats.expectancy > 0 ? '✅' : '⚠️';
+        lines.push(`  ${emoji} ${regime}: ${(stats.winRate * 100).toFixed(0)}% win rate, $${stats.expectancy.toFixed(2)}/trade (${stats.tradeCount} trades)`);
+      }
+    }
+
+    // Calibration guidance
+    if (profile.calibrationScore < 0.4) {
+      lines.push('');
+      lines.push('⚠️ Your conviction levels do NOT predict outcomes well. Be more conservative with high-conviction calls.');
+    } else if (profile.calibrationScore > 0.7) {
+      lines.push('');
+      lines.push('✅ Your conviction levels are well-calibrated. Trust your instincts on high-conviction calls.');
+    }
+
+    lines.push('Use this to calibrate your confidence. If you\'re weak in the current regime, be more cautious.');
+    lines.push('--- END RELIABILITY PROFILE ---');
+
+    return lines.join('\n');
   }
 
   /**

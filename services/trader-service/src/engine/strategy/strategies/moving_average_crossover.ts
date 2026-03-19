@@ -9,8 +9,8 @@ import { OrderIntent } from '../../execution/order_router';
  * Generates sell signal when fast MA crosses below slow MA
  *
  * Parameters:
- * - fastPeriod: Period for fast moving average (default: 10)
- * - slowPeriod: Period for slow moving average (default: 30)
+ * - fastPeriod: Period for fast moving average (default: 5)
+ * - slowPeriod: Period for slow moving average (default: 15)
  * - symbols: Array of symbols to trade
  * - positionSize: Position size in USD (default: 1000)
  */
@@ -29,8 +29,8 @@ export class MovingAverageCrossoverStrategy implements IStrategy {
       version: this.version,
       enabled: false,
       params: {
-        fastPeriod: params?.fastPeriod || 10,
-        slowPeriod: params?.slowPeriod || 30,
+        fastPeriod: params?.fastPeriod || 5,
+        slowPeriod: params?.slowPeriod || 15,
         positionSize: params?.positionSize || 1000,
         symbols: params?.symbols || ['AAPL', 'MSFT', 'GOOGL'],
       },

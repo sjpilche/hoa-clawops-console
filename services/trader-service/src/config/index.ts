@@ -54,8 +54,19 @@ const ConfigSchema = z.object({
   brainDbPath: z.string().optional(),  // Defaults to data/trader-brain.sqlite
 
   // AI Panel
-  panelIntervalMs: z.coerce.number().default(180000),  // 3 minutes
+  panelIntervalMs: z.coerce.number().default(1800000),  // 30 minutes (reduced from 3min to cut LLM cost)
   panelDryRun: z.string().optional().transform((v) => v === 'true').default('false'),
+
+  // CIO Reviewer — final AI approval gate before execution
+  cioEnabled: z.string().optional().transform((v) => v !== 'false').default('true'),
+  cioModel: z.string().default('gpt-4o-mini'),  // override: gpt-4o, grok-3, claude-haiku-4-5-20251001
+
+  // Capital Allocator
+  allocatorMinScore: z.coerce.number().default(40),
+  allocatorRiskPctPerTrade: z.coerce.number().default(0.01),  // 1% of account = 1R
+  allocatorMaxPositionPct: z.coerce.number().default(0.10),   // 10% max per position
+  allocatorMaxOpenPositions: z.coerce.number().default(8),
+  allocatorMaxDailyNewPositions: z.coerce.number().default(5),
 
   // Logging
   logLevel: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
@@ -90,6 +101,13 @@ function loadConfig(): Config {
     brainDbPath: process.env.BRAIN_DB_PATH,
     panelIntervalMs: process.env.PANEL_INTERVAL_MS,
     panelDryRun: process.env.PANEL_DRY_RUN,
+    cioEnabled: process.env.CIO_ENABLED,
+    cioModel: process.env.CIO_MODEL,
+    allocatorMinScore: process.env.ALLOCATOR_MIN_SCORE,
+    allocatorRiskPctPerTrade: process.env.ALLOCATOR_RISK_PCT_PER_TRADE,
+    allocatorMaxPositionPct: process.env.ALLOCATOR_MAX_POSITION_PCT,
+    allocatorMaxOpenPositions: process.env.ALLOCATOR_MAX_OPEN_POSITIONS,
+    allocatorMaxDailyNewPositions: process.env.ALLOCATOR_MAX_DAILY_NEW_POSITIONS,
     logLevel: process.env.LOG_LEVEL,
   });
 

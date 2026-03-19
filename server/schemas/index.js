@@ -10,6 +10,8 @@ const chatSchemas = require('./chat.schema');
 const runSchemas = require('./run.schema');
 const settingsSchemas = require('./settings.schema');
 const domainSchemas = require('./domain.schema');
+const contactsSchemas = require('./contacts.schema');
+const contentSchemas = require('./content.schema');
 
 module.exports = {
   // Common schemas
@@ -32,4 +34,10 @@ module.exports = {
 
   // Domain, extension, hierarchy, team schemas (v2.0)
   ...domainSchemas,
+
+  // Contacts schemas
+  ...contactsSchemas,
+
+  // Content + Campaign schemas
+  ...contentSchemas,
 };

@@ -268,12 +268,19 @@ router.post('/queue/:id/approve', authenticate, (req, res) => {
       WHERE id = ?
     `, ['approved', id]);
 
-    // TODO: Actually post to the platform (implement in platformScanner.js)
-    // For now, just mark as approved - posting happens manually or via scheduler
+    // Trigger async platform posting (non-blocking)
+    const { postToplatform } = require('../services/platformPoster');
+    postToplatform(id).then(result => {
+      if (result.manual) {
+        console.log(`[Lead Gen Queue] Item ${id} approved — manual post required at ${result.postUrl}`);
+      }
+    }).catch(err => {
+      console.warn(`[Lead Gen Queue] Post attempt failed for ${id} (non-fatal): ${err.message}`);
+    });
 
     res.json({
       success: true,
-      message: 'Item approved for posting',
+      message: 'Item approved — posting queued',
       data: { id, status: 'approved' }
     });
 

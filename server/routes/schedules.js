@@ -35,6 +35,10 @@ router.get('/', (req, res) => {
       lastRunAt: s.last_run_at,
       nextRunAt: s.next_run_at,
       createdAt: s.created_at,
+      performanceHealth: s.performance_health || null,
+      autoPaused: s.auto_paused === 1,
+      autoPauseReason: s.auto_pause_reason || null,
+      autoPausedAt: s.auto_paused_at || null,
     }));
 
     res.json({ success: true, count: normalized.length, schedules: normalized });
@@ -209,6 +213,21 @@ router.delete('/:id', (req, res) => {
     res.json({ success: true, message: 'Schedule deleted' });
   } catch (error) {
     console.error('[Schedules] Error deleting schedule:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/schedules/:id/re-enable
+ * Re-enable an auto-paused schedule
+ */
+router.post('/:id/re-enable', (req, res) => {
+  try {
+    const { id } = req.params;
+    const perf = require('../services/schedulePerformance');
+    perf.reEnableSchedule(id);
+    res.json({ success: true, message: 'Schedule re-enabled' });
+  } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });

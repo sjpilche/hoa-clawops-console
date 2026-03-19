@@ -33,6 +33,7 @@ import {
   GitMerge,
   Radar,
   Radio,
+  Brain,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { NAV_SECTIONS } from '@/lib/constants';
@@ -64,6 +65,7 @@ const iconMap = {
   GitMerge,
   Radar,
   Radio,
+  Brain,
 };
 
 export default function Sidebar() {

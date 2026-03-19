@@ -344,43 +344,21 @@ router.put('/outreach/:id', async (req, res, next) => {
 
     // If marking as 'sent', try to send the actual email
     if (status === 'sent' && existing.lead_id) {
-      const lead = get('SELECT id, contact_email, contact_name, company_name FROM cfo_leads WHERE id = ?', [existing.lead_id]);
-      if (!lead?.contact_email) {
-        // Revert — can't send without an email address
+      const { sendOutreachEmail } = require('../services/autoApprovalEngine');
+      const sendResult = await sendOutreachEmail(id);
+      if (sendResult.success) {
+        updated.email_sent = true;
+        updated.messageId = sendResult.messageId;
+      } else if (sendResult.error?.includes('No contact email')) {
         run('UPDATE cfo_outreach_sequences SET status = ? WHERE id = ?', ['approved', id]);
         return res.status(400).json({
-          error: 'No contact email for this lead. Enrich the lead first.',
+          error: sendResult.error,
           lead_id: existing.lead_id,
           needs_enrichment: true,
         });
-      }
-      try {
-        const sg = require('../services/sendgrid');
-        const subject = updated.email_subject || email_subject || 'Hello';
-        const bodyText = updated.email_body || email_body || '';
-        const html = sg.wrapInBrandedShell(
-          bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join('')
-        );
-        const result = await sg.send({
-          to: lead.contact_email,
-          subject,
-          html,
-          text: bodyText,
-        });
-        if (result.success) {
-          console.log(`[CfoMarketing] Email sent to ${lead.contact_email} (${lead.company_name || 'CFO Insights Lead'}) msgId=${result.messageId}`);
-          run("UPDATE cfo_outreach_sequences SET delivery_status = 'delivered', delivery_error = NULL WHERE id = ?", [id]);
-          run("UPDATE cfo_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ? AND status = 'new'", [lead.id]);
-          updated.email_sent = true;
-          updated.messageId = result.messageId;
-        } else {
-          throw new Error(result.error || result.reason || 'SendGrid send failed');
-        }
-      } catch (emailErr) {
-        console.error(`[CfoMarketing] Email send failed:`, emailErr.message);
-        run("UPDATE cfo_outreach_sequences SET delivery_status = 'failed', delivery_error = ? WHERE id = ?", [emailErr.message, id]);
+      } else {
         updated.email_sent = false;
-        updated.email_error = emailErr.message;
+        updated.email_error = sendResult.error;
       }
     }
 
@@ -493,10 +471,38 @@ router.post('/leads/:id/enrich', async (req, res, next) => {
  */
 router.post('/leads/bulk-enrich', async (req, res, next) => {
   try {
-    const { limit = 20, min_score = 45 } = req.body || {};
+    const { limit = 20, min_score = 45, workspace_id } = req.body || {};
+
+    // Try Apollo first
+    let apolloResults = { enriched: 0, total: 0, results: [] };
+    try {
+      const apollo = require('../services/apolloEnricher');
+      apolloResults = await apollo.enrichMultipleLeads({ limit, min_score, workspace_id: workspace_id || null });
+      console.log(`[bulk-enrich] Apollo enriched ${apolloResults.enriched}/${limit}`);
+    } catch (apolloErr) {
+      console.warn('[bulk-enrich] Apollo failed, falling back to Playwright:', apolloErr.message);
+    }
+
+    // Fall back to Playwright if Apollo enriched < 50% of requested limit
+    if (apolloResults.enriched >= Math.ceil(limit * 0.5)) {
+      return res.json(apolloResults);
+    }
+
+    const remainingLimit = limit - apolloResults.enriched;
     const { enrichMultipleLeads } = require('../services/jakeContactEnricher');
-    const result = await enrichMultipleLeads({ limit, min_score });
-    res.json(result);
+    const playwrightResult = await enrichMultipleLeads({ limit: remainingLimit, min_score });
+
+    // Merge results
+    const combined = {
+      enriched: apolloResults.enriched + playwrightResult.enriched,
+      total: apolloResults.total + playwrightResult.total,
+      results: [...apolloResults.results, ...playwrightResult.results],
+      sources: {
+        apollo: apolloResults.enriched,
+        playwright: playwrightResult.enriched,
+      },
+    };
+    res.json(combined);
   } catch (err) {
     next(err);
   }
@@ -604,6 +610,62 @@ router.post('/outreach/send-confirmed', async (req, res, next) => {
       outputText: result.outputText,
       duration_ms: result.durationMs,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INBOUND REPLIES (from audit_log)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/cfo-marketing/replies
+ * Query inbound reply events from audit_log (inserted by sendgridWebhook inbound handler).
+ * Query params: workspace_id, classification, limit (default 50)
+ */
+router.get('/replies', (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const classification = req.query.classification || null;
+    const workspace_id = req.query.workspace_id ? parseInt(req.query.workspace_id) : null;
+
+    let query = `
+      SELECT
+        a.id,
+        json_extract(a.details, '$.from')           AS from_email,
+        json_extract(a.details, '$.subject')         AS subject,
+        json_extract(a.details, '$.body_preview')    AS body_preview,
+        json_extract(a.details, '$.classification')  AS classification,
+        json_extract(a.details, '$.lead_status')     AS lead_status,
+        json_extract(a.details, '$.company')         AS company,
+        a.timestamp AS created_at
+      FROM audit_log a
+      WHERE a.action IN ('inbound_reply_classified', 'inbound_reply_unmatched')
+    `;
+    const params = [];
+
+    if (classification) {
+      query += " AND json_extract(a.details, '$.classification') = ?";
+      params.push(classification);
+    }
+
+    if (workspace_id) {
+      // Join to cfo_leads to filter by workspace
+      // resource format is 'lead:{id}' for classified replies
+      query += ` AND EXISTS (
+        SELECT 1 FROM cfo_leads l
+        WHERE 'lead:' || l.id = a.resource
+          AND l.workspace_id = ?
+      )`;
+      params.push(workspace_id);
+    }
+
+    query += ' ORDER BY a.timestamp DESC LIMIT ?';
+    params.push(limit);
+
+    const replies = all(query, params);
+    res.json({ success: true, replies });
   } catch (err) {
     next(err);
   }

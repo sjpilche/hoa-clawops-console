@@ -98,6 +98,7 @@ class CampaignMetricsService {
       console.log('[CampaignMetrics] Daily rollup complete');
     } catch (error) {
       console.error('[CampaignMetrics] Rollup all error:', error);
+      throw error; // propagate so callers know the rollup failed
     }
   }
 

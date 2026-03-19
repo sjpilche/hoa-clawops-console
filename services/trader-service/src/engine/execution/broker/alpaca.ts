@@ -22,15 +22,21 @@ export class AlpacaAdapter implements IBrokerAdapter {
     });
   }
 
-  async connect(): Promise<void> {
+  async connect(required: boolean = true): Promise<void> {
+    if (this.connected) return;
     try {
       // Test connection by fetching account
       await this.alpaca.getAccount();
       this.connected = true;
       console.log('✓ Connected to Alpaca');
     } catch (error) {
-      console.error('✗ Failed to connect to Alpaca:', error);
-      throw error;
+      if (required) {
+        console.error('✗ Failed to connect to Alpaca:', error);
+        throw error;
+      }
+      // Non-required: data-only mode (bars still work without account check)
+      console.warn('⚠️  Alpaca account check failed — data-only mode');
+      this.connected = true; // allow getBars to proceed
     }
   }
 
@@ -180,7 +186,7 @@ export class AlpacaAdapter implements IBrokerAdapter {
     limit?: number;
     adjustment?: 'raw' | 'split' | 'dividend' | 'all';
   }): Promise<MarketData[]> {
-    await this.connect();
+    await this.connect(false); // data API works without account check
 
     const queryParams: any = {
       start: params.start,

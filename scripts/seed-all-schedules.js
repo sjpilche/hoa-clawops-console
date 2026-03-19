@@ -522,33 +522,65 @@ const SCHEDULES = [
   // ═══════════════════════════════════════════════════════════════
   // DATA REHAB — Foot-in-Door Data Cleaning
   // ═══════════════════════════════════════════════════════════════
+  // ── Data Rehab — HIGH TEMPO PIPELINE ─────────────────────────────
+  // Discovery + Scout run daily to build pipeline fast. Enricher daily.
+  // Outreach 3x/week. Follow-up 3x/week. Analytics daily.
   {
-    name: 'Data Rehab — Cross-Sell Discovery — Mon 8 AM',
+    name: 'Data Rehab — Cross-Sell Discovery — Daily 6 AM',
     description: 'Mines existing leads for data chaos signals. Tags for Data Rehab outreach. $0/run.',
     agent_name: 'data-rehab-discovery',
-    cron: '0 8 * * 1',
-    message: '{"limit": 30}',
+    cron: '0 6 * * 1-5',
+    message: '{"limit": 50}',
   },
   {
-    name: 'Data Rehab — Scout — Wed 8 AM',
-    description: 'Finds new SMBs with data chaos signals via web search. LLM agent.',
+    name: 'Data Rehab — Scout — Mon/Wed/Fri 8 AM',
+    description: 'Finds new SMBs with data chaos signals. Qualifies into Autopsy/Lite/Core/Complex tiers.',
     agent_name: 'data-rehab-scout',
-    cron: '0 8 * * 3',
-    message: '{"industries": ["construction", "property_management", "professional_services"]}',
+    cron: '0 8 * * 1,3,5',
+    message: JSON.stringify({ industries: ['construction', 'property_management', 'professional_services', 'pe_backed'], limit: 20 }),
   },
   {
-    name: 'Data Rehab — Content — Thu 8 AM',
-    description: 'GIGO messaging content — hidden cost of messy data, data audit education. LLM agent.',
+    name: 'Data Rehab — Content — Tue/Thu 8 AM',
+    description: 'Data cleanup education content — 5 pillars. August West voice. Soft CTA to getdatarehab.com.',
     agent_name: 'data-rehab-content',
-    cron: '0 8 * * 4',
-    message: '{"pillar": "gigo", "channel": "linkedin"}',
+    cron: '0 8 * * 2,4',
+    message: JSON.stringify({ pillars: ['data-not-ai-ready', 'migration-hangover', 'excel-not-a-database', 'audit-nightmare', 'leakage-you-cant-see'], channel: 'linkedin' }),
   },
   {
-    name: 'Data Rehab — Outreach — Tue/Thu 11 AM',
-    description: 'Low-risk data audit offer outreach to tagged leads. LLM agent.',
+    name: 'Data Rehab — Outreach — Mon/Wed/Fri 10 AM',
+    description: 'Draft personalized Autopsy pitches ($4,997) for enriched Data Rehab leads. August West voice.',
     agent_name: 'data-rehab-outreach',
-    cron: '0 11 * * 2,4',
-    message: '{"batch_size": 5}',
+    cron: '0 10 * * 1,3,5',
+    enabled: true,
+    message: JSON.stringify({ batch_size: 10 }),
+  },
+  {
+    name: 'Data Rehab — Contact Enricher — Daily 8:30 AM',
+    description: 'Finds contact emails and phone numbers for Data Rehab leads.',
+    agent_name: 'data-rehab-enricher',
+    cron: '30 8 * * 1-5',
+    message: JSON.stringify({ limit: 25, min_score: 0, status_filter: 'pending' }),
+  },
+  {
+    name: 'Data Rehab — Reply Classifier — Daily 9 AM',
+    description: 'Classifies inbound email replies to Data Rehab outreach.',
+    agent_name: 'data-rehab-reply-classifier',
+    cron: '0 9 * * 1-5',
+    message: JSON.stringify({ limit: 30 }),
+  },
+  {
+    name: 'Data Rehab — Follow-Up — Mon/Wed/Fri 9:30 AM',
+    description: 'Multi-touch follow-up for Data Rehab leads with no reply after 4+ days.',
+    agent_name: 'data-rehab-follow-up',
+    cron: '30 9 * * 1,3,5',
+    message: JSON.stringify({ limit: 15, min_days_since_last: 4 }),
+  },
+  {
+    name: 'Data Rehab — Analytics — Daily 7:30 AM',
+    description: 'Daily Data Rehab pipeline health — leads, outreach, replies, conversions.',
+    agent_name: 'data-rehab-analytics',
+    cron: '30 7 * * *',
+    message: JSON.stringify({}),
   },
 
   // ═══════════════════════════════════════════════════════════════
@@ -605,6 +637,45 @@ const SCHEDULES = [
     description: 'Sends next welcome email to newsletter subscribers who are due. $0/run (SendGrid).',
     agent_name: 'welcome-sequence',
     cron: '0 * * * *',
+    message: '{}',
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // DC SITE INTEL — Land & Opportunity Research
+  // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'DC Intel — Opportunity Scout — Daily 5 AM',
+    description: 'Hunts new land opportunities in target counties (IL + DC/NoVA/MD). Creates stub opportunities for promising finds. $0/run.',
+    agent_name: 'dc-intel-opportunity-scout',
+    cron: '0 5 * * *',
+    message: '{}',
+  },
+  {
+    name: 'DC Intel — Deal Monitor — Daily 7 AM',
+    description: 'Morning market scan: rezoning, permits, substation news, competitor activity, owner distress signals across active opportunities. $0/run.',
+    agent_name: 'dc-intel-deal-monitor',
+    cron: '0 7 * * *',
+    message: '{}',
+  },
+  {
+    name: 'DC Intel — Research Queue — Monday 6 AM',
+    description: 'Weekly batch: researches all unresearched land owners in DC Site Intel (SOS filings, litigation, distress signals). $0/run.',
+    agent_name: 'dc-intel-research-queue',
+    cron: '0 6 * * 1',
+    message: '{"limit":12}',
+  },
+  {
+    name: 'DC Intel — Daily Scorecard — 8 AM',
+    description: 'Fetches morning scorecard, quick-scores and grades all new leads A/B/C/D, emails ranked HTML report to Steve + Doug. $0/run.',
+    agent_name: 'dc-intel-daily-scorecard',
+    cron: '0 8 * * *',
+    message: '{}',
+  },
+  {
+    name: 'DC Intel — Learning Loop — Sunday 10 PM',
+    description: "Weekly recursive learning: analyzes validated/dismissed outcomes, updates market heat weights, posts insight memo. $0/run.",
+    agent_name: 'dc-intel-learning-loop',
+    cron: '0 22 * * 0',
     message: '{}',
   },
 ];

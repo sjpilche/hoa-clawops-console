@@ -1,20 +1,25 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 export default function HOALeadsPage() {
+  const { activeWorkspaceId } = useWorkspace();
   const [leads, setLeads] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [activeWorkspaceId]);
 
   const fetchData = async () => {
+    setLoading(true);
     try {
+      const ws = activeWorkspaceId ? `&workspace_id=${activeWorkspaceId}` : '';
+      const wsp = activeWorkspaceId ? `?workspace_id=${activeWorkspaceId}` : '';
       const [leadsRes, statsRes] = await Promise.all([
-        api.get('/hoa-leads?limit=100'),
-        api.get('/hoa-leads/stats')
+        api.get(`/hoa-leads?limit=100${ws}`),
+        api.get(`/hoa-leads/stats${wsp}`)
       ]);
       if (leadsRes.success) setLeads(leadsRes.leads);
       if (statsRes.success) setStats(statsRes.stats);

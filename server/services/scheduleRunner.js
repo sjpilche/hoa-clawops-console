@@ -242,7 +242,26 @@ async function executeSchedule(schedule) {
 
       // Post-process LLM output into unified marketing pipeline
       const { postProcessLLMOutput } = require('./postProcessor');
-      postProcessLLMOutput(agent, outputText, message);
+      postProcessLLMOutput(agent, outputText, message, { runId });
+
+      // Record episode for EVERY completed run — closes the learning loop
+      try {
+        const brain = require('./collectiveBrain');
+        const outputLen = outputText?.length || 0;
+        const leadsFound = (outputText.match(/lead|contact|company|hoa/gi) || []).length;
+        const isDiscovery = /discovery|enricher|scout|scanner|finder/i.test(agent.name);
+        const isContent = /content|writer|social|scheduler/i.test(agent.name);
+
+        brain.recordEpisode(agent.name, {
+          market: marketCtx,
+          erpContext: erpCtx,
+          actionTaken: `Ran "${schedule.name}" — ${isDiscovery ? `found ~${leadsFound} signals` : isContent ? `generated ${outputLen} chars content` : `produced ${outputLen} chars output`}`,
+          outcome: outputLen > 100 ? 'Completed successfully' : 'Minimal output',
+          outcomeType: outputLen > 100 ? 'completed' : 'low_output',
+          outcomeScore: Math.min(1.0, Math.max(0.1, outputLen / 2000)),
+          runId,
+        });
+      } catch {} // non-fatal
 
       // Notify pipeline runner in case this run is part of a chain
       try { getPipelineRunner().onRunCompleted(runId, outputText); } catch {}
@@ -256,10 +275,52 @@ async function executeSchedule(schedule) {
       `UPDATE runs SET status='failed', error_msg=?, duration_ms=?, completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`,
       [err.message, durationMs, runId]
     );
+
+    // Record failure as negative episode — system learns from failures too
+    try {
+      const brain = require('./collectiveBrain');
+      brain.recordEpisode(agent.name, {
+        actionTaken: `Ran "${schedule.name}" but FAILED: ${err.message.slice(0, 200)}`,
+        outcome: `Error: ${err.message.slice(0, 100)}`,
+        outcomeType: 'failed',
+        outcomeScore: 0.0,
+        runId,
+      });
+    } catch {} // non-fatal
     run(
       `UPDATE agents SET status='idle', updated_at=datetime('now') WHERE id=?`,
       [agent.id]
     );
+  }
+}
+
+// ── Nightly schedule performance evaluation — runs at 01:00 AM ───────────────
+let _lastPerfEvalDate = null;
+
+function maybeRunPerformanceEval() {
+  const now = new Date();
+  if (now.getHours() !== 1 || now.getMinutes() !== 0) return;
+  const today = now.toISOString().slice(0, 10);
+  if (_lastPerfEvalDate === today) return;
+  _lastPerfEvalDate = today;
+
+  try {
+    const perf = require('./schedulePerformance');
+    console.log('[ScheduleRunner] Nightly schedule performance evaluation...');
+    const results = perf.evaluateAllSchedules();
+    const summary = { green: 0, yellow: 0, red: 0, paused: 0 };
+    for (const r of results) {
+      if (r.health === 'green') summary.green++;
+      else if (r.health === 'yellow') summary.yellow++;
+      else if (r.health === 'red') summary.red++;
+    }
+    summary.paused = results.filter(r => {
+      const check = perf.shouldAutoPause(r.scheduleId);
+      return check.pause;
+    }).length;
+    console.log(`[ScheduleRunner] Performance eval: ${summary.green} green, ${summary.yellow} yellow, ${summary.red} red, ${summary.paused} newly paused`);
+  } catch (err) {
+    console.warn('[ScheduleRunner] Performance eval failed (non-fatal):', err.message);
   }
 }
 
@@ -363,6 +424,16 @@ async function tick() {
 
     for (const schedule of schedules) {
       if (isDue(schedule.cron_expression) && !alreadyRanThisMinute(schedule.last_run_at)) {
+        // Performance gate: check if this schedule should be auto-paused
+        try {
+          const perf = require('./schedulePerformance');
+          const pauseCheck = perf.shouldAutoPause(schedule.id);
+          if (pauseCheck.pause) {
+            perf.autoPauseSchedule(schedule.id, pauseCheck.reason);
+            continue; // Skip this schedule
+          }
+        } catch {} // Non-fatal if schedulePerformance isn't ready
+
         executeSchedule(schedule).catch(e =>
           console.error(`[ScheduleRunner] Unhandled in "${schedule.name}":`, e.message)
         );
@@ -371,6 +442,9 @@ async function tick() {
 
     // Check for delayed pipeline steps that are now due
     try { getPipelineRunner().tickDelayedSteps(); } catch {}
+
+    // Nightly schedule performance evaluation at 01:00 AM
+    maybeRunPerformanceEval();
 
     // Nightly brain distillation at 02:00 AM
     maybeRunDistillation().catch(() => {});

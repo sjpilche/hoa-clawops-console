@@ -12,6 +12,7 @@ import App from './App';
 import './index.css';
 import { CampaignProvider } from './context/CampaignContext';
 import { CampaignThemeProvider } from './components/campaigns/CampaignThemeProvider';
+import { WorkspaceProvider } from './context/WorkspaceContext';
 
 /**
  * TanStack Query client configuration.
@@ -32,11 +33,13 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <CampaignProvider>
-          <CampaignThemeProvider>
-            <App />
-          </CampaignThemeProvider>
-        </CampaignProvider>
+        <WorkspaceProvider>
+          <CampaignProvider>
+            <CampaignThemeProvider>
+              <App />
+            </CampaignThemeProvider>
+          </CampaignProvider>
+        </WorkspaceProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>

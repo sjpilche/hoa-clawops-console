@@ -13,6 +13,7 @@
 
 import { BrainStore, TradeEpisode, FeedbackSignal } from './brain-store';
 import { AnalystReport, AnalystPick, RebalanceTrade } from '../ai-panel/index';
+import { AttributionStore } from '../allocation/attribution-store';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,10 +49,12 @@ export interface PositionCloseEvent {
 export class OutcomeTracker {
   private brain: BrainStore;
   private trackedPicks: Map<string, TrackedPick[]>;  // symbol → picks from analysts
+  private attrStore: AttributionStore | null;
 
-  constructor(brain: BrainStore) {
+  constructor(brain: BrainStore, attrStore?: AttributionStore | null) {
     this.brain = brain;
     this.trackedPicks = new Map();
+    this.attrStore = attrStore || null;
     console.log('📊 Outcome Tracker: Initialized');
   }
 
@@ -174,6 +177,16 @@ export class OutcomeTracker {
         : event.reason === 'time_exit' ? 'time_exit'
         : pnlPercent > 0 ? 'profit' : 'loss';
 
+      // Look up candidate_id for attribution linkage
+      let candidateId: string | undefined;
+      if (this.attrStore) {
+        try {
+          const candidates = this.attrStore.getCandidatesByRun(pick.runId);
+          const match = candidates.find((c: any) => c.symbol === pick.symbol);
+          candidateId = match?.candidate_id;
+        } catch {}
+      }
+
       // Layer 3: Record full episode
       const episode: TradeEpisode = {
         analystId: pick.analystId,
@@ -190,6 +203,7 @@ export class OutcomeTracker {
         outcomeScore,
         thesis: pick.thesis,
         runId: pick.runId,
+        candidateId,
       };
 
       this.brain.recordEpisode(episode);

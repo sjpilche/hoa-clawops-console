@@ -7,7 +7,7 @@
  * /campaigns, /expert-library. Auto-refreshes every 60s via TanStack Query.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
@@ -16,14 +16,15 @@ import {
   Plus, Search, Star, Shield, Clock, Zap, AlertTriangle,
   ToggleLeft, ToggleRight, Youtube, Users, Target, Filter,
   ChevronDown, ChevronRight, Lightbulb, Code, DollarSign,
+  SlidersHorizontal, RefreshCw, Power,
 } from 'lucide-react';
 
 // ── Fetch helpers ───────────────────────────────────────────────────────────
 
 const fetchStats = () => api.get('/rse/stats');
 const fetchSources = () => api.get('/rse/sources');
-const fetchTranscripts = (status) => api.get(`/rse/transcripts${status ? `?status=${status}&` : '?'}limit=100`);
-const fetchSignals = (minScore) => api.get(`/rse/signals?min_score=${minScore}&limit=100`);
+const fetchTranscripts = (status, offset = 0) => api.get(`/rse/transcripts${status ? `?status=${status}&` : '?'}limit=1000&offset=${offset}`);
+const fetchSignals = (minScore, offset = 0) => api.get(`/rse/signals?min_score=${minScore}&limit=1000&offset=${offset}`);
 const fetchSpecs = (status) => api.get(`/rse/build-specs${status ? `?status=${status}` : ''}`);
 const fetchCampaigns = () => api.get('/rse/campaigns');
 const fetchPrototypes = () => api.get('/rse/prototypes');
@@ -37,8 +38,8 @@ const fetchDTReports = () => api.get('/rse/dream-team/reports');
 const triggerDTCycle = () => api.post('/rse/dream-team/run-cycle');
 const fetchTasks = () => api.get('/rse/tasks');
 const updateTaskStatus = (id, status, resultSummary) => api.patch(`/rse/tasks/${id}`, { status, result_summary: resultSummary });
-const fetchLibrary = (category, search) => {
-  let url = '/rse/expert-library?limit=100';
+const fetchLibrary = (category, search, offset = 0) => {
+  let url = `/rse/expert-library?limit=1000&offset=${offset}`;
   if (category) url += `&category=${category}`;
   if (search) url += `&search=${encodeURIComponent(search)}`;
   return api.get(url);
@@ -277,6 +278,33 @@ function DreamTeamTab() {
                   <ScoreBar100 label={card.dim3_name} value={card.dim3_score} />
                   <ScoreBar100 label={card.dim4_name} value={card.dim4_score} />
                 </div>
+                {/* Score history — last 3 grades as colored dots */}
+                {(() => {
+                  const history = (scorecards || [])
+                    .filter(c => c.agent_name === card.agent_name)
+                    .sort((a, b) => b.score_date.localeCompare(a.score_date))
+                    .slice(0, 3);
+                  if (history.length <= 1) return null;
+                  return (
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <span className="text-xs text-text-muted mr-1">Recent:</span>
+                      {history.map((h, i) => (
+                        <span
+                          key={h.id}
+                          title={`${h.score_date}: ${h.grade} (${h.composite_score}/100)`}
+                          className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white ${
+                            h.grade === 'A' ? 'bg-accent-success' :
+                            h.grade === 'B' ? 'bg-accent-info' :
+                            h.grade === 'C' ? 'bg-accent-warning' :
+                            'bg-accent-danger'
+                          }`}
+                        >
+                          {h.grade}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
                 {card.assessment && <p className="text-xs text-text-muted mt-2 italic">{card.assessment}</p>}
               </div>
             ))}
@@ -316,6 +344,80 @@ function DreamTeamTab() {
             </div>
           )}
         </>
+      )}
+
+      {/* Auto-Disabled Agents */}
+      <DisabledAgentsSection scorecards={scorecards} />
+    </div>
+  );
+}
+
+function DisabledAgentsSection({ scorecards }) {
+  const queryClient = useQueryClient();
+
+  const { data: agents } = useQuery({
+    queryKey: ['agents-disabled'],
+    queryFn: () => api.get('/agents?status=disabled'),
+    refetchInterval: 60000,
+  });
+
+  const reEnable = useMutation({
+    mutationFn: (id) => api.put(`/agents/${id}`, { status: 'idle' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents-disabled'] });
+      queryClient.invalidateQueries({ queryKey: ['dt-scorecards'] });
+    },
+  });
+
+  const disabledAgents = agents || [];
+
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-2">
+        <Power size={14} />
+        Auto-Disabled Agents
+      </h3>
+      {disabledAgents.length === 0 ? (
+        <div className="bg-bg-secondary border border-accent-success/30 rounded-lg p-4 flex items-center gap-2">
+          <CheckCircle2 size={16} className="text-accent-success" />
+          <span className="text-sm text-accent-success font-medium">All agents healthy</span>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {disabledAgents.map(agent => {
+            const lastCard = (scorecards || [])
+              .filter(c => c.agent_name === agent.name?.toLowerCase())
+              .sort((a, b) => b.score_date.localeCompare(a.score_date))[0];
+            return (
+              <div key={agent.id} className="bg-bg-secondary border border-accent-danger/30 rounded-lg p-3 flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-text-primary">{agent.name}</span>
+                    {lastCard && (
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                        lastCard.grade === 'A' ? 'bg-accent-success/10 text-accent-success' :
+                        lastCard.grade === 'B' ? 'bg-accent-info/10 text-accent-info' :
+                        lastCard.grade === 'C' ? 'bg-accent-warning/10 text-accent-warning' :
+                        'bg-accent-danger/10 text-accent-danger'
+                      }`}>Last: {lastCard.grade}</span>
+                    )}
+                  </div>
+                  {(agent.description || agent.notes) && (
+                    <p className="text-xs text-text-muted mt-0.5 truncate">{agent.description || agent.notes}</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => reEnable.mutate(agent.id)}
+                  disabled={reEnable.isPending}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-accent-success/10 text-accent-success hover:bg-accent-success/20 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={reEnable.isPending ? 'animate-spin' : ''} />
+                  Re-enable
+                </button>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -903,8 +1005,36 @@ function SignalsTab() {
     },
   });
 
+  const [threshold, setThreshold] = useState(2.5);
+  const aboveCount = useMemo(() => (signals || []).filter(s => s.composite_score >= threshold).length, [signals, threshold]);
+  const belowCount = useMemo(() => (signals || []).filter(s => s.composite_score < threshold).length, [signals, threshold]);
+
   return (
     <div className="space-y-4">
+      {/* Threshold Tuning */}
+      <div className="bg-bg-secondary border border-border rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <SlidersHorizontal size={14} className="text-text-muted" />
+          <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Threshold Tuning</span>
+        </div>
+        <div className="flex items-center gap-4">
+          <input
+            type="range"
+            min={1}
+            max={5}
+            step={0.1}
+            value={threshold}
+            onChange={(e) => setThreshold(parseFloat(e.target.value))}
+            className="flex-1 h-2 accent-accent-primary cursor-pointer"
+          />
+          <span className="text-lg font-bold text-text-primary font-mono w-10 text-right">{threshold.toFixed(1)}</span>
+        </div>
+        <div className="flex items-center gap-6 mt-2">
+          <span className="text-xs font-medium text-accent-success">{aboveCount} signals ABOVE threshold</span>
+          <span className="text-xs font-medium text-accent-danger">{belowCount} signals BELOW threshold</span>
+        </div>
+      </div>
+
       <SectionHeader title="Scored Signals" count={signals?.length}>
         <div className="flex items-center gap-3">
           <ActionButton onClick={() => scoreNow.mutate()} loading={scoreNow.isPending} icon={Target} label="Score Now (5)" color="accent-success" result={scoreResult} />

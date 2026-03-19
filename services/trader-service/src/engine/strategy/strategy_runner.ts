@@ -3,6 +3,10 @@ import { Signal, MarketData } from './types';
 import { OrderRouter } from '../execution/order_router';
 import { IBrokerAdapter } from '../execution/broker/types';
 import { AlpacaAdapter } from '../execution/broker/alpaca';
+import { AttributionStore } from '../allocation/attribution-store';
+import { CapitalAllocator } from '../allocation/capital-allocator';
+import { signalToCandidate } from '../allocation/candidate-normalizer';
+import { TradeDecision, RegimeLabel } from '../allocation/types';
 import { config } from '../../config';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -12,10 +16,14 @@ export class StrategyRunner {
   private broker: IBrokerAdapter;
   private isRunning: boolean = false;
   private runInterval: NodeJS.Timeout | null = null;
+  private attrStore: AttributionStore | null = null;
+  private allocator: CapitalAllocator | null = null;
 
   constructor(
     registry?: StrategyRegistry,
-    broker?: IBrokerAdapter
+    broker?: IBrokerAdapter,
+    attrStore?: AttributionStore | null,
+    allocator?: CapitalAllocator | null,
   ) {
     this.registry = registry || new StrategyRegistry();
 
@@ -32,6 +40,8 @@ export class StrategyRunner {
     }
 
     this.orderRouter = new OrderRouter(this.broker);
+    this.attrStore = attrStore || null;
+    this.allocator = allocator || null;
   }
 
   /**
@@ -143,11 +153,76 @@ export class StrategyRunner {
     console.log(`   Strength: ${(signal.strength * 100).toFixed(0)}%`);
     console.log(`   Reason: ${signal.reason}`);
 
-    // Convert signal to order intent
-    const intent = await strategy.signalToIntent(signal);
+    // Create TradeCandidate for attribution (uses cached regime from last panel run)
+    let candidateId: string | undefined;
+    if (this.attrStore) {
+      try {
+        const latestRegime = this.attrStore.getLatestRegime();
+        const regimeLabel: RegimeLabel = latestRegime?.label || 'unknown';
+        const candidate = signalToCandidate(signal, regimeLabel, latestRegime?.id);
+        // Use the strategy's human name
+        candidate.sourceName = strategy.getName();
+        this.attrStore.insertCandidate(candidate);
+        candidateId = candidate.candidateId;
+      } catch (e: any) {
+        console.warn(`⚠️  Failed to store candidate for ${signal.symbol}:`, e.message);
+      }
+    }
 
-    console.log(`\n→ Converting signal to order intent...`);
-    console.log(`   ${intent.side.toUpperCase()} ${intent.qty} ${intent.symbol} @ $${intent.limitPrice}`);
+    // Route through allocator if available, otherwise use legacy signalToIntent()
+    let intent;
+
+    if (this.allocator && this.attrStore && candidateId) {
+      // NEW: Allocator-driven sizing
+      try {
+        const candidate = this.attrStore.getCandidateById(candidateId);
+        if (candidate) {
+          // Get current positions from broker for constraint checks
+          const positions = await this.broker.getPositions();
+          const existingSymbols = (positions || []).map((p: any) => p.symbol);
+          const account = await this.broker.getAccount();
+          const portfolioValue = account.portfolioValue || account.equity || 500;
+
+          const decision = this.allocator.evaluateOne(
+            candidate,
+            signal.price,
+            portfolioValue,
+            existingSymbols,
+          );
+
+          if (decision.action === 'reject') {
+            console.log(`💰 Allocator REJECTED: ${signal.symbol} — ${decision.reasons.join(', ')}`);
+            return;
+          }
+
+          // Build intent from allocator decision
+          intent = {
+            intentId: uuidv4(),
+            strategyId: signal.strategyId,
+            signalId: signal.signalId,
+            symbol: signal.symbol,
+            side: signal.side,
+            qty: decision.approvedQty || 1,
+            orderType: 'market' as const,
+            timeInForce: 'day' as const,
+            signalPrice: signal.price,
+          };
+
+          console.log(`💰 Allocator: ${signal.symbol} → score ${decision.allocatorScore}, ${decision.approvedQty} shares ($${(decision.dollarValue || 0).toFixed(2)})`);
+        } else {
+          // Candidate not found — fall back to legacy
+          intent = await strategy.signalToIntent(signal);
+        }
+      } catch (e: any) {
+        console.warn(`⚠️  Allocator failed, falling back to legacy sizing:`, e.message);
+        intent = await strategy.signalToIntent(signal);
+      }
+    } else {
+      // LEGACY: Strategy determines its own sizing
+      intent = await strategy.signalToIntent(signal);
+    }
+
+    console.log(`\n→ Order intent: ${intent.side.toUpperCase()} ${intent.qty} ${intent.symbol} @ $${intent.signalPrice || intent.limitPrice || '?'}`);
 
     // Submit order through order router (includes risk checks)
     const result = await this.orderRouter.submitOrder(intent);

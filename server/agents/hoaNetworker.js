@@ -18,6 +18,47 @@
 const { v4: uuidv4 } = require('uuid');
 const { run, all, get } = require('../db/connection');
 
+// ---------------------------------------------------------------------------
+// Telegram Alert — sends hot lead notifications
+// ---------------------------------------------------------------------------
+
+async function sendTelegramAlert(post, score, draftResponse) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return; // silently skip if not configured
+
+  const message = [
+    `🔥 *HOT LEAD* (score ${score}/100)`,
+    ``,
+    `*${post.title || 'Untitled'}*`,
+    post.platform ? `Platform: ${post.platform}` : '',
+    post.url ? `Link: ${post.url}` : '',
+    ``,
+    `*Draft response:*`,
+    draftResponse ? draftResponse.slice(0, 300) + (draftResponse.length > 300 ? '...' : '') : '(none)',
+    ``,
+    `_Review in ClawOps → Engagement Queue_`,
+  ].filter(Boolean).join('\n');
+
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: message,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Telegram ${res.status}: ${err}`);
+  }
+
+  console.log(`[HOA Networker] 📱 Telegram alert sent for score ${score} lead`);
+}
+
 // Response templates for different scenarios
 const RESPONSE_TEMPLATES = {
   special_assessment_distress: {
@@ -305,10 +346,12 @@ async function processPost(post, platform) {
 
     console.log(`[HOA Networker] ✅ Added to queue (score ${relevanceScore}): ${post.title}`);
 
-    // If score >= 90, it's a hot lead - could send Telegram alert here
+    // If score >= 90, it's a hot lead — send Telegram alert
     if (relevanceScore >= 90) {
       console.log(`[HOA Networker] 🔥 HOT LEAD detected (score ${relevanceScore})`);
-      // TODO: Send Telegram notification
+      sendTelegramAlert(post, relevanceScore, draftResponse).catch(err =>
+        console.warn(`[HOA Networker] Telegram alert failed (non-fatal): ${err.message}`)
+      );
     }
 
     return queueId;

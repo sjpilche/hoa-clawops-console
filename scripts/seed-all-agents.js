@@ -101,6 +101,21 @@ const AGENT_FLEET = [
   { name: 'data-rehab-scout', description: 'Finds SMBs with data chaos signals — QB+Excel mix, hiring accountants, ERP migration issues. Self-evaluating.', group: 'data-rehab' },
   { name: 'data-rehab-scorer', description: 'Scores leads on data-readiness: ERP age, employee count, manual processes, failed migrations. $0/run.', group: 'data-rehab', special_handler: 'data_rehab_discovery' },
 
+  // Data Rehab — Reply Classifier
+  { name: 'data-rehab-reply-classifier', description: 'Classify inbound email replies to Data Rehab outreach (INTERESTED, NOT_NOW, WRONG_PERSON, etc.)', group: 'data-rehab', special_handler: 'data_rehab_reply_classifier' },
+
+  // Data Rehab — Follow-Up
+  { name: 'data-rehab-follow-up', description: 'Generate personalized follow-up emails for Data Rehab leads with no reply after 5+ days. Multi-touch cadence.', group: 'data-rehab', special_handler: 'data_rehab_follow_up' },
+
+  // Data Rehab — Analytics Monitor
+  { name: 'data-rehab-analytics', description: 'Daily Data Rehab pipeline health — leads, outreach stats, reply breakdown, conversion rates. Posts summary to Discord.', group: 'data-rehab', special_handler: 'data_rehab_analytics' },
+
+  // Data Rehab — Meeting Booker
+  { name: 'data-rehab-meeting-booker', description: 'Draft Autopsy kickoff scheduling emails for INTERESTED Data Rehab replies. Requires manual confirmation before send.', group: 'data-rehab', special_handler: 'data_rehab_meeting_booker' },
+
+  // Data Rehab — Contact Enricher
+  { name: 'data-rehab-enricher', description: 'Find contact emails and phone numbers for Data Rehab leads using web search and pattern matching.', group: 'data-rehab', special_handler: 'data_rehab_enricher' },
+
   // ── ClawOps 2.0 Upgrades ──
   { name: 'urgency-scorer', description: 'Scores all leads 0-100 across Fit/Pain/Timeliness/Enrichment. Dual-product (Jake + HOA). $0/run — no LLM.', group: 'jake-marketing', special_handler: 'urgency_scorer' },
   { name: 'lead-dossier-generator', description: 'Assembles a personalized Markdown dossier per lead: pain narrative, brain episode proof, KB winning angles, CTA. Dual-product (Jake + HOA). $0/run.', group: 'jake-marketing', special_handler: 'lead_dossier_generator' },
@@ -148,6 +163,19 @@ const AGENT_FLEET = [
   { name: 'rse-expert-librarian', description: 'Extracts proven patterns from high-scoring signals into expert library. $0/run.', group: 'revenue-signal', special_handler: 'rse_expert_librarian' },
   { name: 'rse-code-builder', description: 'Builds working prototypes from approved build specs via Charlie/DeepSeek. $0 Ollama, ~$0.10 GPT-4o fallback.', group: 'revenue-signal', special_handler: 'rse_code_builder' },
   { name: 'rse-feedback-loop', description: 'Updates source trust scores, prunes fluff creators, tracks campaign outcomes. $0/run.', group: 'revenue-signal', special_handler: 'rse_feedback_loop' },
+
+  // ── DC Site Intel (4) ──
+  { name: 'dc-intel-deal-monitor', description: 'Daily 7am — scans target markets for DC/warehouse land signals: rezoning, permits, substation upgrades, competitor activity, owner distress. Posts intel notes to DC Site Intel. $0/run (Brave Search).', group: 'dc-intel', special_handler: 'dc_intel_deal_monitor' },
+  { name: 'dc-intel-owner-research', description: 'On-demand — deep-researches a single land owner: SOS filings, litigation, news, distress signals. Posts findings to DC Site Intel owner-intel endpoint. $0/run.', group: 'dc-intel', special_handler: 'dc_intel_owner_research' },
+  { name: 'dc-intel-research-queue', description: 'Weekly Mon 6am — polls all unresearched owners from DC Site Intel, runs dc-intel-owner-research on each. Batch enrichment pass. $0/run.', group: 'dc-intel', special_handler: 'dc_intel_research_queue' },
+  { name: 'dc-intel-opportunity-scout', description: 'Daily 5am — hunts NEW land opportunities not yet in DC Site Intel: county transfers, rezoning filings, DC-related land acquisitions. Creates stub opportunities for promising finds. $0/run.', group: 'dc-intel', special_handler: 'dc_intel_opportunity_scout' },
+  { name: 'dc-intel-daily-scorecard', description: 'Daily 8am — fetches morning lead scorecard from DC Site Intel, scores each new lead A/B/C/D, emails ranked HTML report to Steve + Doug via SendGrid. $0/run.', group: 'dc-intel', special_handler: 'dc_intel_daily_scorecard' },
+  { name: 'dc-intel-learning-loop', description: 'Weekly Sunday 10pm — analyzes this week\'s validated/dismissed outcomes, uses Ollama to find patterns, updates market heat weights in DC Site Intel scoring engine. $0/run (local LLM).', group: 'dc-intel', special_handler: 'dc_intel_learning_loop' },
+  { name: 'dc-intel-auto-generate', description: 'Weekly Tue 6am — sweeps DC Site Intel scored parcel DB for top-scored parcels (≥0.65) not yet in pipeline. Creates opportunity stubs with real APNs + power/zoning data, then triggers Apollo + skip-trace on each new owner. $0/run (DB-native, no search).', group: 'dc-intel', special_handler: 'dc_intel_auto_generate' },
+  { name: 'dc-intel-rto-scanner', description: 'Mon/Wed/Fri 5:30am — polls PJM/MISO power interconnect queue for new large-MW filings (≥50MW) in target markets. A new 100MW+ request signals active hyperscaler site selection weeks before news coverage. $0/run (DB-native).', group: 'dc-intel', special_handler: 'dc_intel_rto_scanner' },
+  { name: 'dc-intel-planning-scanner', description: 'Daily 5:15am — polls county planning event DB (Cook/DuPage/Will/Loudoun/Prince William) for new rezonings, permits, and variances. Primary-source government data — day-1 filings before any news article. $0/run (DB-native).', group: 'dc-intel', special_handler: 'dc_intel_planning_scanner' },
+  { name: 'dc-intel-distress-scanner', description: 'Weekly Wed 6:30am — cross-references tax-delinquent + estate + stale-tenure owners with skip-trace phone results. Generates prioritized "call today" intel notes for every distressed owner with a phone on file. $0/run (DB-native).', group: 'dc-intel', special_handler: 'dc_intel_distress_scanner' },
+  { name: 'dc-intel-meta-reviewer', description: 'Daily 9am — master AI reviewer. Scores every OpenClaw intel note from the past 24h on relevance, specificity, and actionability (0–10 via Ollama). Validated notes (≥7) post outcome signals; dismissed notes (<4) feed into the learning loop. The quality layer that makes all other agents improve. $0/run (local Ollama).', group: 'dc-intel', special_handler: 'dc_intel_meta_reviewer' },
 ];
 
 async function main() {

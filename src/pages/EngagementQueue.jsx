@@ -5,11 +5,13 @@
  * before they get posted to Facebook, Reddit, LinkedIn, etc.
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 export default function EngagementQueue() {
+  const { activeWorkspaceId } = useWorkspace();
   const [filters, setFilters] = useState({
     status: 'pending_review',
     platform: 'all',
@@ -18,11 +20,12 @@ export default function EngagementQueue() {
 
   const queryClient = useQueryClient();
 
-  // Fetch queue items
+  // Fetch queue items (workspace-aware)
   const { data: queueData, isLoading } = useQuery({
-    queryKey: ['engagement-queue', filters],
+    queryKey: ['engagement-queue', filters, activeWorkspaceId],
     queryFn: async () => {
       const params = new URLSearchParams(filters);
+      if (activeWorkspaceId) params.set('workspace_id', activeWorkspaceId);
       return api.get(`/lead-gen/queue?${params}`);
     },
     refetchInterval: 30000

@@ -29,6 +29,13 @@ import { fetchRealMarketData, formatRealMarketData } from './market-data';
 import { BrainStore } from '../learning/brain-store';
 import { BrainContextBuilder } from '../learning/brain-context';
 import { OutcomeTracker } from '../learning/outcome-tracker';
+import { AttributionStore } from '../allocation/attribution-store';
+import { CapitalAllocator } from '../allocation/capital-allocator';
+import { classifyRegime } from '../allocation/regime-classifier';
+import { aggregatedPickToCandidate } from '../allocation/candidate-normalizer';
+import { TradeCandidate, TradeDecision } from '../allocation/types';
+import { SourceProfiler } from '../learning/source-profiles';
+import { CIOReviewer } from './cio-reviewer';
 import { v4 as uuidv4 } from 'uuid';
 
 // ---------------------------------------------------------------------------
@@ -62,16 +69,27 @@ export class PanelRunner {
   private brain: BrainStore | null;
   private brainContext: BrainContextBuilder | null;
   private outcomeTracker: OutcomeTracker | null;
+  private attrStore: AttributionStore | null;
+  private allocator: CapitalAllocator | null;
+  private profiler: SourceProfiler | null;
+  private cioReviewer: CIOReviewer;
 
   constructor(
     brain?: BrainStore | null,
     outcomeTracker?: OutcomeTracker | null,
+    attrStore?: AttributionStore | null,
+    allocator?: CapitalAllocator | null,
+    profiler?: SourceProfiler | null,
   ) {
     this.llmClient = new LLMClient();
     this.executor = new OpenClawExecutor();
     this.brain = brain || null;
-    this.brainContext = brain ? new BrainContextBuilder(brain) : null;
+    this.brainContext = brain ? new BrainContextBuilder(brain, profiler) : null;
     this.outcomeTracker = outcomeTracker || null;
+    this.attrStore = attrStore || null;
+    this.allocator = allocator || null;
+    this.profiler = profiler || null;
+    this.cioReviewer = new CIOReviewer();
   }
 
   // -------------------------------------------------------------------------
@@ -107,6 +125,14 @@ export class PanelRunner {
       const skillsCtx = await fetchRealMarketData(allSymbols);
       const skillsBlock = formatRealMarketData(skillsCtx);
       const marketContext = this.buildMarketContext(skillsBlock);
+
+      // Step 2c: Classify market regime from structured data
+      const regime = classifyRegime(skillsCtx.regimeInput);
+      let regimeSnapshotId: number | undefined;
+      if (this.attrStore) {
+        regimeSnapshotId = this.attrStore.insertRegimeSnapshot(regime);
+        console.log(`🌡️  Regime: ${regime.label} (confidence: ${(regime.confidence * 100).toFixed(0)}%, VIX: ${regime.vix ?? '?'}, F&G: ${regime.fearGreedScore ?? '?'})`);
+      }
 
       // Record observation
       if (this.brain) {
@@ -177,8 +203,79 @@ export class PanelRunner {
       const aggregatedPicks = this.aggregatePicks(reports);
       console.log(`\n📊 Aggregated: ${aggregatedPicks.length} actionable picks`);
 
-      // Step 7: Calculate rebalance trades
-      const trades = this.calculateRebalanceTrades(portfolio, aggregatedPicks);
+      // Step 6b: (Candidate creation now happens inside allocator flow in Step 7)
+
+      // Step 7: Route through Capital Allocator (or fallback to legacy sizing)
+      let trades: RebalanceTrade[];
+      let allocatorDecisions: TradeDecision[] | null = null;
+
+      if (this.allocator && this.attrStore) {
+        // NEW: Allocator-driven sizing
+        // 7a. Get current prices for all pick symbols
+        const pickSymbols = aggregatedPicks.map(p => p.symbol);
+        const prices = await this.executor.getMarketPrices(pickSymbols);
+
+        // 7b. Convert aggregated picks to TradeCandidate[]
+        const candidates: TradeCandidate[] = [];
+        for (const pick of aggregatedPicks) {
+          const candidate = aggregatedPickToCandidate(pick, reports, runId, regime.label, regimeSnapshotId);
+          candidates.push(candidate);
+          this.attrStore.insertCandidate(candidate);
+        }
+
+        // 7c. Run allocator
+        const existingSymbols = portfolio.positions.map((p: any) => p.symbol);
+        allocatorDecisions = this.allocator.evaluate(candidates, prices, portfolio.totalValue, existingSymbols);
+
+        // 7d. Convert approved decisions to RebalanceTrade[] for executor
+        trades = [];
+        for (const decision of allocatorDecisions) {
+          if (decision.action !== 'execute') continue;
+
+          const candidate = candidates.find(c => c.candidateId === decision.candidateId);
+          if (!candidate) continue;
+
+          const currentPosition = portfolio.positions.find((p: any) => p.symbol === candidate.symbol);
+          const currentWeight = currentPosition?.weight || 0;
+          const targetWeight = decision.dollarValue ? decision.dollarValue / portfolio.totalValue : 0;
+
+          trades.push({
+            symbol: candidate.symbol,
+            side: candidate.side,
+            targetWeight,
+            currentWeight,
+            deltaWeight: targetWeight - currentWeight,
+            estimatedShares: decision.approvedQty || 0,
+            estimatedValue: decision.dollarValue || 0,
+            sourceAnalysts: [candidate.sourceName],
+            compositeScore: decision.allocatorScore || 0,
+          });
+        }
+
+        console.log(`💰 Allocator: ${allocatorDecisions.filter(d => d.action === 'execute').length} approved, ${allocatorDecisions.filter(d => d.action === 'reject').length} rejected`);
+
+        // 7e. CIO final review — qualitative gate before execution
+        if (trades.length > 0) {
+          console.log(`\n🧠 CIO Review: ${trades.length} trade(s) under review...`);
+          const cioResult = await this.cioReviewer.review({
+            trades,
+            candidates,
+            decisions: allocatorDecisions,
+            reports,
+            regime,
+            portfolioValue: portfolio.totalValue,
+            cashAvailable: portfolio.cash || 0,
+          });
+          trades = cioResult.approved; // only CIO-approved trades proceed
+        }
+      } else {
+        // LEGACY: Old sizing path (fallback when allocator not available)
+        trades = this.calculateRebalanceTrades(portfolio, aggregatedPicks);
+      }
+
+      if (trades.length === 0 && aggregatedPicks.length > 0) {
+        console.log(`⚠️  ${aggregatedPicks.length} picks but 0 trades — ${this.allocator ? 'all rejected by allocator' : 'below thresholds'}`);
+      }
       console.log(`💼 Portfolio Actions: ${trades.length} trade(s)`);
 
       if (trades.length > 0) {
@@ -194,6 +291,28 @@ export class PanelRunner {
         executionResults = await this.executor.executePortfolioRebalance(trades);
       } else if (options.dryRun && trades.length > 0) {
         console.log('\n🏃 DRY RUN — Trades NOT executed');
+      }
+
+      // Step 8b: Log trade decisions to attribution store (legacy path only — allocator logs its own)
+      if (this.attrStore && !allocatorDecisions) {
+        const candidates = this.attrStore.getCandidatesByRun(runId);
+        for (const trade of trades) {
+          const matchingCandidate = candidates.find((c: any) => c.symbol === trade.symbol);
+          if (matchingCandidate) {
+            this.attrStore.insertDecision({
+              decisionId: uuidv4(),
+              candidateId: matchingCandidate.candidate_id,
+              action: 'execute',
+              requestedQty: trade.estimatedShares,
+              approvedQty: trade.estimatedShares,
+              dollarValue: trade.estimatedValue,
+              riskPassed: true,
+              executed: !options.dryRun,
+              reasons: [`Legacy sizing — composite score: ${trade.compositeScore}`],
+              createdAt: new Date(),
+            });
+          }
+        }
       }
 
       // Step 9: Register picks with outcome tracker (THE LOOP)
@@ -432,9 +551,25 @@ export class PanelRunner {
       const side = buyEntries.length > 0 ? 'buy' : 'sell';
       const picks = relevant.map(e => e.pick);
 
-      const avgConviction = picks.reduce((sum, p) => sum + p.conviction, 0) / picks.length;
-      const maxConviction = Math.max(...picks.map(p => p.conviction));
       const analystCount = relevant.length;
+
+      // Weight convictions by analyst reliability (Sprint 3)
+      let avgConviction: number;
+      if (this.profiler) {
+        // Reliability-weighted conviction: high-reliability analyst's opinion counts more
+        let totalWeight = 0;
+        let weightedConviction = 0;
+        for (const entry of relevant) {
+          const profile = this.profiler.getProfile(entry.analystId);
+          const weight = profile.reliabilityScore;
+          weightedConviction += entry.pick.conviction * weight;
+          totalWeight += weight;
+        }
+        avgConviction = totalWeight > 0 ? weightedConviction / totalWeight : picks.reduce((s, p) => s + p.conviction, 0) / picks.length;
+      } else {
+        avgConviction = picks.reduce((sum, p) => sum + p.conviction, 0) / picks.length;
+      }
+      const maxConviction = Math.max(...picks.map(p => p.conviction));
 
       // Multi-analyst composite scoring:
       //   Base = avgConviction / 5 * 100
@@ -487,10 +622,10 @@ export class PanelRunner {
     // Calculate buys
     targetPortfolio.forEach((targetWeight, symbol) => {
       const currentPosition = portfolio.positions.find((p: any) => p.symbol === symbol);
-      const currentWeight = currentPosition ? currentPosition.weight : 0;
+      const currentWeight = (currentPosition && !isNaN(currentPosition.weight)) ? currentPosition.weight : 0;
       const deltaWeight = targetWeight - currentWeight;
 
-      if (Math.abs(deltaWeight) >= TIERED_PANEL_CONFIG.minTradeThreshold) {
+      if (!isNaN(deltaWeight) && Math.abs(deltaWeight) >= TIERED_PANEL_CONFIG.minTradeThreshold) {
         const estimatedValue = deltaWeight * portfolio.totalValue;
         const pick = picks.find(p => p.symbol === symbol)!;
 
@@ -513,13 +648,14 @@ export class PanelRunner {
       // Only sell if this position is flagged by sell-side analysts
       const sellPick = picks.find(p => p.symbol === pos.symbol && p.side === 'sell');
 
-      if (sellPick && pos.weight >= TIERED_PANEL_CONFIG.minTradeThreshold) {
+      const posWeight = (!isNaN(pos.weight) && pos.weight > 0) ? pos.weight : (pos.marketValue / portfolio.totalValue) || 0;
+      if (sellPick && posWeight >= TIERED_PANEL_CONFIG.minTradeThreshold) {
         trades.push({
           symbol: pos.symbol,
           side: 'sell',
           targetWeight: 0,
-          currentWeight: pos.weight,
-          deltaWeight: -pos.weight,
+          currentWeight: posWeight,
+          deltaWeight: -posWeight,
           estimatedShares: pos.qty,
           estimatedValue: -pos.marketValue,
           sourceAnalysts: ['Risk Sentinel'],

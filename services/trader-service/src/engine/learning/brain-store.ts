@@ -59,6 +59,7 @@ export interface TradeEpisode {
   thesis?: string;
   marketContext?: string;
   runId?: string;
+  candidateId?: string;  // Links to trade_candidates for attribution
   createdAt?: string;
 }
 
@@ -339,6 +340,8 @@ export class BrainStore {
 
     // Add strategy_id to brain_episodes if missing
     try { this.db.exec('ALTER TABLE brain_episodes ADD COLUMN strategy_id TEXT'); } catch {}
+    // Add candidate_id to brain_episodes for attribution linkage
+    try { this.db.exec('ALTER TABLE brain_episodes ADD COLUMN candidate_id TEXT'); } catch {}
   }
 
   /** Expose raw DB for ExecStore */
@@ -450,8 +453,8 @@ export class BrainStore {
         INSERT INTO brain_episodes (
           analyst_id, symbol, side, conviction, opportunity_type,
           entry_price, exit_price, pnl_dollars, pnl_percent, hold_days,
-          outcome_type, outcome_score, thesis, market_context, keywords, run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          outcome_type, outcome_score, thesis, market_context, keywords, run_id, candidate_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         episode.analystId, episode.symbol, episode.side,
         episode.conviction || null, episode.opportunityType || null,
@@ -459,7 +462,7 @@ export class BrainStore {
         episode.pnlDollars || null, episode.pnlPercent || null,
         episode.holdDays || null, episode.outcomeType, episode.outcomeScore,
         episode.thesis || null, episode.marketContext || null,
-        keywords, episode.runId || null
+        keywords, episode.runId || null, episode.candidateId || null
       );
     } catch (err: any) {
       console.warn('Brain recordEpisode error (non-fatal):', err.message);

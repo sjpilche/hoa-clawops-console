@@ -153,17 +153,17 @@ export class OpenClawExecutor {
       const cash = account.cash || 0;
 
       const positionInfos: PositionInfo[] = positions.map((p: any) => {
-        const marketValue = parseFloat(p.market_value);
-        const qty = parseFloat(p.qty);
-        const avgEntryPrice = parseFloat(p.avg_entry_price);
-        const currentPrice = parseFloat(p.current_price);
-        const unrealizedPnl = parseFloat(p.unrealized_pl);
+        const marketValue = parseFloat(p.market_value) || 0;
+        const qty = parseFloat(p.qty) || 0;
+        const avgEntryPrice = parseFloat(p.avg_entry_price) || 0;
+        const currentPrice = parseFloat(p.current_price) || 0;
+        const unrealizedPnl = parseFloat(p.unrealized_pl) || 0;
 
         return {
           symbol: p.symbol,
           qty,
           marketValue,
-          weight: totalValue > 0 ? marketValue / totalValue : 0,
+          weight: (totalValue > 0 && !isNaN(marketValue)) ? marketValue / totalValue : 0,
           avgEntryPrice,
           currentPrice,
           unrealizedPnl,
@@ -230,7 +230,10 @@ export class OpenClawExecutor {
         }
       }
 
-      const shares = Math.floor(dollarValue / currentPrice);
+      // Use allocator-provided share count if available, otherwise calculate from dollar value
+      const shares = (trade.estimatedShares > 0 && trade.estimatedValue > 0)
+        ? Math.floor(trade.estimatedShares)  // Allocator already calculated shares
+        : Math.floor(dollarValue / currentPrice);  // Legacy: calculate from dollar value
 
       console.log(`[OpenClawExecutor] Executing ${trade.side.toUpperCase()} ${shares} ${trade.symbol} @ $${currentPrice.toFixed(2)} ($${dollarValue.toFixed(2)} value)`);
 

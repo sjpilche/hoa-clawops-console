@@ -139,9 +139,7 @@ export default function AgentBuilderPage() {
         setParentAgentId(data.agent.parent_id);
       }
 
-      // Load soul documents if they exist
-      // TODO: Add API endpoint to fetch soul documents
-      // For now, use instructions as soul content
+      // Soul document is stored in the instructions column and synced to SOUL.md via OpenClaw
       setSoulDocument(data.agent.instructions || getDefaultSoulTemplate());
 
       // Load advanced configuration from config JSON

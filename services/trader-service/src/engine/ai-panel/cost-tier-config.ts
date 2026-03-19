@@ -1,14 +1,15 @@
 // =============================================================================
 // Cost Tier System — Analyst → LLM Assignment with Fallbacks
 // =============================================================================
-// Tier 0: Ollama (free, local) — Value Hunter + Risk Sentinel
-// Tier 1: GPT-4o-mini (~$0.003/call) — Momentum Scanner
-// Tier 2: Grok (~$0.015/call) — Special Situations (needs real-time X)
+// Panel runs every 30 minutes (not 3min) — Ollama latency is acceptable.
 //
-// RAM-safe execution on 16GB Dell OptiPlex:
-//   1. Tier 0 analysts run SEQUENTIALLY (same Ollama model, no thrashing)
-//   2. Tier 1 + 2 analysts run IN PARALLEL (API calls, zero RAM impact)
-//   Total wall time: ~6s (Ollama) + ~3s (API) ≈ 9s per panel run
+// Tier 0: Ollama — Value Hunter, Momentum Scanner, Risk Sentinel ($0/call)
+// Tier 2: Grok-3-mini (~$0.003/call) — Special Situations (needs real-time X)
+//
+// Cost at 13 runs/market day:
+//   Ollama × 3:     $0.00/day
+//   Grok-3-mini:    ~$0.04/day
+//   Monthly:        ~$0.80/month
 // =============================================================================
 
 import { AnalystConfig, LLMProvider } from './index';
@@ -36,8 +37,8 @@ export interface TieredAnalystConfig extends AnalystConfig {
 // Tiered Analyst Configs
 // -----------------------------------------------------------------------------
 
-/** Value Hunter — Tier 0 (Ollama, $0/run). Fundamental analysis doesn't need
- *  real-time social data, so local LLM is fine. Falls back to GPT-4o-mini. */
+/** Value Hunter — Tier 0 (Ollama, $0/call). Panel runs every 30min so
+ *  local inference latency is acceptable. Falls back to GPT-4o-mini. */
 export const TIERED_VALUE_HUNTER: TieredAnalystConfig = {
   ...VALUE_HUNTER,
   provider: 'ollama',
@@ -47,30 +48,30 @@ export const TIERED_VALUE_HUNTER: TieredAnalystConfig = {
   fallbackModel: 'gpt-4o-mini',
 };
 
-/** Momentum Scanner — Tier 1 (GPT-4o-mini, ~$0.003/call). Technical analysis
- *  needs decent pattern recognition but not bleeding-edge. Falls back to Ollama. */
+/** Momentum Scanner — Tier 0 (Ollama, $0/call). Technical pattern recognition
+ *  works well with local models at 30min cadence. Falls back to GPT-4o-mini. */
 export const TIERED_MOMENTUM_SCANNER: TieredAnalystConfig = {
   ...MOMENTUM_SCANNER,
-  provider: 'openai',
-  model: 'gpt-4o-mini',
-  costTier: 1,
-  fallbackProvider: 'ollama',
-  fallbackModel: process.env.OLLAMA_DEFAULT_MODEL || 'llama3.2:3b',
+  provider: 'ollama',
+  model: process.env.OLLAMA_DEFAULT_MODEL || 'llama3.2:3b',
+  costTier: 0,
+  fallbackProvider: 'openai',
+  fallbackModel: 'gpt-4o-mini',
 };
 
-/** Special Situations — Tier 2 (Grok, ~$0.015/call). Needs real-time X/Twitter
- *  for early catalyst detection. Falls back to Grok standard model. */
+/** Special Situations — Tier 2 (grok-3-mini, ~$0.003/call). Needs real-time X/Twitter
+ *  for early catalyst detection. Cannot use Ollama (no live web access). */
 export const TIERED_SPECIAL_SITUATIONS: TieredAnalystConfig = {
   ...SPECIAL_SITUATIONS,
   provider: 'grok',
-  model: 'grok-4-1-fast-non-reasoning',
+  model: 'grok-3-mini',
   costTier: 2,
   fallbackProvider: 'grok',
-  fallbackModel: 'grok-3-mini-fast',
+  fallbackModel: 'grok-3-mini',
 };
 
-/** Risk Sentinel — Tier 0 (Ollama, $0/run). Defensive analysis is conservative
- *  by nature — local LLM handles it well. Falls back to GPT-4o-mini. */
+/** Risk Sentinel — Tier 0 (Ollama, $0/call). Defensive/risk analysis is
+ *  well within local model capability. Falls back to GPT-4o-mini. */
 export const TIERED_RISK_SENTINEL: TieredAnalystConfig = {
   ...RISK_SENTINEL,
   provider: 'ollama',
@@ -84,16 +85,15 @@ export const TIERED_RISK_SENTINEL: TieredAnalystConfig = {
 // All tiered analysts, grouped by execution order
 // -----------------------------------------------------------------------------
 
-/** Tier 0 analysts — run sequentially on Ollama (same model = no reload) */
+/** Tier 0 analysts — run sequentially via Ollama (free, ~5-15s each at 30min cadence) */
 export const TIER_0_ANALYSTS: TieredAnalystConfig[] = [
   TIERED_VALUE_HUNTER,
+  TIERED_MOMENTUM_SCANNER,
   TIERED_RISK_SENTINEL,
 ];
 
-/** Tier 1 analysts — run in parallel via cheap API */
-export const TIER_1_ANALYSTS: TieredAnalystConfig[] = [
-  TIERED_MOMENTUM_SCANNER,
-];
+/** Tier 1 analysts — none currently (all moved to Ollama Tier 0) */
+export const TIER_1_ANALYSTS: TieredAnalystConfig[] = [];
 
 /** Tier 2 analysts — run in parallel via premium API */
 export const TIER_2_ANALYSTS: TieredAnalystConfig[] = [
@@ -113,8 +113,8 @@ export const ALL_TIERED_ANALYSTS: TieredAnalystConfig[] = [
 
 /**
  * Get analysts grouped by tier for the runner to execute correctly:
- * - Tier 0: sequential (RAM-safe Ollama)
- * - Tier 1+2: parallel (API calls)
+ * - Tier 0: sequential (Ollama — one at a time to avoid RAM pressure)
+ * - Tier 2: parallel (Grok API — fast, one call)
  */
 export function getAnalystsByExecutionGroup(): {
   sequential: TieredAnalystConfig[];
@@ -141,14 +141,14 @@ export function getFallbackConfig(analyst: TieredAnalystConfig): TieredAnalystCo
 // Cost estimation per run
 // -----------------------------------------------------------------------------
 
-/** Estimated cost per full panel run (4 analysts) */
+/** Estimated cost per full panel run (4 analysts, 30min interval = 13 runs/market day) */
 export const ESTIMATED_COST_PER_RUN = {
-  tier0: 0,           // Ollama: free
-  tier1: 0.003,       // GPT-4o-mini: ~$0.003/call
-  tier2: 0.015,       // Grok: ~$0.015/call
-  total: 0.018,       // ~$0.018/run
-  daily130Runs: 2.34, // 130 runs/day × $0.018
-  monthlyEstimate: 70, // ~$70/month
+  tier0: 0,             // Ollama × 3: $0/call
+  tier1: 0,             // No Tier 1 analysts
+  tier2: 0.003,         // grok-3-mini: ~$0.003/call
+  total: 0.003,         // ~$0.003/run (10× cheaper than before)
+  daily13Runs: 0.039,   // 13 runs/day × $0.003
+  monthlyEstimate: 0.82, // ~$0.82/month (21 trading days)
 };
 
 // -----------------------------------------------------------------------------
@@ -157,8 +157,8 @@ export const ESTIMATED_COST_PER_RUN = {
 
 export const TIERED_PANEL_CONFIG = {
   ...DEFAULT_PANEL_CONFIG,
-  minScoreToAct: 50,          // Lowered: with 4 analysts, composite scoring is richer
-  minTradeThreshold: 0.02,    // Lowered from 0.05 — allow trades with 2%+ weight change
+  minScoreToAct: 40,          // Lowered from 50: single-analyst conviction 2/5 = score 40. Start trading to learn.
+  minTradeThreshold: 0.015,   // Lowered from 0.02 — allow trades with 1.5%+ weight change
 };
 
 // -----------------------------------------------------------------------------

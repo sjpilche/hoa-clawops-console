@@ -127,6 +127,7 @@ export default function ResultsPage() {
             <Input
               type="text"
               placeholder="Search by agent name or status..."
+              aria-label="Search run results"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"

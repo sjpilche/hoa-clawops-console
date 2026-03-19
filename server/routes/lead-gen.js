@@ -214,24 +214,32 @@ router.post('/networker/queue/:id/post', async (req, res) => {
       });
     }
 
-    // TODO: Trigger agent to post response
-    // For now, we'll mark it as posted immediately
-    // In production, this would queue a task for the agent
-
-    await db.run(
-      `UPDATE lg_engagement_queue
-       SET status = 'posted', posted_at = datetime('now')
-       WHERE id = ?`,
-      [id]
-    );
+    // Trigger platform posting via the poster service
+    const { postToplatform } = require('../services/platformPoster');
+    const result = await postToplatform(id);
 
     const updated = await db.get('SELECT * FROM lg_engagement_queue WHERE id = ?', [id]);
 
-    res.json({
-      success: true,
-      message: 'Response posted successfully',
-      opportunity: updated
-    });
+    if (result.manual) {
+      res.json({
+        success: true,
+        message: `Response approved — open ${result.postUrl} to post manually`,
+        manual: true,
+        opportunity: updated,
+      });
+    } else if (result.success) {
+      res.json({
+        success: true,
+        message: 'Response posted successfully',
+        opportunity: updated,
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: `Post failed: ${result.error}`,
+        opportunity: updated,
+      });
+    }
   } catch (error) {
     console.error('[Lead Gen API] Error posting response:', error);
     res.status(500).json({

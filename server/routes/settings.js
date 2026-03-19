@@ -40,6 +40,11 @@ const VALID_KEYS = new Set([
   'ollama_enabled',
   'ollama_model',
   'ollama_host',
+  'auto_approval_enabled',
+  'auto_approval_qa_threshold',
+  'auto_approval_daily_cap',
+  'auto_approval_bounce_threshold',
+  'auto_approval_paused',
 ]);
 
 // Seed any missing keys with defaults (called once on module load)
@@ -56,6 +61,11 @@ function ensureDefaultSettings() {
     ['ollama_enabled', 'false', 'Route agents with use_ollama:true through local Ollama instead of OpenAI'],
     ['ollama_model', 'llama3.2:3b', 'Default Ollama model for local inference'],
     ['ollama_host', 'http://localhost:11434', 'Ollama API base URL'],
+    ['auto_approval_enabled', 'false', 'Master switch for autonomous outreach approval'],
+    ['auto_approval_qa_threshold', '80', 'Minimum Ralph QA score for auto-approval (0-100)'],
+    ['auto_approval_daily_cap', '50', 'Maximum auto-sent emails per day'],
+    ['auto_approval_bounce_threshold', '0.10', 'Bounce rate that triggers circuit breaker (0.0-1.0)'],
+    ['auto_approval_paused', 'false', 'Circuit breaker state — true = all auto-sending paused'],
   ];
   for (const [key, value, description] of defaults) {
     try {

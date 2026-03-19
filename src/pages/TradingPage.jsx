@@ -28,7 +28,7 @@ import {
   Clock, Play, Eye, Award, Skull, BookOpen,
 } from 'lucide-react';
 
-const TRADER_BASE = 'http://localhost:3002';
+const TRADER_BASE = import.meta.env.VITE_TRADER_URL || 'http://localhost:3002';
 
 // ─── API client ───────────────────────────────────────────────────────────────
 const traderApi = {
@@ -2998,6 +2998,25 @@ function OptionsLabTab() {
   );
 }
 
+// ─── KeepAliveTab — mount once, show/hide via CSS (no refetch on tab switch) ─
+
+function KeepAliveTab({ id, active, children }) {
+  const [hasBeenActive, setHasBeenActive] = React.useState(false);
+  const isActive = active === id;
+
+  React.useEffect(() => {
+    if (isActive && !hasBeenActive) setHasBeenActive(true);
+  }, [isActive, hasBeenActive]);
+
+  if (!hasBeenActive) return null; // never mounted yet
+
+  return (
+    <div style={{ display: isActive ? 'block' : 'none' }}>
+      {children}
+    </div>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -3050,21 +3069,21 @@ export default function TradingPage() {
         ))}
       </div>
 
-      {/* Tab content */}
+      {/* Tab content — tabs stay mounted once visited (no refetch on switch) */}
       <div className="flex-1 overflow-y-auto p-5">
-        {activeTab === 'dashboard'   && <DashboardTab />}
-        {activeTab === 'ai-panel'    && <AIPanelTab />}
-        {activeTab === 'brain'       && <BrainTab />}
-        {activeTab === 'performance' && <PerformanceTab />}
-        {activeTab === 'kalshi'      && <KalshiAutoTab />}
-        {activeTab === 'options-lab' && <OptionsLabTab />}
-        {activeTab === 'polymarket'  && <PolymarketTab />}
-        {activeTab === 'copy-trade'  && <CopyTradeTab />}
-        {activeTab === 'strategies'  && <StrategiesTab />}
-        {activeTab === 'orders'      && <OrdersTab />}
-        {activeTab === 'risk'        && <RiskTab />}
-        {activeTab === 'broker'      && <BrokerTab />}
-        {activeTab === 'kill-switch' && <KillSwitchTab />}
+        <KeepAliveTab id="dashboard"   active={activeTab}><DashboardTab /></KeepAliveTab>
+        <KeepAliveTab id="ai-panel"    active={activeTab}><AIPanelTab /></KeepAliveTab>
+        <KeepAliveTab id="brain"       active={activeTab}><BrainTab /></KeepAliveTab>
+        <KeepAliveTab id="performance" active={activeTab}><PerformanceTab /></KeepAliveTab>
+        <KeepAliveTab id="kalshi"      active={activeTab}><KalshiAutoTab /></KeepAliveTab>
+        <KeepAliveTab id="options-lab" active={activeTab}><OptionsLabTab /></KeepAliveTab>
+        <KeepAliveTab id="polymarket"  active={activeTab}><PolymarketTab /></KeepAliveTab>
+        <KeepAliveTab id="copy-trade"  active={activeTab}><CopyTradeTab /></KeepAliveTab>
+        <KeepAliveTab id="strategies"  active={activeTab}><StrategiesTab /></KeepAliveTab>
+        <KeepAliveTab id="orders"      active={activeTab}><OrdersTab /></KeepAliveTab>
+        <KeepAliveTab id="risk"        active={activeTab}><RiskTab /></KeepAliveTab>
+        <KeepAliveTab id="broker"      active={activeTab}><BrokerTab /></KeepAliveTab>
+        <KeepAliveTab id="kill-switch" active={activeTab}><KillSwitchTab /></KeepAliveTab>
       </div>
     </div>
   );

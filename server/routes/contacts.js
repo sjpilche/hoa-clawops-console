@@ -7,6 +7,8 @@
 const express = require('express');
 const router = express.Router();
 const contactManager = require('../services/contactManager');
+const { createLeadBodySchema, updateLeadBodySchema, createHoaBodySchema } = require('../schemas');
+const { sendSuccess, sendError, sendValidationError } = require('../middleware/responseHelper');
 
 /**
  * GET /api/contacts/test
@@ -57,27 +59,15 @@ router.get('/stats', async (req, res) => {
  */
 router.post('/leads', async (req, res) => {
   try {
-    const leadData = req.body;
-
-    // Validation
-    if (!leadData.email && !leadData.phone) {
-      return res.status(400).json({
-        success: false,
-        error: 'Either email or phone is required',
-      });
+    const parsed = createLeadBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendValidationError(res, parsed.error.issues.map(i => i.message));
     }
 
-    const leadId = await contactManager.addLead(leadData);
-    res.status(201).json({
-      success: true,
-      leadId,
-      message: 'Lead created successfully',
-    });
+    const leadId = await contactManager.addLead(parsed.data);
+    sendSuccess(res, { leadId, message: 'Lead created successfully' }, 201);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    sendError(res, 500, error.message, 'CREATE_LEAD_FAILED');
   }
 });
 

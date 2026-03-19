@@ -588,30 +588,35 @@ async function enrichLead(leadId) {
  * @param {number} params.min_score - Minimum pilot_fit_score (default 45)
  * @param {string} params.status_filter - enrichment_status to target (default 'pending')
  */
-async function enrichMultipleLeads({ limit = 20, min_score = 45, status_filter = 'pending', source = null } = {}) {
-  console.log(`[ContactEnricher] Starting batch enrichment: limit=${limit}, min_score=${min_score}, status=${status_filter}${source ? ', source=' + source : ''}`);
+async function enrichMultipleLeads({ limit = 20, min_score = 45, status_filter = 'pending', source = null, workspace_id = null } = {}) {
+  console.log(`[ContactEnricher] Starting batch enrichment: limit=${limit}, min_score=${min_score}, status=${status_filter}${source ? ', source=' + source : ''}${workspace_id ? ', workspace_id=' + workspace_id : ''}`);
 
-  // Build query — optionally filter by source (e.g. 'google_maps_discovery' vs 'dbpr_scrape')
+  // Build query — optionally filter by source or workspace_id
   let query, params;
+  const wsClause = workspace_id ? ' AND workspace_id = ?' : '';
   if (source) {
     query = `SELECT id, company_name, city, state, pilot_fit_score
      FROM cfo_leads
      WHERE (enrichment_status = ? OR enrichment_status IS NULL)
        AND (contact_email IS NULL OR contact_email = '')
        AND pilot_fit_score >= ?
-       AND source = ?
+       AND source = ?${wsClause}
      ORDER BY pilot_fit_score DESC
      LIMIT ?`;
-    params = [status_filter, min_score, source, limit];
+    params = workspace_id
+      ? [status_filter, min_score, source, workspace_id, limit]
+      : [status_filter, min_score, source, limit];
   } else {
     query = `SELECT id, company_name, city, state, pilot_fit_score
      FROM cfo_leads
      WHERE (enrichment_status = ? OR enrichment_status IS NULL)
        AND (contact_email IS NULL OR contact_email = '')
-       AND pilot_fit_score >= ?
+       AND pilot_fit_score >= ?${wsClause}
      ORDER BY pilot_fit_score DESC
      LIMIT ?`;
-    params = [status_filter, min_score, limit];
+    params = workspace_id
+      ? [status_filter, min_score, workspace_id, limit]
+      : [status_filter, min_score, limit];
   }
 
   const leads = all(query, params);

@@ -39,6 +39,16 @@ async function getPool() {
   return pool;
 }
 
+/** Graceful shutdown — close the pool when process exits */
+function closePool() {
+  if (pool) {
+    pool.close().catch(() => {});
+    pool = null;
+  }
+}
+process.on('SIGTERM', closePool);
+process.on('SIGINT', closePool);
+
 /**
  * GET /api/hoa-leads - Get all HOA leads with filtering/pagination
  */

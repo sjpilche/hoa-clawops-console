@@ -95,11 +95,11 @@ export async function runBacktest(
 
   // Fetch historical data from Alpaca
   const broker = new AlpacaAdapter({
-    apiKey: config.brokerApiKey,
-    apiSecret: config.brokerApiSecret,
+    apiKey: config.brokerApiKey ?? '',
+    apiSecret: config.brokerApiSecret ?? '',
     baseUrl: config.brokerBaseUrl,
   });
-  await broker.connect();
+  // Skip account check — backtester only needs bar data (data API is separate)
 
   const endDate = new Date();
   const startDate = new Date();

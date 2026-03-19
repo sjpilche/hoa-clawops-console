@@ -10,8 +10,8 @@ import { OrderIntent } from '../../execution/order_router';
  *
  * Parameters:
  * - rsiPeriod: Lookback period for RSI (default: 14)
- * - oversoldThreshold: RSI level to trigger BUY signal (default: 30)
- * - overboughtThreshold: RSI level to trigger SELL signal (default: 70)
+ * - oversoldThreshold: RSI level to trigger BUY signal (default: 35)
+ * - overboughtThreshold: RSI level to trigger SELL signal (default: 65)
  * - positionSize: Position size in USD (default: 500)
  * - symbols: Array of symbols to trade
  */
@@ -32,8 +32,8 @@ export class RsiMeanReversionStrategy implements IStrategy {
       enabled: false,
       params: {
         rsiPeriod: params?.rsiPeriod ?? 14,
-        oversoldThreshold: params?.oversoldThreshold ?? 30,
-        overboughtThreshold: params?.overboughtThreshold ?? 70,
+        oversoldThreshold: params?.oversoldThreshold ?? 35,
+        overboughtThreshold: params?.overboughtThreshold ?? 65,
         positionSize: params?.positionSize ?? 500,
         symbols,
       },
