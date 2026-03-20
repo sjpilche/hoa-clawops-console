@@ -20,17 +20,22 @@ const discordNotifier     = require('./discordNotifier');
 
 // ── 1. Activate newly enriched leads ────────────────────────────────────────
 
-function activateNewLeads(maxPerCycle = 100) {
-  // Constitution: "Any enriched lead sitting >24h without entering cadence gets forced in."
-  // Cap per cycle to avoid overwhelming sending capacity.
+function activateNewLeads(maxPerCycle = 20) {
+  // CRAP playbook: quality over quantity. Only qualified leads enter cadence.
+  // - Must have a title (no blind emails)
+  // - Must score >70 (CRAP rubric) OR be manually approved
+  // - Cap at 20/cycle (10-20 new first-touches/day)
+  // - Prioritize by score (best leads first)
   const leads = all(`
-    SELECT l.id, l.company_name, l.contact_email, l.status, l.urgency_score
+    SELECT l.id, l.company_name, l.contact_email, l.status, l.urgency_score, l.contact_title
     FROM cfo_leads l
     WHERE l.enrichment_status = 'enriched'
       AND l.contact_email IS NOT NULL
+      AND l.contact_title IS NOT NULL AND l.contact_title != ''
       AND (l.cadence_active IS NULL OR l.cadence_active = 0)
-      AND (l.status IS NULL OR l.status NOT IN ('interested', 'unsubscribed', 'bounced', 'converted'))
-    ORDER BY l.urgency_score DESC, l.created_at ASC
+      AND (l.status IS NULL OR l.status NOT IN ('interested', 'unsubscribed', 'bounced', 'converted', 'disqualified'))
+      AND (l.urgency_score >= 70 OR l.pilot_fit_score >= 70)
+    ORDER BY l.urgency_score DESC, l.pilot_fit_score DESC, l.created_at ASC
     LIMIT ?
   `, [maxPerCycle]);
 

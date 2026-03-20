@@ -118,6 +118,64 @@ router.get('/kpis', (req, res, next) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * POST /api/dream-team/todd/execute-pending
+ * Force-execute pending cadence runs. The missing pipeline link.
+ */
+router.post('/todd/execute-pending', async (req, res, next) => {
+  try {
+    const { all: dbAll, get: dbGet, run: dbRun } = require('../db/connection');
+    const pendingRuns = dbAll(`
+      SELECT r.id, r.agent_id, r.result_data, a.name as agent_name, a.config
+      FROM runs r JOIN agents a ON a.id = r.agent_id
+      WHERE r.status = 'pending' AND (r.trigger = 'cadence' OR r.trigger = 'auto-reply')
+      ORDER BY r.created_at ASC LIMIT 5
+    `);
+
+    if (pendingRuns.length === 0) {
+      return res.json({ success: true, message: 'No pending cadence runs', processed: 0 });
+    }
+
+    const results = [];
+    for (const pr of pendingRuns) {
+      const agentConfig = JSON.parse(pr.config || '{}');
+      const resultData = JSON.parse(pr.result_data || '{}');
+      const message = resultData.message || '';
+
+      dbRun("UPDATE runs SET status = 'running', updated_at = datetime('now') WHERE id = ?", [pr.id]);
+
+      try {
+        const bridge = require('../services/openclawBridge');
+        const brain = require('../services/collectiveBrain');
+        let brainContext = '';
+        try { brainContext = await brain.buildAgentContext(pr.agent_name, pr.id, {}) || ''; } catch {}
+        const enrichedMessage = (brainContext + '\n' + message).slice(0, 6000);
+
+        const result = await bridge.runAgent(pr.agent_name, {
+          openclawId: agentConfig.openclaw_id || pr.agent_name,
+          message: enrichedMessage,
+          sessionId: pr.id,
+        });
+
+        const outputText = result?.outputText || result?.output || '';
+        dbRun("UPDATE runs SET status='completed', completed_at=datetime('now'), result_data=?, updated_at=datetime('now') WHERE id=?",
+          [JSON.stringify({ ...resultData, outputText }), pr.id]);
+
+        const { postProcessLLMOutput } = require('../services/postProcessor');
+        const agent = dbGet('SELECT * FROM agents WHERE id = ?', [pr.agent_id]);
+        if (agent && outputText) postProcessLLMOutput(agent, outputText, message, { runId: pr.id });
+
+        results.push({ id: pr.id, agent: pr.agent_name, status: 'completed', outputLength: outputText.length });
+      } catch (err) {
+        dbRun("UPDATE runs SET status='failed', error_msg=?, updated_at=datetime('now') WHERE id=?", [err.message, pr.id]);
+        results.push({ id: pr.id, agent: pr.agent_name, status: 'failed', error: err.message });
+      }
+    }
+
+    res.json({ success: true, processed: results.length, results });
+  } catch (err) { next(err); }
+});
+
+/**
  * POST /api/dream-team/todd/warmup
  * Force-run the lead warmup cycle. Todd's job: nothing sits idle.
  */
@@ -139,6 +197,33 @@ router.post('/todd/cadence', async (req, res, next) => {
     const result = await runCadenceCycle('both');
     res.json({ success: true, ...result });
   } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCOUT — APOLLO LEAD MINER
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/dream-team/scout/mine
+ * Run Apollo Lead Miner. Body: { list: 'core_cfos'|'tinkerer_cfos'|'data_pain', pages: 1-3 }
+ */
+router.post('/scout/mine', async (req, res, next) => {
+  try {
+    const { mineAndScore } = require('../services/apolloLeadMiner');
+    const list = req.body.list || 'core_cfos';
+    const pages = Math.min(parseInt(req.body.pages) || 1, 3);
+    const result = await mineAndScore(list, { pages });
+    res.json({ success: true, ...result });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/dream-team/scout/credits
+ * Check Apollo credit usage.
+ */
+router.get('/scout/credits', (req, res) => {
+  const { getCreditStatus } = require('../services/apolloLeadMiner');
+  res.json(getCreditStatus());
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
