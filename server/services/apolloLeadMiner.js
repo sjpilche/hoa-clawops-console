@@ -112,7 +112,6 @@ async function apolloSearch(listConfig, page = 1) {
   const limit = Math.min(listConfig.per_page || 25, remaining);
 
   const body = {
-    api_key: APOLLO_API_KEY,
     page,
     per_page: limit,
     person_titles: listConfig.person_titles,
@@ -129,9 +128,9 @@ async function apolloSearch(listConfig, page = 1) {
     }
   });
 
-  const resp = await fetch(`${APOLLO_BASE}/api/v1/mixed_people/search`, {
+  const resp = await fetch(`${APOLLO_BASE}/api/v1/mixed_people/api_search`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Api-Key': APOLLO_API_KEY },
     body: JSON.stringify(body),
   });
 
@@ -163,11 +162,12 @@ function scoreLeadCRAP(person) {
   const reasons = [];
   const org = person.organization || {};
 
-  // Industry match (20 pts)
+  // Industry match (20 pts) — check industry, keywords, AND company name
   const industry = (org.industry || '').toLowerCase();
   const keywords = (org.keywords || []).map(k => k.toLowerCase());
-  const industryHits = ['construction', 'contractor', 'building', 'civil', 'mechanical', 'electrical', 'plumbing', 'hvac', 'facilities'];
-  const industryMatch = industryHits.some(h => industry.includes(h) || keywords.some(k => k.includes(h)));
+  const companyLower = (org.name || '').toLowerCase();
+  const industryHits = ['construction', 'contractor', 'building', 'civil', 'mechanical', 'electrical', 'plumbing', 'hvac', 'facilities', 'roofing', 'paving', 'demolition', 'excavat'];
+  const industryMatch = industryHits.some(h => industry.includes(h) || keywords.some(k => k.includes(h)) || companyLower.includes(h));
   if (industryMatch) {
     score += 20;
     reasons.push('industry:construction (+20)');
@@ -202,6 +202,13 @@ function scoreLeadCRAP(person) {
     }
   }
 
+  // Title match bonus (15 pts) — CFO/Controller at construction = high value
+  const titleLower = (person.title || '').toLowerCase();
+  if (/cfo|chief financial|controller|vp.?finance/.test(titleLower)) {
+    score += 15;
+    reasons.push('title:finance-leader (+15)');
+  }
+
   // Tech stack weakness (25 pts)
   const techStack = (org.technologies || []).map(t => t.toLowerCase());
   const weakTech = ['quickbooks', 'sage', 'excel', 'manual'];
@@ -231,7 +238,7 @@ function scoreLeadCRAP(person) {
  * @param {string} listType — 'core_cfos', 'tinkerer_cfos', or 'data_pain'
  * @param {object} [opts]
  * @param {number} [opts.pages=1] — how many pages to fetch
- * @param {number} [opts.minScore=70] — minimum CRAP score to insert
+ * @param {number} [opts.minScore=35] — minimum CRAP score to insert (low default because Apollo search returns limited data; enrich after for full scoring)
  * @returns {{ mined, scored, inserted, skipped, duplicates, creditsUsed, topLeads }}
  */
 async function mineAndScore(listType = 'core_cfos', opts = {}) {
@@ -239,7 +246,7 @@ async function mineAndScore(listType = 'core_cfos', opts = {}) {
   if (!config) throw new Error(`Unknown list type: ${listType}. Valid: ${Object.keys(LIST_CONFIGS).join(', ')}`);
 
   const pages = opts.pages || 1;
-  const minScore = opts.minScore || 70;
+  const minScore = opts.minScore || 35;
   let mined = 0, scored = 0, inserted = 0, skipped = 0, duplicates = 0;
   const topLeads = [];
 
@@ -255,6 +262,16 @@ async function mineAndScore(listType = 'core_cfos', opts = {}) {
     for (const person of result.people) {
       const scoreResult = scoreLeadCRAP(person);
       scored++;
+
+      // Track all scores for debugging
+      topLeads.push({
+        name: `${person.first_name} ${person.last_name}`,
+        title: person.title,
+        company: person.organization?.name || '?',
+        score: scoreResult.score,
+        reasons: scoreResult.reasons,
+        email: person.email ? '✓' : '✗',
+      });
 
       if (scoreResult.score < minScore) {
         skipped++;
