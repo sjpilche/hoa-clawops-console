@@ -412,6 +412,104 @@ function checkScheduleDrift(schedules) {
   }
 }
 
+// ── Process pending cadence runs — the missing link ──────────────────────────
+// Cadence engine creates runs as 'pending'. Nothing was auto-executing them.
+// This function picks them up and runs them through OpenClaw or Ollama.
+async function processPendingCadenceRuns() {
+  const pendingRuns = all(`
+    SELECT r.id, r.agent_id, r.result_data, a.name as agent_name, a.config
+    FROM runs r
+    JOIN agents a ON a.id = r.agent_id
+    WHERE r.status = 'pending'
+      AND (r.trigger = 'cadence' OR r.trigger = 'auto-reply')
+    ORDER BY r.created_at ASC
+    LIMIT 10
+  `);
+
+  if (pendingRuns.length === 0) return;
+
+  console.log(`[ScheduleRunner] Processing ${pendingRuns.length} pending cadence runs...`);
+
+  for (const pendingRun of pendingRuns) {
+    try {
+      const agentConfig = JSON.parse(pendingRun.config || '{}');
+      const resultData = JSON.parse(pendingRun.result_data || '{}');
+      const message = resultData.message || '';
+      const startTime = Date.now();
+
+      // Mark as running
+      run("UPDATE runs SET status = 'running', updated_at = datetime('now') WHERE id = ?", [pendingRun.id]);
+
+      const handlers = getHandlers();
+      const handler = agentConfig.special_handler ? handlers[agentConfig.special_handler] : null;
+
+      if (handler) {
+        // Special handler path
+        const result = await handler({ message, runId: pendingRun.id, agent: { id: pendingRun.agent_id, name: pendingRun.agent_name, config: pendingRun.config } });
+        const durationMs = result.durationMs || (Date.now() - startTime);
+        run(
+          "UPDATE runs SET status='completed', completed_at=datetime('now'), duration_ms=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?",
+          [durationMs, result.costUsd || 0, JSON.stringify({ ...resultData, outputText: result.outputText }), pendingRun.id]
+        );
+        console.log(`[ScheduleRunner] ✅ Pending run ${pendingRun.id.slice(0,8)} (${pendingRun.agent_name}) completed`);
+      } else {
+        // LLM agent path — use OpenClaw or Ollama
+        const bridge = require('./openclawBridge');
+        const brain = require('./collectiveBrain');
+
+        // Build brain context
+        let brainContext = '';
+        try {
+          brainContext = await brain.buildAgentContext(pendingRun.agent_name, pendingRun.id, {}) || '';
+        } catch {}
+
+        const enrichedMessage = (brainContext + '\n' + message).slice(0, 6000);
+
+        const result = await bridge.runAgent(pendingRun.agent_name, {
+          openclawId: agentConfig.openclaw_id || pendingRun.agent_name,
+          message: enrichedMessage,
+          sessionId: pendingRun.id,
+        });
+
+        const outputText = result?.outputText || result?.output || '';
+        const durationMs = Date.now() - startTime;
+        const costUsd = result?.costUsd || 0.02;
+
+        run(
+          "UPDATE runs SET status='completed', completed_at=datetime('now'), duration_ms=?, tokens_used=?, cost_usd=?, result_data=?, updated_at=datetime('now') WHERE id=?",
+          [durationMs, result?.tokensUsed || 0, costUsd, JSON.stringify({ ...resultData, outputText, sessionId: pendingRun.id }), pendingRun.id]
+        );
+
+        // Post-process the output (creates email drafts, triggers QA, auto-approval)
+        const { postProcessLLMOutput } = require('./postProcessor');
+        const agent = get('SELECT * FROM agents WHERE id = ?', [pendingRun.agent_id]);
+        if (agent && outputText) {
+          postProcessLLMOutput(agent, outputText, message, { runId: pendingRun.id });
+        }
+
+        // Record episode
+        try {
+          brain.recordEpisode(pendingRun.agent_name, {
+            actionTaken: `Cadence run for ${pendingRun.agent_name}: ${outputText.slice(0, 200)}`,
+            outcome: outputText.length > 100 ? 'Completed' : 'Minimal output',
+            outcomeType: outputText.length > 100 ? 'completed' : 'low_output',
+            outcomeScore: Math.min(1.0, Math.max(0.1, outputText.length / 2000)),
+            runId: pendingRun.id,
+          });
+        } catch {}
+
+        console.log(`[ScheduleRunner] ✅ Pending LLM run ${pendingRun.id.slice(0,8)} (${pendingRun.agent_name}) completed — ${outputText.length} chars`);
+      }
+    } catch (err) {
+      console.error(`[ScheduleRunner] ❌ Pending run ${pendingRun.id.slice(0,8)} failed: ${err.message}`);
+      run(
+        "UPDATE runs SET status='failed', error_msg=?, completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?",
+        [err.message, pendingRun.id]
+      );
+    }
+  }
+}
+
 // ── Main tick ─────────────────────────────────────────────────────────────────
 async function tick() {
   if (_checkRunning) return;
@@ -442,6 +540,14 @@ async function tick() {
 
     // Check for delayed pipeline steps that are now due
     try { getPipelineRunner().tickDelayedSteps(); } catch {}
+
+    // Process pending cadence runs every 5 minutes (the missing link!)
+    // Cadence engine creates runs as 'pending'. This auto-executes them.
+    if (new Date().getMinutes() % 5 === 0) {
+      processPendingCadenceRuns().catch(err =>
+        console.error('[ScheduleRunner] Pending run processor error:', err.message)
+      );
+    }
 
     // Nightly schedule performance evaluation at 01:00 AM
     maybeRunPerformanceEval();

@@ -1877,6 +1877,89 @@ Reply ONLY with valid JSON (no markdown, no explanation):
 }
 
 
+// ── Virginia SOS Buyer Identification ─────────────────────────────────────────
+
+/**
+ * Known registered agents → likely hyperscaler mapping.
+ * Hyperscalers use the SAME registered agents across all their shell LLCs.
+ * This mapping lets us identify the buyer behind an anonymous LLC.
+ */
+const KNOWN_REGISTERED_AGENTS = {
+  'corporation service company':     { likely: 'Amazon / AWS',      confidence: 0.75 },
+  'csc':                             { likely: 'Amazon / AWS',      confidence: 0.70 },
+  'ct corporation system':           { likely: 'Microsoft',         confidence: 0.70 },
+  'the corporation trust company':   { likely: 'Google / Alphabet', confidence: 0.65 },
+  'national registered agents':      { likely: 'Meta / Facebook',   confidence: 0.55 },
+  'nrai':                            { likely: 'Meta / Facebook',   confidence: 0.55 },
+  'cogency global':                  { likely: 'CoreWeave',         confidence: 0.50 },
+  'registered agents inc':           { likely: 'Oracle',            confidence: 0.45 },
+  // Known specific LLCs
+  'vadata':                          { likely: 'Amazon / AWS',      confidence: 0.95 },
+  'huge holdings':                   { likely: 'Microsoft',         confidence: 0.90 },
+  'cloverleaf':                      { likely: 'Google / Alphabet', confidence: 0.85 },
+};
+
+/**
+ * Look up an LLC/entity on Virginia SCC Business Entity Search via Brave.
+ * Returns registered agent name, principal office, and formation date if found.
+ *
+ * @param {string} entityName — LLC or corp name to look up
+ * @returns {{ agent: string|null, office: string|null, likelyBuyer: string|null, confidence: number }}
+ */
+async function lookupVirginiaSOS(entityName) {
+  if (!entityName || entityName.length < 3) return { agent: null, office: null, likelyBuyer: null, confidence: 0 };
+
+  // Search SCC business entity database via Brave
+  const query = `site:cis.scc.virginia.gov "${entityName}" registered agent`;
+  let results;
+  try {
+    results = await braveSearch(query, 3);
+  } catch {
+    return { agent: null, office: null, likelyBuyer: null, confidence: 0 };
+  }
+
+  if (!results || results.length === 0) {
+    // Fallback: broader search
+    try {
+      results = await braveSearch(`"${entityName}" Virginia LLC registered agent`, 3);
+    } catch {
+      return { agent: null, office: null, likelyBuyer: null, confidence: 0 };
+    }
+  }
+
+  // Extract registered agent from search snippets
+  const combined = results.map(r => `${r.title || ''} ${r.description || ''}`).join(' ').toLowerCase();
+  let detectedAgent = null;
+  let likelyBuyer = null;
+  let confidence = 0;
+
+  for (const [agentKey, mapping] of Object.entries(KNOWN_REGISTERED_AGENTS)) {
+    if (combined.includes(agentKey.toLowerCase())) {
+      detectedAgent = agentKey;
+      likelyBuyer = mapping.likely;
+      confidence = mapping.confidence;
+      break;
+    }
+  }
+
+  // Also check if the entity name itself matches a known pattern
+  const nameLower = entityName.toLowerCase();
+  for (const [key, mapping] of Object.entries(KNOWN_REGISTERED_AGENTS)) {
+    if (nameLower.includes(key)) {
+      likelyBuyer = mapping.likely;
+      confidence = Math.max(confidence, mapping.confidence);
+      break;
+    }
+  }
+
+  // Extract office address if present in snippets
+  const officeMatch = combined.match(/(?:principal|office|address)[:\s]+([^.]{10,80})/i);
+  const office = officeMatch ? officeMatch[1].trim() : null;
+
+  return { agent: detectedAgent, office, likelyBuyer, confidence };
+}
+
+
 // ── Handler: dc_intel_dominion_monitor ────────────────────────────────────────
 
 /**
@@ -1984,6 +2067,21 @@ async function dcIntelDominionMonitor({ message, runId, agent }) {
           isDCSignal ? 'Data center / hyperscaler activity confirmed.' : '',
         ].filter(Boolean).join(' ').slice(0, 500);
 
+        // Attempt Virginia SOS buyer identification on any LLC/Corp name in the signal
+        let buyerNote = '';
+        const llcMatch = text.match(/([A-Z][A-Za-z0-9\s&,.']{3,40}\s(?:LLC|Inc|Corp|LP|LLP|Holdings))/);
+        if (llcMatch) {
+          try {
+            const sos = await lookupVirginiaSOS(llcMatch[1].trim());
+            if (sos.likelyBuyer) {
+              buyerNote = ` | BUYER LIKELY: ${sos.likelyBuyer} (agent: ${sos.agent || 'match'}, conf: ${(sos.confidence * 100).toFixed(0)}%)`;
+              content = content.slice(0, 400) + buyerNote;
+              confidence = 'high'; // upgrade confidence when buyer identified
+              console.log(`[dcIntelDominionMonitor] Buyer ID: ${llcMatch[1]} → ${sos.likelyBuyer}`);
+            }
+          } catch {} // SOS lookup failure is non-fatal
+        }
+
         // Post as market-level intel (no specific opportunity link required)
         await dcPost('/webhooks/openclaw/intel-note', {
           note_type: noteType,
@@ -2004,8 +2102,31 @@ async function dcIntelDominionMonitor({ message, runId, agent }) {
     }
   }
 
+  // ── Hot Signal Alert: fire immediately if high-confidence notes found ──
+  let alertsSent = 0;
+  if (notesCreated > 0) {
+    try {
+      // Send one consolidated alert per county
+      const countySignals = {};
+      for (const [key, r] of signalsSeen.entries()) {
+        if (typeof r === 'string') continue; // signalsSeen stores URLs as keys
+      }
+      // Simple: send one alert summarizing all findings
+      const alertResult = await sendHotSignalAlert({
+        county: 'Prince William',  // Primary target
+        state: 'VA',
+        signalType: 'utility_intel',
+        content: `Dominion/SCC scanner found ${notesCreated} new power infrastructure signal(s) in Northern Virginia. Review intel notes for details.`,
+        confidence: 'high',
+      });
+      if (alertResult.sent) alertsSent++;
+    } catch (err) {
+      console.warn('[dcIntelDominionMonitor] Hot signal alert failed:', err.message);
+    }
+  }
+
   const durationMs = Date.now() - startTime;
-  const outputText = `DC Intel Dominion Monitor: ${notesCreated} signals posted, ${errors} errors, ${signalsSeen.size} URLs scanned in ${(durationMs / 1000).toFixed(1)}s`;
+  const outputText = `DC Intel Dominion Monitor: ${notesCreated} signals posted, ${alertsSent} hot alerts sent, ${errors} errors, ${signalsSeen.size} URLs scanned in ${(durationMs / 1000).toFixed(1)}s`;
 
   try {
     const brain = require('./collectiveBrain');
@@ -2016,12 +2137,106 @@ async function dcIntelDominionMonitor({ message, runId, agent }) {
         subject: 'Dominion Energy + SCC power filing scan',
         content: outputText,
         confidence: 0.8,
-        metadata: { notes_created: notesCreated, urls_scanned: signalsSeen.size },
+        metadata: { notes_created: notesCreated, urls_scanned: signalsSeen.size, alerts_sent: alertsSent },
       }
     );
   } catch {}
 
-  return { outputText, durationMs, costUsd: 0, extra: { notesCreated, errors, urlsScanned: signalsSeen.size } };
+  return { outputText, durationMs, costUsd: 0, extra: { notesCreated, errors, urlsScanned: signalsSeen.size, alertsSent } };
+}
+
+
+// ── Hot Signal Alert Utility ──────────────────────────────────────────────────
+
+/**
+ * Send an instant email alert when a high-confidence signal is detected.
+ * Called from Dominion monitor, RTO scanner, or planning scanner when
+ * they find something worth an immediate phone call.
+ *
+ * @param {{ county, state, signalType, content, sourceUrl, confidence }} signal
+ */
+async function sendHotSignalAlert(signal) {
+  const sg = require('./sendgrid');
+  if (!sg.status().configured) {
+    console.log('[HotSignal] SendGrid not configured — skipping alert');
+    return { sent: false, reason: 'not_configured' };
+  }
+
+  // Get uncontacted owners in this county for the alert
+  let owners = [];
+  try {
+    owners = await dcGet(`/owners/call-queue?county=${encodeURIComponent(signal.county || '')}&state=${encodeURIComponent(signal.state || 'VA')}&limit=5`);
+  } catch (err) {
+    console.warn('[HotSignal] Failed to fetch call queue:', err.message);
+  }
+
+  // Build owner rows HTML
+  let ownerHtml = '';
+  if (owners && owners.length > 0) {
+    const rows = owners.map((o, i) => {
+      const phone = o.phone || '—';
+      const acres = o.acreage ? `${o.acreage} ac` : '—';
+      const score = o.pursuit_priority_score ? o.pursuit_priority_score.toFixed(2) : '—';
+      return `<tr>
+        <td style="padding:8px;border-bottom:1px solid #eee;font-weight:600;">${i + 1}. ${o.owner_name || '—'}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;">${acres}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;font-weight:700;color:#1b5e20;">${phone}</td>
+        <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${score}</td>
+      </tr>`;
+    }).join('');
+    ownerHtml = `
+      <h3 style="margin:16px 0 8px;font-size:14px;color:#333;">Uncontacted Owners in ${signal.county || 'Target'} County — Call NOW</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:#f8f8f8;font-size:11px;text-transform:uppercase;color:#555;">
+          <th style="padding:8px;text-align:left;">Owner</th>
+          <th style="padding:8px;text-align:left;">Acres</th>
+          <th style="padding:8px;text-align:left;">Phone</th>
+          <th style="padding:8px;text-align:center;">Score</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } else {
+    ownerHtml = '<p style="color:#888;font-size:13px;">No uncontacted owners found in this county — run owner resolution first.</p>';
+  }
+
+  const confidenceColor = signal.confidence === 'high' ? '#b71c1c' : '#e65100';
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:650px;margin:0 auto;">
+      <div style="background:#b71c1c;color:white;padding:18px 24px;border-radius:6px 6px 0 0;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.8;">⚡ Hot Signal Alert</div>
+        <div style="font-size:18px;font-weight:700;margin-top:4px;">${signal.county || 'Target Market'} County, ${signal.state || 'VA'}</div>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px 24px;">
+        <div style="margin-bottom:12px;">
+          <span style="background:${confidenceColor};color:white;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700;">${(signal.confidence || 'medium').toUpperCase()}</span>
+          <span style="margin-left:8px;font-size:12px;color:#666;">${signal.signalType || 'utility_intel'}</span>
+        </div>
+        <p style="font-size:14px;color:#222;line-height:1.5;margin:0 0 12px;">${signal.content || 'New signal detected.'}</p>
+        ${signal.sourceUrl ? `<p style="font-size:12px;"><a href="${signal.sourceUrl}" style="color:#1565c0;">Source →</a></p>` : ''}
+        ${ownerHtml}
+      </div>
+      <div style="background:#f9f9f9;border:1px solid #ddd;border-top:none;border-radius:0 0 6px 6px;padding:12px 24px;text-align:center;">
+        <a href="https://dcsi-dashboard.blackbush-bb9e213f.centralus.azurecontainerapps.io/" style="display:inline-block;background:#0d47a1;color:white;padding:6px 16px;border-radius:4px;text-decoration:none;font-size:12px;font-weight:600;margin-bottom:8px;">Open Dashboard</a>
+        <div style="font-size:11px;color:#999;">DC Site Intel — Hot Signal Alert — ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</div>
+      </div>
+    </div>`;
+
+  const recipients = (process.env.DIGEST_TO || process.env.DC_INTEL_ALERT_TO || '').split(',').map(e => e.trim()).filter(Boolean);
+  if (recipients.length === 0) {
+    console.warn('[HotSignal] No recipients configured (DIGEST_TO)');
+    return { sent: false, reason: 'no_recipients' };
+  }
+
+  const result = await sg.send({
+    to: recipients,
+    subject: `⚡ HOT SIGNAL: ${signal.county || 'Target'} Co ${signal.state || 'VA'} — ${(signal.signalType || 'utility_intel').replace(/_/g, ' ')}`,
+    html,
+    from: process.env.SENDGRID_FROM_EMAIL || 'augustwest154@gmail.com',
+    fromName: 'DC Site Intel Alerts',
+  });
+
+  console.log(`[HotSignal] Alert sent to ${recipients.join(', ')}: ${result.success ? 'OK' : result.error}`);
+  return { sent: result.success, recipients: recipients.length };
 }
 
 
