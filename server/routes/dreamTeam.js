@@ -139,7 +139,8 @@ router.post('/todd/execute-pending', async (req, res, next) => {
     for (const pr of pendingRuns) {
       const agentConfig = JSON.parse(pr.config || '{}');
       const resultData = JSON.parse(pr.result_data || '{}');
-      const message = resultData.message || '';
+      // The cadence engine stores the full message payload in result_data.message
+      const message = resultData.message || resultData.outputText || 'Generate outreach email for this lead.';
 
       dbRun("UPDATE runs SET status = 'running', updated_at = datetime('now') WHERE id = ?", [pr.id]);
 
@@ -148,7 +149,8 @@ router.post('/todd/execute-pending', async (req, res, next) => {
         const brain = require('../services/collectiveBrain');
         let brainContext = '';
         try { brainContext = await brain.buildAgentContext(pr.agent_name, pr.id, {}) || ''; } catch {}
-        const enrichedMessage = (brainContext + '\n' + message).slice(0, 6000);
+        // Ensure message is never empty — OpenClaw requires --message to have content
+        const enrichedMessage = (brainContext + '\n' + message).trim().slice(0, 6000) || 'Generate outreach email.';
 
         const result = await bridge.runAgent(pr.agent_name, {
           openclawId: agentConfig.openclaw_id || pr.agent_name,

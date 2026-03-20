@@ -73,7 +73,13 @@ class OpenClawBridge extends EventEmitter {
       || (id.startsWith('hoa-') ? 'hoa' : null)
       || (id.startsWith('jake') ? 'jake' : null);
     const fullMessage = message + loadWorkspaceMandate(wsSlug);
-    let cmd = `openclaw agent --local --json --agent ${esc(id)} --message ${esc(fullMessage)}`;
+    // Windows CLI has 8191 char limit. Truncate and sanitize for shell safety.
+    const safeMessage = fullMessage
+      .replace(/[\r\n]+/g, ' ')       // No newlines (breaks shell args)
+      .replace(/[""]/g, "'")           // Smart quotes → simple quotes
+      .replace(/`/g, "'")             // Backticks → quotes
+      .slice(0, 4000);                 // Stay well under limit
+    let cmd = `openclaw agent --local --json --agent ${esc(id)} --message ${esc(safeMessage)}`;
     if (config.sessionId) cmd += ` --session-id ${esc(config.sessionId)}`;
 
     console.log(`[OpenClawBridge] Running "${id}" — ${message.substring(0, 60)}`);
