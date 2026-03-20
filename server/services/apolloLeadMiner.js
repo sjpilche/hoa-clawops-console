@@ -140,10 +140,45 @@ async function apolloSearch(listConfig, page = 1) {
   }
 
   const data = await resp.json();
-  const people = data.people || [];
+  let people = data.people || [];
 
-  // Track credits (each person returned costs ~1 credit for search, reveal costs more)
-  trackCredits(people.length);
+  // Reveal emails — always try, Apollo search hides emails even when they exist
+  const revealable = people.filter(p => !p.email && p.id);
+  if (revealable.length > 0 && canAfford(revealable.length)) {
+    try {
+      const revealResp = await fetch(`${APOLLO_BASE}/api/v1/people/bulk_match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': APOLLO_API_KEY },
+        body: JSON.stringify({ details: revealable.map(p => ({ id: p.id })) }),
+      });
+      if (revealResp.ok) {
+        const revealData = await revealResp.json();
+        // bulk_match returns { matches: [{...person}] } or could be nested differently
+        const revealed = revealData.matches || revealData.people || (Array.isArray(revealData) ? revealData : []);
+        console.log(`[ApolloMiner] Reveal response keys: ${Object.keys(revealData).join(',')} | revealed: ${revealed.length}`);
+        const emailMap = {};
+        for (const r of revealed) {
+          if (r.email) emailMap[r.id] = r;
+        }
+        // Merge revealed emails + last names back into people array
+        people = people.map(p => {
+          if (emailMap[p.id]) {
+            return { ...p, email: emailMap[p.id].email, last_name: emailMap[p.id].last_name || p.last_name };
+          }
+          return p;
+        });
+        console.log(`[ApolloMiner] Revealed ${Object.keys(emailMap).length}/${revealable.length} emails`);
+      } else {
+        const errText = await revealResp.text();
+        console.warn(`[ApolloMiner] Reveal failed ${revealResp.status}: ${errText.slice(0, 200)}`);
+      }
+    } catch (revealErr) {
+      console.warn('[ApolloMiner] Email reveal failed (non-fatal):', revealErr.message);
+    }
+  }
+
+  // Track credits (search + reveals)
+  trackCredits(people.length + revealable.length);
 
   return {
     people,
