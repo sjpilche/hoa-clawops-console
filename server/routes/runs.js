@@ -2947,17 +2947,17 @@ const SPECIAL_HANDLERS = {
     } else if (params.phase === 'score') {
       const snapshot = dt.collectDailyData();
       const scorecards = await dt.scoreAgents(snapshot);
-      return { outputText: `Dream Team: ${scorecards.length} agents scored`, durationMs: Date.now() - startTime, costUsd: 0.015, extra: { phase: 'score', scorecards: scorecards.length } };
+      return { outputText: `Dream Team: ${scorecards.length} agents scored`, durationMs: Date.now() - startTime, costUsd: 0, extra: { phase: 'score', scorecards: scorecards.length } };
     } else if (params.phase === 'report') {
       const report = await dt.buildMorningReport();
-      return { outputText: `Dream Team: Morning report generated`, durationMs: Date.now() - startTime, costUsd: 0.006, extra: { phase: 'report' } };
+      return { outputText: `Dream Team: Morning report generated`, durationMs: Date.now() - startTime, costUsd: 0, extra: { phase: 'report' } };
     } else {
       // Full cycle (default for scheduled runs)
       result = await dt.runFullCycle();
       return {
-        outputText: `Dream Team Nightly: ${result.scorecards} scored, ${result.proposals} proposed, ${result.approved} approved, ${result.rejected} rejected, ${result.actions} actions taken`,
+        outputText: `Dream Team Nightly: ${result.scorecards} scored, ${result.diagnostics} findings (${result.criticals} critical), ${result.actions} actions`,
         durationMs: result.durationMs,
-        costUsd: 0.07,
+        costUsd: 0,
         extra: result,
       };
     }
