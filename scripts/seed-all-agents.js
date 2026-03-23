@@ -133,11 +133,14 @@ const AGENT_FLEET = [
   // ── Revenue Intelligence ──
   { name: 'revenue-radar', description: 'Cross-lane revenue intelligence scanner — surfaces top Money Moves across Trading, SaaS, Service, and Pipeline lanes. Daily.', group: 'core', special_handler: 'revenue_radar' },
 
+  // ── Google Maps Discovery (shared, any vertical) ──
+  { name: 'google-maps-discovery', description: 'Shared Google Maps lead scraper — supports construction, HOA, PM, or custom verticals. $0/run.', group: 'core', special_handler: 'google_maps_discovery' },
+
   // ── Signal Performance ──
   { name: 'signal-performance-rollup', description: 'Nightly 30-day rolling conversion rates by signal source. Feeds back into agent context. $0/run.', group: 'core', special_handler: 'signal_performance' },
 
   // ── Dream Team Nightly ──
-  { name: 'dream-team-nightly', description: 'Nightly learning cycle — scorecards, self-assessment, pattern proposals, Ralph QA, Todd actions, morning report. ~$0.07/night.', group: 'core', special_handler: 'dream_team_nightly' },
+  { name: 'dream-team-nightly', description: 'Nightly cycle — deterministic scorecards (Operations/Pipeline/Outreach), system diagnostics, Todd overnight actions, morning report. $0/night.', group: 'core', special_handler: 'dream_team_nightly' },
 
   // ── Outreach Delivery ──
   { name: 'outreach-sender', description: 'Sends approved outreach emails via SendGrid. Daily 10 AM. Urgency-ranked. Tracks delivery. $0/run.', group: 'core', special_handler: 'outreach_sender' },

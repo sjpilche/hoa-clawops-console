@@ -972,6 +972,54 @@ const SPECIAL_HANDLERS = {
     return { outputText, durationMs, costUsd: 0, extra: { stats: result.stats, region: result.region } };
   },
 
+  // ── Google Maps Discovery (shared service) — any vertical, any market ──────
+  google_maps_discovery: async ({ message, runId, agent }) => {
+    const gms = require('../services/googleMapsService');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    // Determine vertical config or use custom queries
+    const vertical = params.vertical ? gms.VERTICALS[params.vertical] : null;
+    const queries = vertical?.queries || (params.queries ? params.queries.split('|') : null);
+
+    if (!queries && !vertical) {
+      return {
+        outputText: 'Google Maps Discovery: specify vertical=construction|hoa_management|property_management or queries="query1|query2" and location="City, ST"',
+        durationMs: 0,
+        costUsd: 0,
+      };
+    }
+
+    const location = params.location || params.region;
+    if (!location) {
+      return {
+        outputText: 'Google Maps Discovery: location required (e.g. location=Austin, TX)',
+        durationMs: 0,
+        costUsd: 0,
+      };
+    }
+
+    const result = await gms.discover({
+      queries: queries || vertical.queries,
+      location,
+      source: params.source || 'google_maps',
+      sourceAgent: params.source_agent || 'jake',
+      limit: parseInt(params.limit) || 100,
+      filter: vertical?.filter,
+      score: vertical?.score,
+      enrichTop: params.enrich !== 'false',
+      workspaceId: parseInt(params.workspace_id) || 1,
+    });
+
+    const durationMs = Date.now() - startTime;
+    return {
+      outputText: result.summary + `\n  Duration: ${(durationMs / 1000).toFixed(1)}s`,
+      durationMs,
+      costUsd: 0,
+      extra: { stats: result.stats, region: result.region, vertical: params.vertical || 'custom' },
+    };
+  },
+
   // ── Morning Pipeline Digest — posts yesterday's stats to Discord at 7 AM ──
   morning_digest: async ({ message, runId, agent }) => {
     const { get: dbGet } = require('../db/connection');
