@@ -824,7 +824,7 @@ const SPECIAL_HANDLERS = {
     const enrichParams = {
       limit: parsedLimit,
       min_score: parseInt(params.min_score) || 0,
-      status_filter: params.status_filter || 'pending',
+      status_filter: params.status_filter || 'all_unenriched',
       source: params.source || null,
     };
 
@@ -970,6 +970,38 @@ const SPECIAL_HANDLERS = {
     });
 
     return { outputText, durationMs, costUsd: 0, extra: { stats: result.stats, region: result.region } };
+  },
+
+  // ── Batch Outreach Drafter — 10 emails per LLM call, no OpenClaw CLI ────────
+  outreach_batch_drafter: async ({ message, runId, agent }) => {
+    const { runBatchDraft } = require('../services/outreachDrafter');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const result = await runBatchDraft({
+      limit: parseInt(params.limit) || 10,
+      sourceAgent: params.source_agent || null,
+      persona: params.persona || 'jake',
+    });
+
+    const durationMs = Date.now() - startTime;
+    const lines = [
+      `Outreach Drafter: ${result.drafted}/${result.leads} emails drafted in ${(durationMs / 1000).toFixed(1)}s`,
+      `  QA passed: ${result.qa_passed} | Auto-approved: ${result.approved} | Flagged: ${result.flagged}`,
+    ];
+    if (result.results.length > 0) {
+      for (const r of result.results.slice(0, 10)) {
+        const lead = r.lead_id ? require('../db/connection').get('SELECT company_name FROM cfo_leads WHERE id = ?', [r.lead_id]) : null;
+        lines.push(`  ${lead?.company_name || 'lead#' + r.lead_id}: ${r.status}${r.qa ? ' qa:' + r.qa.score : ''}${r.approval ? ' -> ' + r.approval : ''}`);
+      }
+    }
+
+    return {
+      outputText: lines.join('\n'),
+      durationMs,
+      costUsd: result.drafted > 0 ? 0.01 : 0,
+      extra: { drafted: result.drafted, qa_passed: result.qa_passed, approved: result.approved },
+    };
   },
 
   // ── Google Maps Discovery (shared service) — any vertical, any market ──────
