@@ -585,11 +585,23 @@ async function enrichLead(leadId) {
  *
  * @param {object} params
  * @param {number} params.limit - Max leads to process (default 20)
- * @param {number} params.min_score - Minimum pilot_fit_score (default 45)
+ * @param {number} params.min_score - Minimum pilot_fit_score (default 30)
  * @param {string} params.status_filter - enrichment_status to target (default 'pending')
+ *   Special value 'all_unenriched' targets pending + partial + failed (retry mode)
  */
-async function enrichMultipleLeads({ limit = 20, min_score = 45, status_filter = 'pending', source = null, workspace_id = null } = {}) {
+async function enrichMultipleLeads({ limit = 20, min_score = 30, status_filter = 'pending', source = null, workspace_id = null } = {}) {
   console.log(`[ContactEnricher] Starting batch enrichment: limit=${limit}, min_score=${min_score}, status=${status_filter}${source ? ', source=' + source : ''}${workspace_id ? ', workspace_id=' + workspace_id : ''}`);
+
+  // Build status clause — 'all_unenriched' retries partial + failed leads too
+  let statusClause;
+  let statusParams;
+  if (status_filter === 'all_unenriched') {
+    statusClause = "(enrichment_status IN ('pending', 'partial', 'failed') OR enrichment_status IS NULL)";
+    statusParams = [];
+  } else {
+    statusClause = '(enrichment_status = ? OR enrichment_status IS NULL)';
+    statusParams = [status_filter];
+  }
 
   // Build query — optionally filter by source or workspace_id
   let query, params;
@@ -597,26 +609,22 @@ async function enrichMultipleLeads({ limit = 20, min_score = 45, status_filter =
   if (source) {
     query = `SELECT id, company_name, city, state, pilot_fit_score
      FROM cfo_leads
-     WHERE (enrichment_status = ? OR enrichment_status IS NULL)
+     WHERE ${statusClause}
        AND (contact_email IS NULL OR contact_email = '')
        AND pilot_fit_score >= ?
        AND source = ?${wsClause}
      ORDER BY pilot_fit_score DESC
      LIMIT ?`;
-    params = workspace_id
-      ? [status_filter, min_score, source, workspace_id, limit]
-      : [status_filter, min_score, source, limit];
+    params = [...statusParams, min_score, source, ...(workspace_id ? [workspace_id] : []), limit];
   } else {
     query = `SELECT id, company_name, city, state, pilot_fit_score
      FROM cfo_leads
-     WHERE (enrichment_status = ? OR enrichment_status IS NULL)
+     WHERE ${statusClause}
        AND (contact_email IS NULL OR contact_email = '')
        AND pilot_fit_score >= ?${wsClause}
      ORDER BY pilot_fit_score DESC
      LIMIT ?`;
-    params = workspace_id
-      ? [status_filter, min_score, workspace_id, limit]
-      : [status_filter, min_score, limit];
+    params = [...statusParams, min_score, ...(workspace_id ? [workspace_id] : []), limit];
   }
 
   const leads = all(query, params);

@@ -16,7 +16,7 @@
 // Auto-start: Run scripts/install-openclaw-autostart.bat as Admin (once)
 // =============================================================================
 
-const ROOT = 'C:\\Users\\SPilcher\\OpenClaw2.0 for linux - Copy';
+const ROOT = __dirname;
 
 module.exports = {
   apps: [

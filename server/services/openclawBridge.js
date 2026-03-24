@@ -57,7 +57,44 @@ function esc(val) {
 class OpenClawBridge extends EventEmitter {
   constructor() {
     super();
+    this._agentLocks = new Map(); // per-agent concurrency guard
     console.log('[OpenClawBridge] Ready (openclaw-cli mode)');
+  }
+
+  /**
+   * Acquire a per-agent lock. Only one OpenClaw call per agent at a time.
+   * Returns a release function. Callers that can't wait get queued.
+   */
+  _acquireAgentLock(agentId) {
+    if (!this._agentLocks.has(agentId)) {
+      this._agentLocks.set(agentId, Promise.resolve());
+    }
+    let release;
+    const prev = this._agentLocks.get(agentId);
+    const next = new Promise(resolve => { release = resolve; });
+    this._agentLocks.set(agentId, next);
+    return prev.then(() => release);
+  }
+
+  /**
+   * Clean stale OpenClaw session lock files for an agent.
+   * Lock files older than 5 minutes are leftovers from crashed processes.
+   */
+  _cleanStaleLocks(agentId) {
+    try {
+      const sessDir = path.join(process.env.HOME || process.env.USERPROFILE, '.openclaw', 'agents', agentId, 'sessions');
+      if (!fs.existsSync(sessDir)) return;
+      const now = Date.now();
+      for (const f of fs.readdirSync(sessDir)) {
+        if (!f.endsWith('.lock')) continue;
+        const lockPath = path.join(sessDir, f);
+        const age = now - fs.statSync(lockPath).mtimeMs;
+        if (age > 5 * 60 * 1000) {
+          fs.unlinkSync(lockPath);
+          console.log(`[OpenClawBridge] Cleaned stale lock: ${f} (${Math.round(age / 60000)}m old)`);
+        }
+      }
+    } catch {} // non-fatal
   }
 
   /** Run an agent. Returns { sessionId, output }. config.workspaceSlug injects workspace mandate. */
@@ -82,10 +119,33 @@ class OpenClawBridge extends EventEmitter {
     let cmd = `openclaw agent --local --json --agent ${esc(id)} --message ${esc(safeMessage)}`;
     if (config.sessionId) cmd += ` --session-id ${esc(config.sessionId)}`;
 
-    console.log(`[OpenClawBridge] Running "${id}" — ${message.substring(0, 60)}`);
-    const stdout = await this._run(cmd, sessionId);
+    // Per-agent lock: only one OpenClaw call per agent at a time.
+    // This prevents session file lock contention when cadence + cron fire together.
+    // 10s cooldown between calls avoids OpenAI rate limits on back-to-back batches.
+    const release = await this._acquireAgentLock(id);
+    try {
+      this._cleanStaleLocks(id);
 
-    return { sessionId, status: 'completed', output: stdout };
+      // Rate limit cooldown: wait if last call for this agent was recent
+      const lastCall = this._lastCallTime?.get(id) || 0;
+      const elapsed = Date.now() - lastCall;
+      const COOLDOWN_MS = 10_000;
+      if (elapsed < COOLDOWN_MS) {
+        const wait = COOLDOWN_MS - elapsed;
+        console.log(`[OpenClawBridge] Rate limit cooldown: waiting ${(wait/1000).toFixed(0)}s before "${id}"`);
+        await new Promise(r => setTimeout(r, wait));
+      }
+
+      console.log(`[OpenClawBridge] Running "${id}" — ${message.substring(0, 60)}`);
+      const stdout = await this._run(cmd, sessionId);
+
+      if (!this._lastCallTime) this._lastCallTime = new Map();
+      this._lastCallTime.set(id, Date.now());
+
+      return { sessionId, status: 'completed', output: stdout };
+    } finally {
+      release();
+    }
   }
 
   /** Continue a multi-turn conversation. */

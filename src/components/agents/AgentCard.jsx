@@ -8,11 +8,11 @@ import { Bot, Play, Trash2, Edit, RefreshCw, CheckCircle, XCircle, Clock, Zap } 
 import Button from '@/components/ui/Button';
 
 const STATUS_CONFIG = {
-  active:  { dot: 'bg-emerald-400', label: 'Active',  text: 'text-emerald-400' },
-  idle:    { dot: 'bg-slate-400',   label: 'Idle',    text: 'text-slate-400'   },
-  running: { dot: 'bg-blue-400 animate-pulse', label: 'Running', text: 'text-blue-400' },
-  error:   { dot: 'bg-red-400',     label: 'Error',   text: 'text-red-400'     },
-  paused:  { dot: 'bg-amber-400',   label: 'Paused',  text: 'text-amber-400'   },
+  active:  { dot: 'bg-status-active', label: 'Active',  text: 'text-status-active' },
+  idle:    { dot: 'bg-status-idle',   label: 'Idle',    text: 'text-status-idle'   },
+  running: { dot: 'bg-status-running animate-pulse', label: 'Running', text: 'text-status-running' },
+  error:   { dot: 'bg-status-error',     label: 'Error',   text: 'text-status-error'     },
+  paused:  { dot: 'bg-status-paused',   label: 'Paused',  text: 'text-status-paused'   },
 };
 
 export default function AgentCard({ agent, onRun, onEdit, onDelete, onRegister }) {

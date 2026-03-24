@@ -28,9 +28,9 @@ if errorlevel 1 (
 )
 
 SET TASK_NAME=OpenClaw Fleet pm2
-SET PM2_PATH=C:\Users\SPilcher\AppData\Roaming\npm\pm2.cmd
-SET ECO_PATH=C:\Users\SPilcher\OpenClaw2.0 for linux - Copy\ecosystem.config.cjs
-SET ROOT_DIR=C:\Users\SPilcher\OpenClaw2.0 for linux - Copy
+SET PM2_PATH=%APPDATA%\npm\pm2.cmd
+SET ECO_PATH=%~dp0..\ecosystem.config.cjs
+SET ROOT_DIR=%~dp0..
 
 echo Checking pm2...
 "%PM2_PATH%" --version >nul 2>&1

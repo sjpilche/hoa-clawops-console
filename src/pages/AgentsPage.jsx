@@ -14,17 +14,17 @@ import ConfirmationDialog from '@/components/safety/ConfirmationDialog';
 
 /** Domain group definitions — agents are grouped by name prefix */
 const DOMAIN_GROUPS = [
-  { key: 'hoa-marketing', label: 'HOA Marketing', prefix: 'hoa-', icon: Building2, color: 'text-emerald-400', bg: 'bg-emerald-400/10',
+  { key: 'hoa-marketing', label: 'HOA Marketing', prefix: 'hoa-', icon: Building2, color: 'text-domain-marketing', bg: 'bg-domain-marketing/10',
     filter: (name) => ['hoa-content-writer','hoa-cms-publisher','hoa-social-media','hoa-social-engagement','hoa-networker','hoa-email-campaigns','hoa-website-publisher','hoa-facebook-poster'].includes(name) },
-  { key: 'hoa-pipeline', label: 'HOA Pipeline', prefix: 'hoa-', icon: Globe, color: 'text-blue-400', bg: 'bg-blue-400/10',
+  { key: 'hoa-pipeline', label: 'HOA Pipeline', prefix: 'hoa-', icon: Globe, color: 'text-domain-pipeline', bg: 'bg-domain-pipeline/10',
     filter: (name) => ['hoa-discovery','hoa-contact-finder','hoa-contact-enricher','hoa-outreach-drafter'].includes(name) },
-  { key: 'hoa-intel', label: 'HOA Intel', prefix: '', icon: Search, color: 'text-cyan-400', bg: 'bg-cyan-400/10',
+  { key: 'hoa-intel', label: 'HOA Intel', prefix: '', icon: Search, color: 'text-domain-intel', bg: 'bg-domain-intel/10',
     filter: (name) => ['hoa-minutes-monitor','google-reviews-monitor'].includes(name) },
-  { key: 'mgmt-research', label: 'Mgmt Research', prefix: 'mgmt-', icon: Building, color: 'text-purple-400', bg: 'bg-purple-400/10',
+  { key: 'mgmt-research', label: 'Mgmt Research', prefix: 'mgmt-', icon: Building, color: 'text-domain-research', bg: 'bg-domain-research/10',
     filter: (name) => name.startsWith('mgmt-') },
-  { key: 'jake-marketing', label: 'Jake Marketing', prefix: '', icon: Zap, color: 'text-rose-400', bg: 'bg-rose-400/10',
+  { key: 'jake-marketing', label: 'Jake Marketing', prefix: '', icon: Zap, color: 'text-domain-jake', bg: 'bg-domain-jake/10',
     filter: (name) => name.startsWith('jake-') || name.startsWith('cfo-') },
-  { key: 'core', label: 'Core', prefix: '', icon: Cpu, color: 'text-slate-400', bg: 'bg-slate-400/10',
+  { key: 'core', label: 'Core', prefix: '', icon: Cpu, color: 'text-domain-core', bg: 'bg-domain-core/10',
     filter: () => true }, // catch-all for unmatched agents
 ];
 
@@ -361,7 +361,13 @@ function RunAgentModal({ agent, onClose, onComplete }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Run agent: ${agent.name}`}
+    >
       <div
         className="bg-bg-primary border border-border rounded-xl max-w-xl w-full max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -377,7 +383,7 @@ function RunAgentModal({ agent, onClose, onComplete }) {
               <p className="text-sm text-text-secondary">{agent.name}</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary p-1">
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary p-1" aria-label="Close dialog">
             <X size={18} />
           </button>
         </div>
@@ -619,7 +625,13 @@ function NewAgentModal({ onClose, onSuccess }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Create new agent"
+    >
       <div className="bg-bg-primary border border-border rounded-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-xl font-semibold text-text-primary mb-4">Create New Agent</h2>
 

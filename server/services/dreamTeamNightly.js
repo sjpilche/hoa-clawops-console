@@ -5,87 +5,156 @@
  *
  * NIGHTLY SCHEDULE:
  *   11:00 PM  collectDailyData()       — snapshot day's performance ($0)
- *   11:15 PM  scoreAgents()            — GPT-4o-mini grades A-F (~$0.015)
- *   11:30 PM  selfAssessAndPropose()   — each agent proposes patterns (~$0.015)
- *   11:45 PM  ralphQAGate()            — Ralph reviews proposals (~$0.006)
- *   12:00 AM  toddOvernightActions()   — Todd makes changes (~$0.006)
- *   6:30 AM   buildMorningReport()     — accountability report (~$0.006)
+ *   11:15 PM  scoreAgents()            — deterministic A-F grading ($0)
+ *   11:30 PM  runDiagnostics()         — detect stalls, broken joints ($0)
+ *   12:00 AM  toddOvernightActions()   — activate patterns, auto-disable ($0)
+ *   6:30 AM   buildMorningReport()     — diagnostics-driven briefing ($0)
  *
- * TOTAL COST: ~$0.05-0.07/night
+ * TOTAL COST: $0/night (no LLM calls)
  */
 
 'use strict';
 
 const { get, run, all } = require('../db/connection');
-const { chat } = require('./llmClient');
-
-const MODEL = process.env.DT_MODEL || 'gpt-4o-mini';
-const PROVIDER = process.env.DT_PROVIDER || 'openai';
-const BASE_URL = process.env.DT_BASE_URL || process.env.OPENAI_BASE_URL || '';
-const API_KEY = process.env.DT_API_KEY || process.env.OPENAI_API_KEY || '';
-
-function llm(system, user, maxTokens = 1024) {
-  const opts = { model: MODEL, provider: PROVIDER, temperature: 0.3, maxTokens, timeoutMs: 90000, maxRetries: 1 };
-  if (BASE_URL) opts.baseURL = BASE_URL;
-  if (API_KEY) opts.apiKey = API_KEY;
-  return chat(system, user, opts);
-}
 
 // ════════════════════════════════════════════════════════════════════════════
 // DREAM TEAM ROSTER + METRICS DEFINITIONS
 // ════════════════════════════════════════════════════════════════════════════
 
-// ── REVENUE-ALIGNED SCORING ──────────────────────────────────────────────────
-// Every agent's #1 dimension ties to revenue. Activity without outcomes = F.
+// ── DETERMINISTIC SCORING ────────────────────────────────────────────────────
+// Each dimension has concrete thresholds. No LLM — just math.
+// Scores map to: A=90+ B=75+ C=60+ D=40+ F=<40
 const DREAM_TEAM = {
-  todd: {
-    label: 'Todd',
-    role: 'Chief of Staff',
+  operations: {
+    label: 'Operations',
+    role: 'System Health',
     dims: [
-      { name: 'Routing Accuracy', weight: 0.20, query: (d) => `${d.runs_completed} runs completed, ${d.runs_failed} failed` },
-      { name: 'Pipeline Velocity', weight: 0.35, query: (d) => `${d.pipeline_advances_today} leads advanced stages today out of ${d.active_leads} active` },
-      { name: 'Revenue Progress', weight: 0.25, query: (d) => `${d.meetings_booked_7d} meetings + ${d.pilots_started_7d} pilots this week` },
-      { name: 'Cost Per Outcome', weight: 0.20, query: (d) => `$${d.total_cost.toFixed(2)} spent / ${d.replies_today + d.meetings_booked_7d} outcomes = $${(d.replies_today + d.meetings_booked_7d) > 0 ? (d.total_cost / (d.replies_today + d.meetings_booked_7d)).toFixed(2) : '∞'}/outcome` },
+      {
+        name: 'Run Success Rate', weight: 0.35,
+        score: (d) => {
+          const total = d.runs_completed + d.runs_failed;
+          if (total === 0) return { value: 50, detail: 'No runs today' };
+          const rate = d.runs_completed / total;
+          const s = Math.round(rate * 100);
+          return { value: s, detail: `${d.runs_completed}/${total} runs succeeded (${s}%)` };
+        },
+      },
+      {
+        name: 'Cost Efficiency', weight: 0.25,
+        score: (d) => {
+          if (d.runs_completed === 0) return { value: 50, detail: 'No completed runs' };
+          const costPerRun = d.total_cost / d.runs_completed;
+          // < $0.01/run = A, < $0.05 = B, < $0.10 = C, < $0.25 = D, else F
+          const s = costPerRun < 0.01 ? 95 : costPerRun < 0.05 ? 80 : costPerRun < 0.10 ? 65 : costPerRun < 0.25 ? 45 : 25;
+          return { value: s, detail: `$${costPerRun.toFixed(4)}/run ($${d.total_cost.toFixed(2)} total)` };
+        },
+      },
+      {
+        name: 'Schedule Coverage', weight: 0.20,
+        score: (d) => {
+          const agentRuns = d.agent_runs || [];
+          const activeAgents = agentRuns.length;
+          // 10+ agents running = A, 7+ = B, 4+ = C, 1+ = D, 0 = F
+          const s = activeAgents >= 10 ? 90 : activeAgents >= 7 ? 78 : activeAgents >= 4 ? 62 : activeAgents >= 1 ? 45 : 20;
+          return { value: s, detail: `${activeAgents} agents ran today` };
+        },
+      },
+      {
+        name: 'Uptime', weight: 0.20,
+        score: (d) => {
+          // If we're running and collecting data, uptime is good
+          const s = d.runs_completed > 0 ? 90 : 30;
+          return { value: s, detail: d.runs_completed > 0 ? 'System active' : 'No activity detected' };
+        },
+      },
     ],
   },
-  scout: {
-    label: 'Scout',
-    role: 'Research & Discovery',
+  pipeline: {
+    label: 'Pipeline',
+    role: 'Lead Flow & Conversion',
     dims: [
-      { name: 'Lead Quality', weight: 0.35, query: (d) => `${d.leads_that_replied_30d}/${d.leads_discovered_30d} leads replied in 30d (${d.leads_discovered_30d > 0 ? Math.round(d.leads_that_replied_30d / d.leads_discovered_30d * 100) : 0}% reply rate)` },
-      { name: 'Enrichment Hit Rate', weight: 0.25, query: (d) => `${d.enrichment_with_email}/${d.enrichment_attempted} emails found (${d.enrichment_rate}%)` },
-      { name: 'Market Targeting', weight: 0.25, query: (d) => `${d.top_market_leads} leads from top markets out of ${d.leads_discovered} total (${d.leads_discovered > 0 ? Math.round(d.top_market_leads / d.leads_discovered * 100) : 0}%)` },
-      { name: 'Signal Freshness', weight: 0.15, query: (d) => `${d.brain_observations} observations written` },
+      {
+        name: 'Discovery', weight: 0.25,
+        score: (d) => {
+          const leads = d.leads_discovered;
+          // 10+/day = A, 5+ = B, 2+ = C, 1+ = D, 0 = F
+          const s = leads >= 10 ? 92 : leads >= 5 ? 78 : leads >= 2 ? 62 : leads >= 1 ? 45 : 25;
+          return { value: s, detail: `${leads} new leads discovered today` };
+        },
+      },
+      {
+        name: 'Enrichment', weight: 0.25,
+        score: (d) => {
+          if (d.enrichment_attempted === 0) return { value: 50, detail: 'No enrichment attempts' };
+          const rate = d.enrichment_rate;
+          // 60%+ = A, 40%+ = B, 25%+ = C, 10%+ = D, else F
+          const s = rate >= 60 ? 92 : rate >= 40 ? 78 : rate >= 25 ? 62 : rate >= 10 ? 45 : 25;
+          return { value: s, detail: `${d.enrichment_with_email}/${d.enrichment_attempted} emails found (${rate}%)` };
+        },
+      },
+      {
+        name: 'Reply Rate (30d)', weight: 0.30,
+        score: (d) => {
+          if (d.leads_discovered_30d === 0) return { value: 50, detail: 'No leads in 30d window' };
+          const rate = d.leads_that_replied_30d / d.leads_discovered_30d;
+          // 10%+ = A, 5%+ = B, 2%+ = C, 0.5%+ = D, else F
+          const s = rate >= 0.10 ? 95 : rate >= 0.05 ? 80 : rate >= 0.02 ? 65 : rate >= 0.005 ? 45 : 25;
+          return { value: s, detail: `${d.leads_that_replied_30d}/${d.leads_discovered_30d} replied (${(rate*100).toFixed(1)}%)` };
+        },
+      },
+      {
+        name: 'Revenue Progress', weight: 0.20,
+        score: (d) => {
+          const meetings = d.meetings_booked_7d || 0;
+          const pilots = d.pilots_started_7d || 0;
+          const total = meetings + pilots;
+          // 3+ = A, 2 = B, 1 = C, 0 with replies = D, 0 without = F
+          const s = total >= 3 ? 95 : total >= 2 ? 80 : total >= 1 ? 65 : d.leads_that_replied_30d > 0 ? 45 : 25;
+          return { value: s, detail: `${meetings} meetings + ${pilots} pilots this week` };
+        },
+      },
     ],
   },
-  revops: {
-    label: 'RevOps',
-    role: 'Economics & Capital',
+  outreach: {
+    label: 'Outreach',
+    role: 'Email & Content Quality',
     dims: [
-      { name: 'Cost Per Meeting', weight: 0.30, query: (d) => `$${d.total_cost.toFixed(2)} spent, ${d.meetings_booked_7d} meetings → ${d.meetings_booked_7d > 0 ? '$' + (d.total_cost / d.meetings_booked_7d).toFixed(2) + '/meeting' : 'no meetings yet'}` },
-      { name: 'Cost Per Reply', weight: 0.25, query: (d) => `${d.replies_today} replies today, cost $${d.total_cost.toFixed(2)} → ${d.replies_today > 0 ? '$' + (d.total_cost / d.replies_today).toFixed(2) + '/reply' : 'no replies yet'}` },
-      { name: 'Compute Efficiency', weight: 0.25, query: (d) => `${d.runs_completed} runs at $${d.total_cost.toFixed(2)} = $${d.runs_completed > 0 ? (d.total_cost / d.runs_completed).toFixed(4) : '0'}/run` },
-      { name: 'Reporting Timeliness', weight: 0.20, query: (d) => `Daily scorecard ${d.digest_posted ? 'delivered' : 'MISSED'}` },
-    ],
-  },
-  ralph: {
-    label: 'Ralph',
-    role: 'QA Gate',
-    dims: [
-      { name: 'Catch Rate', weight: 0.30, query: (d) => `${d.voice_rejections} items flagged — are these true problems? (${d.false_passes} false passes found later)` },
-      { name: 'False Pass Rate', weight: 0.30, query: (d) => `${d.ralph_approved_bounced}/${d.ralph_approved_total} Ralph-approved emails bounced (${d.ralph_approved_total > 0 ? Math.round(d.ralph_approved_bounced / d.ralph_approved_total * 100) : 0}%)` },
-      { name: 'Review Coverage', weight: 0.20, query: (d) => `${d.qa_submissions}/${d.emails_drafted + d.content_drafted} items reviewed out of total created` },
-      { name: 'Bounce Prevention', weight: 0.20, query: (d) => `Overall bounce rate: ${d.bounce_rate_7d}% — Ralph's approved bounce rate: ${d.ralph_bounce_rate}%` },
-    ],
-  },
-  quill: {
-    label: 'Quill',
-    role: 'Content & Outreach',
-    dims: [
-      { name: 'Reply Rate', weight: 0.40, query: (d) => `${d.emails_replied}/${d.emails_sent} got replies (${d.reply_rate}%) — THIS IS THE #1 METRIC` },
-      { name: 'Meeting Rate', weight: 0.25, query: (d) => `${d.meetings_booked_7d} meetings booked from outreach this week` },
-      { name: 'QA Pass Rate', weight: 0.20, query: (d) => `${d.qa_passes}/${d.qa_submissions} passed Ralph` },
-      { name: 'Pilot Offer Inclusion', weight: 0.15, query: (d) => `${d.emails_with_pilot_offer}/${d.emails_total_today} emails include pilot offer CTA (${d.emails_total_today > 0 ? Math.round(d.emails_with_pilot_offer / d.emails_total_today * 100) : 0}%)` },
+      {
+        name: 'Email Volume', weight: 0.20,
+        score: (d) => {
+          const sent = d.emails_sent;
+          const s = sent >= 20 ? 90 : sent >= 10 ? 78 : sent >= 5 ? 62 : sent >= 1 ? 45 : 25;
+          return { value: s, detail: `${sent} emails sent today` };
+        },
+      },
+      {
+        name: 'Reply Rate', weight: 0.35,
+        score: (d) => {
+          if (d.emails_sent === 0) return { value: 50, detail: 'No emails sent' };
+          const rate = d.reply_rate;
+          const s = rate >= 10 ? 95 : rate >= 5 ? 80 : rate >= 2 ? 65 : rate >= 0.5 ? 45 : 25;
+          return { value: s, detail: `${d.emails_replied}/${d.emails_sent} replied (${rate}%)` };
+        },
+      },
+      {
+        name: 'QA Pass Rate', weight: 0.25,
+        score: (d) => {
+          if (d.qa_submissions === 0) return { value: 50, detail: 'No QA submissions' };
+          const rate = d.qa_submissions > 0 ? Math.round(d.qa_passes / d.qa_submissions * 100) : 0;
+          const s = rate >= 90 ? 92 : rate >= 75 ? 78 : rate >= 50 ? 60 : rate >= 25 ? 42 : 25;
+          return { value: s, detail: `${d.qa_passes}/${d.qa_submissions} passed QA (${rate}%)` };
+        },
+      },
+      {
+        name: 'Bounce Rate', weight: 0.20,
+        score: (d) => {
+          const bounceStr = String(d.bounce_rate_7d || '0').replace('%', '');
+          const bounce = parseFloat(bounceStr) || 0;
+          // Lower is better: 0% = A, <2% = B, <5% = C, <10% = D, else F
+          const s = bounce === 0 ? 92 : bounce < 2 ? 80 : bounce < 5 ? 65 : bounce < 10 ? 45 : 25;
+          return { value: s, detail: `${bounce}% bounce rate (7d)` };
+        },
+      },
     ],
   },
 };
@@ -158,7 +227,7 @@ function collectDailyData() {
   data.replies_today = get("SELECT COUNT(*) c FROM cfo_leads WHERE status = 'replied' AND DATE(updated_at) = ?", [today])?.c || 0;
   data.emails_with_pilot_offer = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE pilot_offer IS NOT NULL AND DATE(created_at) = ?", [today])?.c || 0;
   data.emails_total_today = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE DATE(created_at) = ?", [today])?.c || 0;
-  data.content_published_7d = get("SELECT COUNT(*) c FROM cfo_content_pieces WHERE status = 'approved' AND updated_at > datetime('now', '-7 days')")?.c || 0;
+  data.content_published_7d = get("SELECT COUNT(*) c FROM cfo_content_pieces WHERE status = 'approved' AND created_at > datetime('now', '-7 days')")?.c || 0;
 
   // Pipeline velocity
   try {
@@ -215,7 +284,7 @@ function collectDailyData() {
 // PHASE 2: SCORECARD GRADING (11:15 PM)
 // ════════════════════════════════════════════════════════════════════════════
 
-async function scoreAgents(snapshot) {
+function scoreAgents(snapshot) {
   const today = new Date().toISOString().slice(0, 10);
   const scorecards = [];
 
@@ -231,52 +300,19 @@ async function scoreAgents(snapshot) {
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     const prevCard = get('SELECT composite_score FROM dt_scorecards WHERE agent_name = ? AND score_date = ?', [agentName, yesterday]);
 
-    // Build metrics summary for LLM
-    const metricsSummary = config.dims.map(d => `${d.name}: ${d.query(snapshot)}`).join('\n');
-
-    // Get active patterns for context
-    const activePatterns = all('SELECT pattern_text FROM dt_learned_patterns WHERE agent_name = ? AND status = \'active\'', [agentName]);
-    const patternsContext = activePatterns.length > 0
-      ? `\nActive learned patterns (${activePatterns.length}):\n${activePatterns.map(p => `- ${p.pattern_text}`).join('\n')}`
-      : '\nNo active learned patterns yet.';
-
-    const scorePrompt = `Score this Dream Team agent's performance today.
-
-AGENT: ${config.label} (${agentName})
-DATE: ${today}
-
-TODAY'S METRICS:
-${metricsSummary}
-${patternsContext}
-
-Score each dimension 0-100 based on the metrics. Be honest — if there's no data for a dimension, score 50 (baseline).
-Return ONLY valid JSON:
-{
-  "dim1_score": <0-100>,
-  "dim2_score": <0-100>,
-  "dim3_score": <0-100>,
-  "dim4_score": <0-100>,
-  "assessment": "1-2 sentence performance summary",
-  "recommendations": ["improvement 1", "improvement 2"]
-}`;
-
-    let scores;
-    try {
-      const raw = await llm('You are a strict performance evaluator for an AI agent team. Score honestly — no inflation.', scorePrompt);
-      scores = parseJson(raw);
-    } catch (err) {
-      console.warn(`[DreamTeam] Scoring failed for ${agentName}: ${err.message}`);
-      scores = { dim1_score: 50, dim2_score: 50, dim3_score: 50, dim4_score: 50, assessment: 'Scoring failed', recommendations: [] };
-    }
-
-    const d1 = clamp(scores.dim1_score, 0, 100);
-    const d2 = clamp(scores.dim2_score, 0, 100);
-    const d3 = clamp(scores.dim3_score, 0, 100);
-    const d4 = clamp(scores.dim4_score, 0, 100);
+    // Deterministic scoring — each dimension computes its own score from thresholds
+    const dimResults = config.dims.map(d => d.score(snapshot));
+    const d1 = clamp(dimResults[0].value, 0, 100);
+    const d2 = clamp(dimResults[1].value, 0, 100);
+    const d3 = clamp(dimResults[2].value, 0, 100);
+    const d4 = clamp(dimResults[3].value, 0, 100);
     const composite = Math.round(d1 * config.dims[0].weight + d2 * config.dims[1].weight + d3 * config.dims[2].weight + d4 * config.dims[3].weight);
     const grade = getGrade(composite);
     const prev = prevCard?.composite_score || null;
-    const trend = prev === null ? 'stable' : composite > prev + 5 ? 'up' : composite < prev - 5 ? 'down' : 'stable';
+    const trend = prev === null ? 'new' : composite > prev + 5 ? 'up' : composite < prev - 5 ? 'down' : 'stable';
+
+    // Build assessment from dimension details
+    const assessment = dimResults.map((r, i) => `${config.dims[i].name}: ${r.detail}`).join('. ');
 
     run(`INSERT INTO dt_scorecards
       (agent_name, score_date, dim1_name, dim1_score, dim2_name, dim2_score, dim3_name, dim3_score, dim4_name, dim4_score,
@@ -284,196 +320,19 @@ Return ONLY valid JSON:
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       agentName, today,
       config.dims[0].name, d1, config.dims[1].name, d2, config.dims[2].name, d3, config.dims[3].name, d4,
-      composite, grade, prev, trend,
-      scores.assessment || '', JSON.stringify(scores.recommendations || []),
+      composite, grade, prev, trend, assessment, '[]',
     ]);
 
     const card = get('SELECT * FROM dt_scorecards WHERE agent_name = ? AND score_date = ?', [agentName, today]);
     scorecards.push(card);
-    console.log(`[DreamTeam] ${config.label}: ${grade} (${composite}) — ${scores.assessment}`);
+    console.log(`[DreamTeam] ${config.label}: ${grade} (${composite}) — ${assessment.substring(0, 120)}`);
   }
 
   return scorecards;
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// PHASE 3: SELF-ASSESSMENT + PATTERN PROPOSALS (11:30 PM)
-// ════════════════════════════════════════════════════════════════════════════
-
-async function selfAssessAndPropose(scorecards) {
-  const proposals = [];
-
-  for (const card of scorecards) {
-    const config = DREAM_TEAM[card.agent_name];
-    if (!config) continue;
-
-    const prompt = `You are ${config.label}, reviewing your scorecard for today.
-
-SCORECARD:
-  ${card.dim1_name}: ${card.dim1_score}/100
-  ${card.dim2_name}: ${card.dim2_score}/100
-  ${card.dim3_name}: ${card.dim3_score}/100
-  ${card.dim4_name}: ${card.dim4_score}/100
-  COMPOSITE: ${card.composite_score}/100 (${card.grade})
-  TREND: ${card.trend}
-
-Based on your performance, propose 0-2 learned patterns — specific behavioral changes that would improve your weakest dimensions.
-
-A learned pattern is a CONCRETE instruction like:
-- "When enriching Florida leads, try direct domain guess before Bing — 31% vs 18% hit rate"
-- "Cold emails with project-specific subjects get 2.3x more replies"
-- "Skip LinkedIn search for companies with <10 employees — hit rate is 0%"
-
-NOT vague advice like "try harder" or "be more thorough."
-
-Return ONLY valid JSON:
-{
-  "self_assessment": "2-3 sentences on what went well and what didn't",
-  "patterns": [
-    {
-      "pattern_text": "Specific actionable instruction",
-      "category": "timing|quality|workflow|outreach|enrichment|building|scoring",
-      "evidence": "What data supports this pattern"
-    }
-  ]
-}
-
-If your score is A (90+) and stable, return {"self_assessment": "...", "patterns": []} — no changes needed.`;
-
-    try {
-      const raw = await llm(`You are ${config.label}, a Dream Team agent doing your nightly self-review. Be specific and data-driven.`, prompt);
-      const result = parseJson(raw);
-
-      if (result?.patterns?.length > 0) {
-        for (const p of result.patterns.slice(0, 2)) {
-          run(`INSERT INTO dt_learned_patterns
-            (agent_name, pattern_text, category, source_type, source_scorecard_id, evidence, status)
-            VALUES (?, ?, ?, 'self_assessment', ?, ?, 'proposed')`, [
-            card.agent_name, p.pattern_text, p.category || 'workflow', card.id, p.evidence || '',
-          ]);
-          const patternId = get('SELECT last_insert_rowid() as id')?.id;
-          run('INSERT INTO dt_pattern_audit (pattern_id, action, actor, reason) VALUES (?, \'proposed\', ?, ?)', [
-            patternId, card.agent_name, result.self_assessment,
-          ]);
-          proposals.push({ agent: card.agent_name, pattern: p.pattern_text, patternId });
-        }
-      }
-
-      console.log(`[DreamTeam] ${config.label} self-review: ${result?.patterns?.length || 0} patterns proposed`);
-    } catch (err) {
-      console.warn(`[DreamTeam] Self-review failed for ${card.agent_name}: ${err.message}`);
-    }
-  }
-
-  return proposals;
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// PHASE 4: RALPH QA GATE (11:45 PM)
-// ════════════════════════════════════════════════════════════════════════════
-
-// Anti-drift blocklist
-const DRIFT_BLOCKLIST = [
-  /lower.*quality/i, /reduce.*threshold/i, /skip.*qa/i, /skip.*review/i,
-  /remove.*escalation/i, /disable.*escalation/i, /bypass.*ralph/i,
-  /auto.?approve.*all/i, /expand.*authority/i, /increase.*budget/i,
-  /delete.*data/i, /send.*email.*directly/i, /push.*code.*directly/i,
-  /ignore.*error/i, /skip.*error.?handling/i, /remove.*validation/i,
-];
-
-async function ralphQAGate(proposals) {
-  if (proposals.length === 0) return { approved: 0, rejected: 0 };
-
-  let approved = 0, rejected = 0;
-
-  // First: blocklist check (no LLM needed)
-  for (const p of proposals) {
-    const blocked = DRIFT_BLOCKLIST.some(rx => rx.test(p.pattern));
-    if (blocked) {
-      run('UPDATE dt_learned_patterns SET status = \'archived\', qa_verdict = \'REJECT\', qa_notes = \'Anti-drift blocklist match\', qa_reviewed_at = datetime(\'now\') WHERE id = ?', [p.patternId]);
-      run('INSERT INTO dt_pattern_audit (pattern_id, action, actor, reason) VALUES (?, \'rejected\', \'ralph\', \'Anti-drift blocklist match\')', [p.patternId]);
-      rejected++;
-      console.log(`[DreamTeam] Ralph BLOCKED: "${p.pattern}" (drift blocklist)`);
-      continue;
-    }
-  }
-
-  // Then: LLM review for remaining
-  const remaining = proposals.filter(p => {
-    const pat = get('SELECT status FROM dt_learned_patterns WHERE id = ?', [p.patternId]);
-    return pat?.status === 'proposed';
-  });
-
-  if (remaining.length === 0) return { approved, rejected };
-
-  const patternList = remaining.map((p, i) => `${i + 1}. [${p.agent}] "${p.pattern}"`).join('\n');
-
-  const prompt = `You are Ralph, QA Supervisor. Review these proposed learned patterns.
-
-PROPOSED PATTERNS:
-${patternList}
-
-For each pattern, decide PASS or REJECT.
-REJECT if: it would lower quality, bypass safety checks, expand authority, or conflict with another agent's active patterns.
-PASS if: it's a specific, data-backed behavioral improvement.
-
-Return ONLY valid JSON:
-{
-  "verdicts": [
-    {"index": 1, "verdict": "PASS|REJECT", "reason": "one sentence"}
-  ]
-}`;
-
-  try {
-    const raw = await llm('You are Ralph, the skeptical QA supervisor. Protect quality standards. Reject anything that weakens the system.', prompt);
-    const result = parseJson(raw);
-
-    if (result?.verdicts) {
-      for (const v of result.verdicts) {
-        const p = remaining[v.index - 1];
-        if (!p) continue;
-
-        if (v.verdict === 'PASS') {
-          run('UPDATE dt_learned_patterns SET qa_verdict = \'PASS\', qa_notes = ?, qa_reviewed_at = datetime(\'now\') WHERE id = ?', [v.reason, p.patternId]);
-          run('INSERT INTO dt_pattern_audit (pattern_id, action, actor, reason) VALUES (?, \'qa_passed\', \'ralph\', ?)', [p.patternId, v.reason]);
-          approved++;
-          console.log(`[DreamTeam] Ralph PASSED: [${p.agent}] "${p.pattern}"`);
-        } else {
-          run('UPDATE dt_learned_patterns SET status = \'archived\', qa_verdict = \'REJECT\', qa_notes = ?, qa_reviewed_at = datetime(\'now\') WHERE id = ?', [v.reason, p.patternId]);
-          run('INSERT INTO dt_pattern_audit (pattern_id, action, actor, reason) VALUES (?, \'rejected\', \'ralph\', ?)', [p.patternId, v.reason]);
-          rejected++;
-          console.log(`[DreamTeam] Ralph REJECTED: [${p.agent}] "${p.pattern}" — ${v.reason}`);
-        }
-      }
-    } else {
-      console.warn(`[DreamTeam] Ralph LLM returned no verdicts — raw: ${(raw || '').slice(0, 200)}`);
-      // Deterministic fallback: reject vague patterns, pass specific ones
-      for (const p of remaining) {
-        const isSpecific = /\d+/.test(p.pattern) || /percent|rate|score|threshold|limit/i.test(p.pattern);
-        const isVague = /implement|establish|prioritize|focus on|increase|improve/i.test(p.pattern) && !isSpecific;
-        const verdict = isVague ? 'REJECT' : 'PASS';
-        const reason = isVague ? 'Deterministic fallback: too vague, no specific metric' : 'Deterministic fallback: contains measurable criteria';
-        run(`UPDATE dt_learned_patterns SET qa_verdict = ?, qa_notes = ?, qa_reviewed_at = datetime('now')${verdict === 'REJECT' ? ", status = 'archived'" : ''} WHERE id = ?`, [verdict, reason, p.patternId]);
-        run('INSERT INTO dt_pattern_audit (pattern_id, action, actor, reason) VALUES (?, ?, \'ralph\', ?)', [p.patternId, verdict === 'PASS' ? 'qa_passed' : 'rejected', reason]);
-        if (verdict === 'PASS') approved++; else rejected++;
-        console.log(`[DreamTeam] Ralph ${verdict} (fallback): [${p.agent}] "${p.pattern}"`);
-      }
-    }
-  } catch (err) {
-    console.warn(`[DreamTeam] Ralph QA gate LLM failed: ${err.message} — running deterministic fallback`);
-    // Same deterministic fallback on total failure
-    for (const p of remaining) {
-      const isSpecific = /\d+/.test(p.pattern) || /percent|rate|score|threshold|limit/i.test(p.pattern);
-      const verdict = isSpecific ? 'PASS' : 'REJECT';
-      const reason = isSpecific ? 'Deterministic: contains metric' : 'Deterministic: no measurable criteria';
-      run(`UPDATE dt_learned_patterns SET qa_verdict = ?, qa_notes = ?, qa_reviewed_at = datetime('now')${verdict === 'REJECT' ? ", status = 'archived'" : ''} WHERE id = ?`, [verdict, reason, p.patternId]);
-      run('INSERT INTO dt_pattern_audit (pattern_id, action, actor, reason) VALUES (?, ?, \'ralph\', ?)', [p.patternId, verdict === 'PASS' ? 'qa_passed' : 'rejected', reason]);
-      if (verdict === 'PASS') approved++; else rejected++;
-    }
-  }
-
-  return { approved, rejected };
-}
+// (Phases 3-4 removed: selfAssessAndPropose + ralphQAGate cut in deterministic rewrite.
+//  Scoring is now threshold-based, no LLM needed. Patterns still managed by Todd actions.)
 
 // ════════════════════════════════════════════════════════════════════════════
 // PHASE 5: TODD OVERNIGHT ACTIONS (12:00 AM)
@@ -648,7 +507,7 @@ async function toddOvernightActions(scorecards) {
 // PHASE 6: MORNING REPORT (6:30 AM)
 // ════════════════════════════════════════════════════════════════════════════
 
-async function buildMorningReport() {
+async function buildMorningReport(diagnostics = []) {
   const today = new Date().toISOString().slice(0, 10);
 
   // Check if already reported
@@ -657,128 +516,101 @@ async function buildMorningReport() {
 
   const scorecards = all('SELECT * FROM dt_scorecards WHERE score_date = ? ORDER BY composite_score DESC', [today]);
   const actions = all('SELECT * FROM dt_overnight_actions WHERE action_date = ?', [today]);
-  const newPatterns = all('SELECT lp.*, pa.action AS audit_action FROM dt_learned_patterns lp LEFT JOIN dt_pattern_audit pa ON pa.pattern_id = lp.id AND pa.action IN (\'activated\',\'rejected\') WHERE DATE(lp.created_at) = ?', [today]);
 
-  // Build report text
-  const lines = [`DREAM TEAM OVERNIGHT REPORT — ${today}`, '━'.repeat(50), '', 'SCORECARDS:'];
+  const lines = [`OPENCLAW DAILY BRIEFING — ${today}`, '━'.repeat(50)];
 
-  if (scorecards.length === 0) {
-    lines.push('  (no scorecards generated — nightly cycle may not have run)');
+  // ── DIAGNOSTICS: the point of this report ──
+  const criticals = diagnostics.filter(d => d.level === 'critical');
+  const highs = diagnostics.filter(d => d.level === 'high');
+  const mediums = diagnostics.filter(d => d.level === 'medium');
+
+  if (diagnostics.length === 0) {
+    lines.push('', 'SYSTEM STATUS: All clear. No issues detected.');
   } else {
-    const allBaseline = scorecards.every(c => c.composite_score === 50);
-    for (const card of scorecards) {
-      lines.push(`  ${card.agent_name.charAt(0).toUpperCase() + card.agent_name.slice(1)}:`.padEnd(12) +
-        `${card.grade} (${card.composite_score})`.padEnd(10) + ' — ' +
-        `${card.dim1_name}: ${card.dim1_score} | ${card.dim2_name}: ${card.dim2_score} | ${card.dim3_name}: ${card.dim3_score} | ${card.dim4_name}: ${card.dim4_score}`);
+    if (criticals.length > 0) {
+      lines.push('', '!! CRITICAL:');
+      for (const d of criticals) {
+        lines.push(`  ${d.title}`);
+        lines.push(`    ${d.detail}`);
+        lines.push(`    -> ${d.action}`);
+      }
     }
-    if (allBaseline) {
-      lines.push('', '  ⚠️ ALL SCORES AT BASELINE (50) — upstream agents may not be producing data. Check agent health.');
+    if (highs.length > 0) {
+      lines.push('', '! NEEDS ATTENTION:');
+      for (const d of highs) {
+        lines.push(`  ${d.title}`);
+        lines.push(`    -> ${d.action}`);
+      }
+    }
+    if (mediums.length > 0) {
+      lines.push('', 'MINOR:');
+      for (const d of mediums) lines.push(`  ${d.title}`);
     }
   }
 
-  // ── Revenue Pipeline by Product Line ──
+  // ── HEALTH GRADES (one line each) ──
+  if (scorecards.length > 0) {
+    lines.push('', 'HEALTH:');
+    for (const card of scorecards) {
+      const arrow = card.trend === 'up' ? '+' : card.trend === 'down' ? '-' : '=';
+      lines.push(`  ${card.agent_name.padEnd(12)} ${card.grade} (${card.composite_score}) ${arrow}`);
+    }
+  }
+
+  // ── PIPELINE FUNNEL ──
   try {
     const pipelineByProduct = all(`
       SELECT
-        CASE
-          WHEN source_agent = 'owen' THEN 'Owen CFO'
-          WHEN source_agent IN ('hoa','mgmt') THEN 'HOA'
-          WHEN attribution_source = 'data_rehab_cross_sell' THEN 'Data Rehab'
-          ELSE 'Jake CFO'
-        END AS product,
+        CASE WHEN source_agent = 'owen' THEN 'Owen' WHEN source_agent IN ('hoa','mgmt') THEN 'HOA'
+             WHEN attribution_source = 'data_rehab_cross_sell' THEN 'DataRehab' ELSE 'Jake' END AS product,
         COUNT(*) AS total,
         SUM(CASE WHEN revenue_stage IN ('contacted','replied','meeting','pilot','closed','revenue') THEN 1 ELSE 0 END) AS contacted,
         SUM(CASE WHEN revenue_stage IN ('replied','meeting','pilot','closed','revenue') THEN 1 ELSE 0 END) AS replied,
         SUM(CASE WHEN revenue_stage IN ('meeting','pilot','closed','revenue') THEN 1 ELSE 0 END) AS meetings,
-        SUM(CASE WHEN revenue_stage IN ('pilot','closed','revenue') THEN 1 ELSE 0 END) AS pilots,
-        SUM(CASE WHEN revenue_stage IN ('closed','revenue') THEN 1 ELSE 0 END) AS closed,
-        SUM(COALESCE(close_value_cents, 0)) AS revenue_cents
-      FROM cfo_leads
-      WHERE created_at >= DATE('now', '-30 days')
-      GROUP BY product
-      ORDER BY total DESC
+        SUM(CASE WHEN revenue_stage IN ('closed','revenue') THEN 1 ELSE 0 END) AS closed
+      FROM cfo_leads WHERE created_at >= DATE('now', '-30 days') GROUP BY product ORDER BY total DESC
     `);
-
     if (pipelineByProduct.length > 0) {
-      lines.push('', 'REVENUE PIPELINE (30-day):');
+      lines.push('', 'PIPELINE (30d):');
       for (const p of pipelineByProduct) {
-        const rev = p.revenue_cents > 0 ? ` | $${(p.revenue_cents / 100).toLocaleString()} rev` : '';
-        lines.push(`  ${p.product}: ${p.total} leads → ${p.contacted} contacted → ${p.replied} replied → ${p.meetings} meetings → ${p.pilots} pilots → ${p.closed} closed${rev}`);
+        lines.push(`  ${p.product.padEnd(10)} ${p.total} -> ${p.contacted} contacted -> ${p.replied} replied -> ${p.meetings} mtg -> ${p.closed} closed`);
       }
     }
-  } catch (err) {
-    lines.push('', `REVENUE PIPELINE: unavailable (${err.message})`);
-  }
-
-  // ── Signal Source Performance ──
-  try {
-    const signalPerf = require('./signalPerformance');
-    const signalSummary = signalPerf.getDiscordSummary();
-    if (signalSummary && signalSummary !== 'No signal performance data yet.') {
-      lines.push('', 'SIGNAL SOURCE PERFORMANCE (30-day):');
-      // Strip Discord markdown for plain text report
-      lines.push('  ' + signalSummary.replace(/\*\*/g, '').split('\n').join('\n  '));
-    }
   } catch {}
 
-  // ── Paper Trading Scorecard ──
+  // ── PAPER TRADING (compact) ──
   try {
-    const path = require('path');
+    const pathMod = require('path');
     const Database = require('better-sqlite3');
-    const brainDbPath = path.join(__dirname, '../../services/trader-service/data/trader-brain.sqlite');
+    const brainDbPath = pathMod.join(__dirname, '../../services/trader-service/data/trader-brain.sqlite');
     const brainDb = new Database(brainDbPath, { readonly: true });
-    const perfRows = brainDb.prepare('SELECT * FROM performance_daily ORDER BY date DESC LIMIT 14').all();
+    const last = brainDb.prepare('SELECT * FROM performance_daily ORDER BY date DESC LIMIT 1').get();
     brainDb.close();
-
-    if (perfRows.length > 0) {
-      perfRows.reverse();
-      const first = perfRows[0];
-      const last = perfRows[perfRows.length - 1];
-      const totalReturn = first.portfolio_value > 0 ? ((last.portfolio_value - first.portfolio_value) / first.portfolio_value * 100) : 0;
-      const dailyReturns = perfRows.map(r => r.daily_return);
-      const avgReturn = dailyReturns.reduce((a, b) => a + b, 0) / perfRows.length;
-      const rfDaily = 0.05 / 252 * 100;
-      const excess = dailyReturns.map(r => r - rfDaily);
-      const avgExcess = excess.reduce((a, b) => a + b, 0) / perfRows.length;
-      const stdDev = Math.sqrt(excess.reduce((s, r) => s + Math.pow(r - avgExcess, 2), 0) / Math.max(perfRows.length - 1, 1));
-      const sharpe = stdDev > 0 ? (avgExcess / stdDev) * Math.sqrt(252) : 0;
-      const spyTotal = perfRows.reduce((s, r) => s + (r.spy_return || 0), 0);
-      const fundReady = perfRows.length >= 14 && sharpe > 0.5;
-
-      lines.push('', `PAPER TRADING (${perfRows.length} days):`);
-      lines.push(`  Portfolio: $${last.portfolio_value.toFixed(2)} | Return: ${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%`);
-      lines.push(`  Sharpe: ${sharpe.toFixed(2)} | Max DD: -${last.max_drawdown.toFixed(2)}%`);
-      lines.push(`  SPY: ${spyTotal >= 0 ? '+' : ''}${spyTotal.toFixed(2)}% | Alpha: ${(totalReturn - spyTotal) >= 0 ? '+' : ''}${(totalReturn - spyTotal).toFixed(2)}%`);
-      lines.push(`  Fund Status: ${fundReady ? 'READY (Sharpe > 0.5 for 14+ days)' : `NOT READY (${perfRows.length}/14 days, Sharpe ${sharpe.toFixed(2)})`}`);
+    if (last) {
+      lines.push('', `TRADING: $${last.portfolio_value.toFixed(2)} | ${last.daily_return >= 0 ? '+' : ''}${last.daily_return.toFixed(2)}% today | DD: -${last.max_drawdown.toFixed(2)}%`);
     }
   } catch {}
 
+  // ── OVERNIGHT ACTIONS ──
   if (actions.length > 0) {
-    lines.push('', 'OVERNIGHT CHANGES (by Todd):');
-    actions.forEach((a, i) => lines.push(`  ${i + 1}. [${a.action_type}] ${a.target} — ${a.reason}`));
+    lines.push('', 'OVERNIGHT:');
+    actions.forEach(a => lines.push(`  [${a.action_type}] ${a.target} -- ${a.reason}`));
   }
 
-  if (newPatterns.length > 0) {
-    lines.push('', 'PATTERNS:');
-    for (const p of newPatterns) {
-      const status = p.qa_verdict === 'PASS' ? 'APPROVED' : p.qa_verdict === 'REJECT' ? 'REJECTED' : 'PENDING';
-      lines.push(`  [${p.agent_name}] ${status}: "${p.pattern_text}"`);
-    }
-  }
-
-  // ── Revenue Radar — Cross-Lane Money Moves ──
+  // ── REVENUE RADAR ──
   try {
     const { runRevenueScan, formatForReport } = require('./revenueRadar');
     const scan = runRevenueScan();
-    lines.push('', formatForReport(scan));
-  } catch (err) {
-    lines.push('', `REVENUE RADAR: unavailable (${err.message})`);
-  }
+    if (scan.moneyMoves?.length > 0) lines.push('', formatForReport(scan));
+  } catch {}
 
-  // Find lowest scorer for priority
-  const lowest = scorecards.length > 0 ? scorecards[scorecards.length - 1] : null;
-  if (lowest && lowest.grade !== 'A') {
-    lines.push('', `TOP PRIORITY: ${lowest.agent_name}'s ${lowest.grade} grade. Focus: improve weakest dimension.`);
+  // ── BIGGEST LEVER ──
+  if (criticals.length > 0) {
+    lines.push('', `#1 THING TO FIX: ${criticals[0].title}`);
+    lines.push(`   ${criticals[0].action}`);
+  } else if (highs.length > 0) {
+    lines.push('', `#1 THING TO FIX: ${highs[0].title}`);
+    lines.push(`   ${highs[0].action}`);
   }
 
   const reportText = lines.join('\n');
@@ -786,69 +618,175 @@ async function buildMorningReport() {
   run(`INSERT INTO dt_morning_reports
     (report_date, report_text, scorecards_json, actions_json, patterns_json)
     VALUES (?, ?, ?, ?, ?)`, [
-    today, reportText,
-    JSON.stringify(scorecards),
-    JSON.stringify(actions),
-    JSON.stringify(newPatterns),
+    today, reportText, JSON.stringify(scorecards), JSON.stringify(actions), JSON.stringify(diagnostics),
   ]);
 
   // Post to Discord
   try {
     const discord = require('./discordNotifier');
+    let desc = '';
 
-    // Build extended Discord description
-    let discordDesc = scorecards.map(c =>
-      `**${c.agent_name.charAt(0).toUpperCase() + c.agent_name.slice(1)}**: ${c.grade} (${c.composite_score}) ${c.trend === 'up' ? '📈' : c.trend === 'down' ? '📉' : '➡️'}`
-    ).join('\n');
-
-    // Add pipeline summary to Discord
-    try {
-      const pipelineTotals = get(`
-        SELECT COUNT(*) AS total,
-               SUM(CASE WHEN revenue_stage IN ('replied','meeting','pilot','closed','revenue') THEN 1 ELSE 0 END) AS active,
-               SUM(CASE WHEN revenue_stage IN ('closed','revenue') THEN 1 ELSE 0 END) AS closed,
-               SUM(COALESCE(close_value_cents, 0)) AS rev
-        FROM cfo_leads WHERE created_at >= DATE('now', '-30 days')
-      `);
-      if (pipelineTotals) {
-        const rev = pipelineTotals.rev > 0 ? ` | $${(pipelineTotals.rev / 100).toLocaleString()}` : '';
-        discordDesc += `\n\n**Pipeline (30d):** ${pipelineTotals.total} leads → ${pipelineTotals.active} active → ${pipelineTotals.closed} closed${rev}`;
-      }
-    } catch {}
-
-    // Revenue Radar in Discord
-    try {
-      const { runRevenueScan, formatForDiscord } = require('./revenueRadar');
-      const scan = runRevenueScan();
-      if (scan.moneyMoves.length > 0) {
-        const topMove = scan.moneyMoves[0];
-        const tag = topMove.priority === 'critical' ? '🔴' : topMove.priority === 'high' ? '🟠' : '🟡';
-        discordDesc += `\n\n${tag} **#1 Money Move:** ${topMove.action}`;
-        if (scan.moneyMoves.length > 1) {
-          discordDesc += `\n*(+ ${scan.moneyMoves.length - 1} more in full report)*`;
-        }
-      }
-    } catch {}
-
-    if (actions.length > 0) discordDesc += `\n**Overnight changes:** ${actions.length}`;
-    if (newPatterns.length > 0) discordDesc += `\n**Patterns learned:** ${newPatterns.filter(p => p.qa_verdict === 'PASS').length} approved`;
-
-    // Flag auto-disabled agents prominently
-    const disabledActions = actions.filter(a => a.action_type === 'schedule_disable');
-    if (disabledActions.length > 0) {
-      discordDesc += `\n\n⚠️ **Auto-disabled:** ${disabledActions.map(a => a.target).join(', ')}`;
+    if (criticals.length > 0) {
+      desc += criticals.map(d => `**${d.title}**\n> ${d.action}`).join('\n\n');
     }
+    if (highs.length > 0) {
+      if (desc) desc += '\n\n';
+      desc += highs.map(d => `${d.title}`).join('\n');
+    }
+    if (diagnostics.length === 0) desc = 'All systems nominal. No issues detected.';
 
+    // Compact health + pipeline
+    if (scorecards.length > 0) {
+      desc += '\n\n' + scorecards.map(c => `**${c.agent_name}**: ${c.grade}`).join(' | ');
+    }
+    try {
+      const pt = get("SELECT COUNT(*) AS t, SUM(CASE WHEN revenue_stage IN ('replied','meeting','pilot','closed','revenue') THEN 1 ELSE 0 END) AS a FROM cfo_leads WHERE created_at >= DATE('now', '-30 days')");
+      if (pt) desc += `\n**Pipeline:** ${pt.t} leads, ${pt.a} active (30d)`;
+    } catch {}
+
+    const color = criticals.length > 0 ? 0xe74c3c : highs.length > 0 ? 0xf39c12 : 0x2ecc71;
     await discord.sendEmbed({
-      title: `🏆 Dream Team Report — ${today}`,
-      description: discordDesc,
-      color: disabledActions.length > 0 ? 0xe74c3c : 0xf1c40f,
-      footer: { text: `Cost: ~$0.05 | Full report at /rse → Dream Team` },
+      title: `OpenClaw Briefing — ${today}`,
+      description: desc,
+      color,
+      footer: { text: `${diagnostics.length} finding(s) | $0 cost` },
     });
   } catch {}
 
   console.log(`[DreamTeam] Morning report generated for ${today}`);
   return get('SELECT * FROM dt_morning_reports WHERE report_date = ?', [today]);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SYSTEM DIAGNOSTICS — detect stalls, broken joints, biggest lever
+// ════════════════════════════════════════════════════════════════════════════
+
+function runDiagnostics() {
+  const findings = [];
+  const sev = (level, category, title, detail, action) =>
+    findings.push({ level, category, title, detail, action });
+
+  // ── 1. OUTREACH STALL: leads with emails not being contacted ────────────
+  try {
+    const queued = get("SELECT COUNT(*) c FROM cfo_leads WHERE status='queued' AND contact_email IS NOT NULL AND contact_email != ''")?.c || 0;
+    const sentRecently = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE sent_at > datetime('now','-7 days')")?.c || 0;
+    if (queued > 100 && sentRecently === 0) {
+      sev('critical', 'outreach', `${queued} leads with emails sitting unsent`,
+        `${queued} queued leads have email addresses but 0 emails sent in 7 days. The outreach pipeline is completely stalled.`,
+        'Check outreach_sender schedule and confirm-send flow. Leads are aging out.');
+    } else if (queued > 100 && sentRecently < 10) {
+      sev('high', 'outreach', `${queued} leads queued, only ${sentRecently} sent this week`,
+        'Outreach is trickling. At this rate it would take months to contact the backlog.',
+        'Increase sending cadence or batch size.');
+    }
+  } catch {}
+
+  // ── 2. DRAFT STALL: agents running but no drafts appearing ──────────────
+  try {
+    const recentOutreachRuns = get("SELECT COUNT(*) c FROM runs WHERE agent_id IN (SELECT id FROM agents WHERE name IN ('jake-outreach-agent','jake-follow-up-agent')) AND status='completed' AND created_at > datetime('now','-3 days')")?.c || 0;
+    const recentDrafts = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE created_at > datetime('now','-3 days') AND status='draft'")?.c || 0;
+    if (recentOutreachRuns > 5 && recentDrafts === 0) {
+      sev('high', 'pipeline', `${recentOutreachRuns} outreach runs completed but 0 new drafts`,
+        'Outreach agents are running and completing, but nothing is landing in the draft queue. Post-processor may be broken or output format changed.',
+        'Check postProcessor.js and recent agent output format.');
+    }
+  } catch {}
+
+  // ── 3. ENRICHMENT BOTTLENECK: leads without emails ──────────────────────
+  try {
+    const noEmail = get("SELECT COUNT(*) c FROM cfo_leads WHERE (contact_email IS NULL OR contact_email='') AND status NOT IN ('dead','closed','unsubscribed','bounced')")?.c || 0;
+    const enricherRan = get("SELECT COUNT(*) c FROM runs WHERE agent_id IN (SELECT id FROM agents WHERE name LIKE '%enricher%') AND status='completed' AND created_at > datetime('now','-3 days')")?.c || 0;
+    if (noEmail > 50) {
+      sev(enricherRan > 0 ? 'medium' : 'high', 'enrichment', `${noEmail} leads missing email addresses`,
+        `${noEmail} active leads have no email. ${enricherRan > 0 ? 'Enricher is running but not finding emails.' : 'Enricher has not run in 3 days.'}`,
+        enricherRan > 0 ? 'Check enrichment hit rate — may need better data sources.' : 'Check enricher schedule and agent health.');
+    }
+  } catch {}
+
+  // ── 4. ZOMBIE RUNS: stuck in running/pending ────────────────────────────
+  try {
+    const zombies = get("SELECT COUNT(*) c FROM runs WHERE status='running' AND created_at < datetime('now','-2 hours')")?.c || 0;
+    const stalePending = get("SELECT COUNT(*) c FROM runs WHERE status='pending' AND created_at < datetime('now','-1 day')")?.c || 0;
+    if (zombies > 0) {
+      sev('medium', 'health', `${zombies} runs stuck in 'running' for 2+ hours`,
+        'These are likely orphaned processes that will never complete.',
+        'Clean up with: UPDATE runs SET status=\'failed\' WHERE status=\'running\' AND created_at < datetime(\'now\',\'-2 hours\')');
+    }
+    if (stalePending > 5) {
+      sev('medium', 'health', `${stalePending} runs stuck in 'pending' for 24+ hours`,
+        'Pending runs that were never picked up for execution.',
+        'Check processPendingCadenceRuns in scheduleRunner.js');
+    }
+  } catch {}
+
+  // ── 5. AGENT FAILURE SPIKE ──────────────────────────────────────────────
+  try {
+    const failSpikes = all(`
+      SELECT a.name, COUNT(*) as fails,
+        (SELECT COUNT(*) FROM runs r2 WHERE r2.agent_id=a.id AND r2.status='completed' AND r2.created_at > datetime('now','-1 day')) as oks
+      FROM runs r JOIN agents a ON a.id=r.agent_id
+      WHERE r.status='failed' AND r.created_at > datetime('now','-1 day')
+      GROUP BY a.name HAVING fails >= 3 ORDER BY fails DESC LIMIT 5
+    `);
+    for (const f of failSpikes) {
+      const total = f.fails + f.oks;
+      const rate = Math.round(f.fails / total * 100);
+      if (rate > 30) {
+        sev('high', 'health', `${f.name}: ${f.fails}/${total} runs failed (${rate}%)`,
+          'This agent is failing at a high rate in the last 24 hours.',
+          'Check error_msg on recent failed runs for this agent.');
+      }
+    }
+  } catch {}
+
+  // ── 6. REPLY RATE CHECK: are we getting any signal back? ────────────────
+  try {
+    const sent30d = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE sent_at > datetime('now','-30 days') AND status IN ('sent','delivered','replied')")?.c || 0;
+    const replied30d = get("SELECT COUNT(*) c FROM cfo_outreach_sequences WHERE replied_at > datetime('now','-30 days')")?.c || 0;
+    if (sent30d >= 50 && replied30d === 0) {
+      sev('high', 'outreach', `${sent30d} emails sent in 30 days, 0 replies`,
+        'Zero reply rate suggests emails may be landing in spam, wrong contacts, or poor messaging.',
+        'Test deliverability. Check if emails are personalized. Review subject lines.');
+    } else if (sent30d >= 50) {
+      const rate = (replied30d / sent30d * 100).toFixed(1);
+      if (rate < 1) {
+        sev('medium', 'outreach', `Reply rate: ${rate}% (${replied30d}/${sent30d} in 30d)`,
+          'Below 1% reply rate. Industry average for cold outreach is 3-5%.',
+          'Review email copy, targeting, and send timing.');
+      }
+    }
+  } catch {}
+
+  // ── 7. SCHEDULE HEALTH: enabled schedules that haven't fired ────────────
+  try {
+    const dormant = all(`
+      SELECT name, agent_name, cron_expression, last_run_at
+      FROM schedules WHERE enabled=1 AND (last_run_at IS NULL OR last_run_at < datetime('now','-3 days'))
+    `);
+    const dormantCount = dormant.length;
+    if (dormantCount > 10) {
+      sev('medium', 'health', `${dormantCount} enabled schedules haven't fired in 3+ days`,
+        'These schedules are enabled but idle. Some may have cron expressions that only fire on specific days, but others may be broken.',
+        'Review schedule list — disable ones that serve no purpose.');
+    }
+  } catch {}
+
+  // ── 8. COST CHECK ──────────────────────────────────────────────────────
+  try {
+    const todayCost = get("SELECT COALESCE(SUM(cost_usd),0) as c FROM runs WHERE status='completed' AND DATE(created_at)=DATE('now')")?.c || 0;
+    const weekCost = get("SELECT COALESCE(SUM(cost_usd),0) as c FROM runs WHERE status='completed' AND created_at > datetime('now','-7 days')")?.c || 0;
+    if (todayCost > 5) {
+      sev('medium', 'cost', `$${todayCost.toFixed(2)} spent today`,
+        `Higher than normal daily spend. Weekly: $${weekCost.toFixed(2)}.`,
+        'Check if any agent is running more frequently than expected.');
+    }
+  } catch {}
+
+  // Sort: critical > high > medium
+  const levelOrder = { critical: 0, high: 1, medium: 2 };
+  findings.sort((a, b) => (levelOrder[a.level] || 9) - (levelOrder[b.level] || 9));
+
+  return findings;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -871,24 +809,50 @@ async function runFullCycle() {
   const startTime = Date.now();
   const errors = [];
 
+  // Purge old-roster scorecards (pre-deterministic rewrite agents)
+  const OLD_ROSTER = ['todd', 'scout', 'charlie', 'ralph', 'quill'];
+  try {
+    const placeholders = OLD_ROSTER.map(() => '?').join(',');
+    run(`DELETE FROM dt_scorecards WHERE agent_name IN (${placeholders})`, OLD_ROSTER);
+  } catch {}
+
   let snapshot, scorecards = [], proposals = [], qaResult = { approved: 0, rejected: 0 }, actions = [], report;
 
   try { snapshot = collectDailyData(); }
   catch (err) { errors.push(`collect: ${err.message}`); console.error('[DreamTeam] collectDailyData failed:', err.message); snapshot = { date: new Date().toISOString().slice(0, 10) }; }
 
-  try { scorecards = await scoreAgents(snapshot); }
+  // Ensure all numeric fields have defaults so scoring doesn't crash on undefined.toFixed()
+  const numericDefaults = {
+    runs_completed: 0, runs_failed: 0, total_cost: 0, leads_discovered: 0, leads_enriched: 0,
+    leads_complete: 0, content_drafted: 0, emails_drafted: 0, emails_sent: 0, emails_replied: 0,
+    rse_videos: 0, rse_signals: 0, brain_observations: 0, enrichment_attempted: 1,
+    enrichment_with_email: 0, enrichment_rate: 0, reply_rate: 0, leads_that_replied_30d: 0,
+    leads_discovered_30d: 0, meetings_booked_7d: 0, pilots_started_7d: 0, active_leads: 0,
+    replies_today: 0, pipeline_advances_today: 0, top_market_leads: 0, qa_submissions: 0,
+    qa_passes: 0, reviews_completed: 0, false_passes: 0, voice_rejections: 0,
+    ralph_approved_bounced: 0, ralph_approved_total: 0, content_published_7d: 0,
+    builds_attempted: 0, builds_completed: 0, avg_build_duration_s: 0, avg_build_cost: 0,
+    avg_review_duration_s: 0,
+  };
+  for (const [k, v] of Object.entries(numericDefaults)) {
+    if (snapshot[k] == null) snapshot[k] = v;
+  }
+
+  try { scorecards = scoreAgents(snapshot); }
   catch (err) { errors.push(`score: ${err.message}`); console.error('[DreamTeam] scoreAgents failed:', err.message); }
 
-  try { proposals = await selfAssessAndPropose(scorecards); }
-  catch (err) { errors.push(`propose: ${err.message}`); console.error('[DreamTeam] selfAssessAndPropose failed:', err.message); }
+  let diagnostics = [];
+  try { diagnostics = runDiagnostics(); }
+  catch (err) { errors.push(`diagnostics: ${err.message}`); console.error('[DreamTeam] runDiagnostics failed:', err.message); }
 
-  try { qaResult = await ralphQAGate(proposals); }
-  catch (err) { errors.push(`qa: ${err.message}`); console.error('[DreamTeam] ralphQAGate failed:', err.message); }
+  if (diagnostics.length > 0) {
+    console.log(`[DreamTeam] ${diagnostics.length} finding(s): ${diagnostics.filter(d=>d.level==='critical').length} critical, ${diagnostics.filter(d=>d.level==='high').length} high, ${diagnostics.filter(d=>d.level==='medium').length} medium`);
+  }
 
   try { actions = await toddOvernightActions(scorecards); }
   catch (err) { errors.push(`actions: ${err.message}`); console.error('[DreamTeam] toddOvernightActions failed:', err.message); }
 
-  try { report = await buildMorningReport(); }
+  try { report = await buildMorningReport(diagnostics); }
   catch (err) { errors.push(`report: ${err.message}`); console.error('[DreamTeam] buildMorningReport failed:', err.message); }
 
   const durationMs = Date.now() - startTime;
@@ -897,9 +861,8 @@ async function runFullCycle() {
 
   return {
     scorecards: scorecards.length,
-    proposals: proposals.length,
-    approved: qaResult.approved,
-    rejected: qaResult.rejected,
+    diagnostics: diagnostics.length,
+    criticals: diagnostics.filter(d => d.level === 'critical').length,
     actions: actions.length,
     durationMs,
     reportDate: report?.report_date,
@@ -913,24 +876,12 @@ async function runFullCycle() {
 
 function clamp(val, min, max) { return Math.max(min, Math.min(max, typeof val === 'number' ? val : 50)); }
 
-function parseJson(raw) {
-  if (!raw) return null;
-  let cleaned = raw.trim();
-  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-  try { return JSON.parse(cleaned); } catch {
-    const m = cleaned.match(/\{[\s\S]*\}/);
-    if (m) try { return JSON.parse(m[0]); } catch {}
-  }
-  return null;
-}
-
 module.exports = {
   collectDailyData,
   scoreAgents,
-  selfAssessAndPropose,
-  ralphQAGate,
   toddOvernightActions,
   buildMorningReport,
+  runDiagnostics,
   getActivePatterns,
   runFullCycle,
   DREAM_TEAM,
