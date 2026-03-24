@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import { LogOut, User, ChevronDown } from 'lucide-react';
+import { LogOut, User, ChevronDown, Menu } from 'lucide-react';
 import KillSwitch from './KillSwitch';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { useAgentStore } from '@/stores/useAgentStore';
@@ -15,7 +15,7 @@ import { NAV_ITEMS } from '@/lib/constants';
 
 export default function Header() {
   const location = useLocation();
-  const { user, logout } = useSettingsStore();
+  const { user, logout, sidebarCollapsed, toggleSidebar } = useSettingsStore();
   const { activeAgentCount } = useAgentStore();
   const { activeWorkspaceSlug, workspaces, switchWorkspace } = useWorkspace();
 
@@ -24,8 +24,15 @@ export default function Header() {
 
   return (
     <header className="h-16 px-8 flex items-center justify-between bg-bg-secondary border-b border-border shrink-0">
-      {/* Left: Page title + workspace switcher + agent count */}
+      {/* Left: Mobile menu + Page title + workspace switcher + agent count */}
       <div className="flex items-center gap-5">
+        <button
+          onClick={toggleSidebar}
+          className="md:hidden p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors cursor-pointer"
+          aria-label="Toggle navigation menu"
+        >
+          <Menu size={20} />
+        </button>
         <h1 className="text-lg font-semibold text-text-primary tracking-tight">{pageTitle}</h1>
 
         {/* Workspace Switcher */}

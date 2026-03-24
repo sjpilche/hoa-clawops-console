@@ -35,7 +35,7 @@
 
   --color-text-primary:   #F1F5F9;
   --color-text-secondary: #94A3B8;
-  --color-text-muted:     #475569;
+  --color-text-muted:     #64748B;
 
   --color-accent-primary: #06B6D4;
   --color-accent-success: #10B981;
@@ -47,6 +47,10 @@
   --color-chat-agent:     #1A2332;
   --color-chat-system:    #1C1917;
 
+  /* --- Semantic color additions --- */
+  --color-bg-hover:       #1A2332;
+  --color-border-subtle:  #1E293B80;
+
   /* --- Campaign Theming --- */
   /* This variable is dynamically set by CampaignThemeProvider */
   --campaign-accent:      var(--color-accent-primary);
@@ -54,6 +58,47 @@
   /* --- Fonts --- */
   --font-sans:  'IBM Plex Sans', system-ui, sans-serif;
   --font-mono:  'IBM Plex Mono', ui-monospace, monospace;
+
+  /* --- Shadow System (dark theme: depth via opacity, accent via glow) --- */
+  --shadow-sm:           0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:           0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg:           0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow-primary: 0 0 12px rgba(6, 182, 212, 0.15);
+  --shadow-glow-success: 0 0 12px rgba(16, 185, 129, 0.15);
+  --shadow-glow-danger:  0 0 12px rgba(239, 68, 68, 0.15);
+  --shadow-glow-warning: 0 0 12px rgba(245, 158, 11, 0.15);
+  --shadow-glow-info:    0 0 12px rgba(139, 92, 246, 0.15);
+
+  /* --- Font Size Scale --- */
+  --font-size-xs:   0.75rem;   /* 12px */
+  --font-size-sm:   0.875rem;  /* 14px */
+  --font-size-base: 1rem;      /* 16px */
+  --font-size-lg:   1.125rem;  /* 18px */
+  --font-size-xl:   1.5rem;    /* 24px */
+  --font-size-2xl:  2rem;      /* 32px */
+  --font-size-3xl:  2.5rem;    /* 40px */
+
+  /* --- Status Colors (agent states) --- */
+  --color-status-active:    #34D399;
+  --color-status-idle:      #94A3B8;
+  --color-status-running:   #60A5FA;
+  --color-status-error:     #F87171;
+  --color-status-paused:    #FBBF24;
+
+  /* --- Domain Colors (agent grouping) --- */
+  --color-domain-marketing:   #34D399;
+  --color-domain-pipeline:    #60A5FA;
+  --color-domain-intel:       #22D3EE;
+  --color-domain-research:    #A78BFA;
+  --color-domain-jake:        #FB7185;
+  --color-domain-core:        #94A3B8;
+
+  /* --- Border Radius Scale --- */
+  --radius-sm:   0.375rem;
+  --radius-md:   0.5rem;
+  --radius-lg:   0.75rem;
+  --radius-xl:   1rem;
+  --radius-full: 9999px;
 }
 
 /* ============================================================================
@@ -122,4 +167,35 @@ body {
 
 .status-running {
   animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+/* ============================================================================
+ * ANIMATIONS — Toast, tooltip, page transitions
+ * ============================================================================ */
+
+/* Toast slide in from right */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+/* Tooltip / generic fade in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+/* Page mount transition */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-page-enter {
+  animation: page-enter 0.2s ease-out;
 }
