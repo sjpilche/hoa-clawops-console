@@ -8,6 +8,10 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import StatCard from '@/components/ui/StatCard';
+import Badge from '@/components/ui/Badge';
+import Tabs from '@/components/ui/Tabs';
+import ProgressBar from '@/components/ui/ProgressBar';
 
 const STATUS_BADGE = {
   pending:  'bg-gray-500/20 text-gray-300',
@@ -595,14 +599,6 @@ export default function MgmtResearchPage() {
   );
 }
 
-function StatCard({ label, value, color }) {
-  return (
-    <div className="bg-bg-surface border border-border-subtle rounded-lg p-3 text-center">
-      <div className={`text-2xl font-bold ${color || 'text-text-primary'}`}>{value}</div>
-      <div className="text-xs text-text-muted mt-1">{label}</div>
-    </div>
-  );
-}
 
 function PipelineDot({ done, label }) {
   return (

@@ -21,6 +21,12 @@ import {
 import { api } from '../lib/api';
 import { useCampaign } from '../context/CampaignContext';
 import { CampaignForm } from '../components/campaigns/CampaignForm';
+import StatCard from '../components/ui/StatCard';
+import SectionHeader from '../components/ui/SectionHeader';
+import Badge from '../components/ui/Badge';
+import DataTable from '../components/ui/DataTable';
+import ProgressBar from '../components/ui/ProgressBar';
+import Button from '../components/ui/Button';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,29 +55,6 @@ function nextRunLabel(cronExpr) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function KpiCard({ icon: Icon, label, value, sub, color = 'text-accent-primary', to }) {
-  const inner = (
-    <div className="p-5 bg-bg-secondary border border-border rounded-xl hover:border-accent-primary/40 transition-colors group">
-      <div className="flex items-start justify-between mb-3">
-        <div className={`p-2 rounded-lg bg-bg-elevated ${color.replace('text-', 'text-')}`}>
-          <Icon size={18} className={color} />
-        </div>
-        {to && (
-          <span className="text-xs text-text-muted group-hover:text-accent-primary transition-colors">
-            View →
-          </span>
-        )}
-      </div>
-      <div className="text-2xl font-bold text-text-primary font-mono leading-none mb-1">
-        {value ?? '—'}
-      </div>
-      <div className="text-xs text-text-muted">{label}</div>
-      {sub && <div className="text-xs text-text-muted mt-0.5 opacity-70">{sub}</div>}
-    </div>
-  );
-  return to ? <Link to={to}>{inner}</Link> : inner;
-}
-
 function RunStatusIcon({ status }) {
   switch (status) {
     case 'success':
@@ -87,38 +70,11 @@ function RunStatusIcon({ status }) {
   }
 }
 
-function RunStatusBadge({ status }) {
-  const map = {
-    success:   'bg-accent-success/10 text-accent-success',
-    completed: 'bg-accent-success/10 text-accent-success',
-    failed:    'bg-accent-danger/10 text-accent-danger',
-    error:     'bg-accent-danger/10 text-accent-danger',
-    running:   'bg-accent-info/10 text-accent-info',
-    pending:   'bg-accent-warning/10 text-accent-warning',
-    cancelled: 'bg-bg-elevated text-text-muted',
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[status] || 'bg-bg-elevated text-text-muted'}`}>
-      {status}
-    </span>
-  );
-}
-
-function SectionHeader({ title, to, linkLabel = 'View all' }) {
-  return (
-    <div className="flex items-center justify-between mb-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-text-muted">{title}</h2>
-      {to && (
-        <Link to={to} className="text-xs text-accent-primary hover:underline">{linkLabel}</Link>
-      )}
-    </div>
-  );
-}
-
-function EmptyState({ message }) {
-  return (
-    <div className="text-center py-8 text-text-muted text-sm">{message}</div>
-  );
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -181,6 +137,49 @@ export default function GlobalOverview() {
     { label: 'Contacts Enriched', value: discoveryStats.totalCommunities - discoveryStats.awaitingContactEnrichment, color: 'bg-emerald-500' },
   ] : [];
 
+  // DataTable columns for live activity
+  const activityColumns = [
+    {
+      key: 'agent_name',
+      label: 'Agent',
+      render: (val, row) => (
+        <div className="flex items-center gap-2">
+          <RunStatusIcon status={row.status} />
+          <span className="text-text-primary font-medium truncate max-w-[180px]">
+            {val || 'Unknown Agent'}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      hideBelow: 'sm',
+      render: (val) => <Badge variant={Badge.variantFromStatus(val)}>{val}</Badge>,
+    },
+    {
+      key: 'cost_usd',
+      label: 'Cost',
+      align: 'right',
+      hideBelow: 'md',
+      render: (val) => (
+        <span className="font-mono text-xs text-text-muted">
+          {val ? `$${Number(val).toFixed(4)}` : '\u2014'}
+        </span>
+      ),
+    },
+    {
+      key: 'started_at',
+      label: 'When',
+      align: 'right',
+      render: (val, row) => (
+        <span className="text-xs text-text-muted">
+          {relativeTime(val || row.created_at)}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-6 max-w-7xl mx-auto space-y-8">
@@ -188,43 +187,39 @@ export default function GlobalOverview() {
         {/* ── Page header ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-text-primary">Operations Dashboard</h1>
+            <h1 className="text-2xl font-bold text-text-primary">
+              {getGreeting()}
+            </h1>
             <p className="text-sm text-text-muted mt-0.5">
               {lastRefreshed
-                ? `Last updated ${relativeTime(lastRefreshed.toISOString())} · auto-refreshes every 30s`
-                : 'Loading…'}
+                ? `Last updated ${relativeTime(lastRefreshed.toISOString())} \u00b7 auto-refreshes every 30s`
+                : 'Loading\u2026'}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={fetchAll}
-              disabled={isRefreshing}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-bg-secondary border border-border rounded-lg hover:bg-bg-elevated transition-colors text-text-secondary disabled:opacity-50"
-            >
+            <Button variant="outline" size="sm" onClick={fetchAll} disabled={isRefreshing}>
               <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
               Refresh
-            </button>
-            <button
-              onClick={() => setIsFormOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-primary text-white rounded-lg hover:bg-opacity-90 transition-all font-medium text-sm"
-            >
+            </Button>
+            <Button size="sm" onClick={() => setIsFormOpen(true)}>
               <Plus size={14} />
               New Campaign
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* ── KPI bar ─────────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-          <KpiCard
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          <StatCard
             icon={Bot}
             label="Agents"
             value={agents.length}
             sub={runningAgents > 0 ? `${runningAgents} running` : 'none running'}
             color="text-accent-primary"
+            glow={runningAgents > 0}
             to="/agents"
           />
-          <KpiCard
+          <StatCard
             icon={Activity}
             label="Runs Today"
             value={todayRuns}
@@ -232,23 +227,23 @@ export default function GlobalOverview() {
             color="text-accent-info"
             to="/results"
           />
-          <KpiCard
+          <StatCard
             icon={MapPin}
             label="HOAs Found"
-            value={discoveryStats?.totalCommunities?.toLocaleString() ?? '—'}
+            value={discoveryStats?.totalCommunities?.toLocaleString() ?? '\u2014'}
             sub="Google Maps pipeline"
-            color="text-orange-400"
+            color="text-accent-warning"
             to="/discovery"
           />
-          <KpiCard
+          <StatCard
             icon={Building2}
             label="Needs Contacts"
-            value={discoveryStats?.awaitingContactEnrichment?.toLocaleString() ?? '—'}
+            value={discoveryStats?.awaitingContactEnrichment?.toLocaleString() ?? '\u2014'}
             sub="contact enrichment"
-            color="text-emerald-400"
+            color="text-accent-success"
             to="/discovery"
           />
-          <KpiCard
+          <StatCard
             icon={Clock}
             label="Schedules"
             value={enabledSchedules.length}
@@ -256,10 +251,10 @@ export default function GlobalOverview() {
             color="text-accent-primary"
             to="/schedule"
           />
-          <KpiCard
+          <StatCard
             icon={DollarSign}
             label="Spend Today"
-            value={costSummary ? `$${costSummary.cost_last_24h.toFixed(3)}` : '—'}
+            value={costSummary ? `$${costSummary.cost_last_24h.toFixed(3)}` : '\u2014'}
             sub={costSummary ? `$${costSummary.cost_last_7d.toFixed(2)} this week` : ''}
             color="text-accent-warning"
             to="/costs"
@@ -274,46 +269,12 @@ export default function GlobalOverview() {
 
             {/* Live activity feed */}
             <section>
-              <SectionHeader title="Live Activity" to="/results" />
-              <div className="bg-bg-secondary border border-border rounded-xl overflow-hidden">
-                {recentRuns.length === 0 ? (
-                  <EmptyState message="No agent runs yet. Run an agent from the Scheduler or Agents tab." />
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wider">
-                        <th className="text-left px-4 py-2.5 font-medium">Agent</th>
-                        <th className="text-left px-4 py-2.5 font-medium hidden sm:table-cell">Status</th>
-                        <th className="text-right px-4 py-2.5 font-medium hidden md:table-cell">Cost</th>
-                        <th className="text-right px-4 py-2.5 font-medium">When</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {recentRuns.map(run => (
-                        <tr key={run.id} className="hover:bg-bg-elevated transition-colors">
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <RunStatusIcon status={run.status} />
-                              <span className="text-text-primary font-medium truncate max-w-[180px]">
-                                {run.agent_name || 'Unknown Agent'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2.5 hidden sm:table-cell">
-                            <RunStatusBadge status={run.status} />
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-mono text-xs text-text-muted hidden md:table-cell">
-                            {run.cost_usd ? `$${Number(run.cost_usd).toFixed(4)}` : '—'}
-                          </td>
-                          <td className="px-4 py-2.5 text-right text-xs text-text-muted">
-                            {relativeTime(run.started_at || run.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+              <SectionHeader title="Live Activity" to="/results" count={recentRuns.length} />
+              <DataTable
+                columns={activityColumns}
+                data={recentRuns}
+                emptyMessage="No agent runs yet. Run an agent from the Scheduler or Agents tab."
+              />
             </section>
 
             {/* Discovery pipeline funnel */}
@@ -321,24 +282,27 @@ export default function GlobalOverview() {
               <section>
                 <SectionHeader title="HOA Discovery Pipeline" to="/discovery" />
                 <div className="bg-bg-secondary border border-border rounded-xl p-5 space-y-3">
-                  {pipelineFunnel.map(stage => {
+                  {pipelineFunnel.map((stage, i) => {
                     const pct = discoveryStats.totalCommunities > 0
                       ? Math.round((stage.value / discoveryStats.totalCommunities) * 100)
                       : 0;
+                    const prevPct = i > 0 && pipelineFunnel[i - 1].value > 0
+                      ? Math.round((stage.value / pipelineFunnel[i - 1].value) * 100)
+                      : null;
                     return (
                       <div key={stage.label}>
                         <div className="flex justify-between text-xs mb-1">
-                          <span className="text-text-secondary">{stage.label}</span>
+                          <span className="text-text-secondary">
+                            {stage.label}
+                            {prevPct !== null && (
+                              <span className="text-text-muted ml-1.5">({prevPct}% conv.)</span>
+                            )}
+                          </span>
                           <span className="text-text-primary font-mono font-semibold">
                             {stage.value.toLocaleString()} <span className="text-text-muted font-normal">({pct}%)</span>
                           </span>
                         </div>
-                        <div className="h-1.5 bg-bg-elevated rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${stage.color} rounded-full transition-all duration-700`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
+                        <ProgressBar value={pct} color={stage.color} size="sm" />
                       </div>
                     );
                   })}
@@ -361,13 +325,13 @@ export default function GlobalOverview() {
                         className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shrink-0"
                         style={{ background: `${c.color || '#3b82f6'}20` }}
                       >
-                        {c.icon || '🎯'}
+                        {c.icon || '\uD83C\uDFAF'}
                       </div>
                       <div className="min-w-0">
                         <div className="font-medium text-text-primary truncate text-sm">{c.name}</div>
                         <div className="text-xs text-text-muted">{c.company || c.type}</div>
                       </div>
-                      <span className="ml-auto text-xs text-text-muted group-hover:text-accent-primary transition-colors shrink-0">→</span>
+                      <span className="ml-auto text-xs text-text-muted group-hover:text-accent-primary transition-colors shrink-0">&rarr;</span>
                     </Link>
                   ))}
                 </div>
@@ -409,22 +373,22 @@ export default function GlobalOverview() {
                     </div>
                   </>
                 ) : (
-                  <EmptyState message="No cost data yet." />
+                  <div className="text-center py-8 text-text-muted text-sm">No cost data yet.</div>
                 )}
               </div>
             </section>
 
             {/* Enabled schedules */}
             <section>
-              <SectionHeader title="Schedules" to="/schedule" />
+              <SectionHeader title="Schedules" to="/schedule" count={enabledSchedules.length} />
               <div className="bg-bg-secondary border border-border rounded-xl overflow-hidden">
                 {enabledSchedules.length === 0 ? (
-                  <EmptyState message="No enabled schedules." />
+                  <div className="text-center py-8 text-text-muted text-sm">No enabled schedules.</div>
                 ) : (
                   <div className="divide-y divide-border">
                     {enabledSchedules.slice(0, 6).map(s => (
                       <div key={s.id} className="px-4 py-3 flex items-start gap-3">
-                        <div className="w-2 h-2 rounded-full bg-accent-success mt-1.5 shrink-0" />
+                        <Badge variant="success" dot pulse size="sm" className="mt-1.5">&nbsp;</Badge>
                         <div className="min-w-0 flex-1">
                           <div className="text-sm text-text-primary font-medium truncate">{s.name}</div>
                           <div className="text-xs text-text-muted truncate">{s.agentName}</div>
@@ -445,9 +409,9 @@ export default function GlobalOverview() {
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { label: 'Run Agent', to: '/agents', icon: Bot, color: 'text-accent-primary' },
-                  { label: 'Discovery', to: '/discovery', icon: MapPin, color: 'text-orange-400' },
+                  { label: 'Discovery', to: '/discovery', icon: MapPin, color: 'text-accent-warning' },
                   { label: 'Content Queue', to: '/content-queue', icon: Send, color: 'text-accent-info' },
-                  { label: 'Mgmt Research', to: '/mgmt-research', icon: Building2, color: 'text-accent-warning' },
+                  { label: 'Mgmt Research', to: '/mgmt-research', icon: Building2, color: 'text-accent-success' },
                 ].map(link => (
                   <Link
                     key={link.to}

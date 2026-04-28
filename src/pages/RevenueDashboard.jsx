@@ -8,6 +8,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, FunnelChart, Funnel, LabelList,
 } from 'recharts';
+import StatCard from '@/components/ui/StatCard';
+import Tabs from '@/components/ui/Tabs';
+import Badge from '@/components/ui/Badge';
+import Button from '@/components/ui/Button';
+import { CHART_TOOLTIP, CHART_GRID, CHART_AXIS } from '@/lib/chartTheme';
 
 const STAGE_COLORS = {
   discovered: '#6b7280',
@@ -135,65 +140,54 @@ export default function RevenueDashboard() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <KpiCard
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        <StatCard
           icon={DollarSign}
           label="Total Revenue"
           value={formatDollars(funnel?.totalRevenueDollars)}
-          color="text-green-500"
+          color="text-accent-success"
         />
-        <KpiCard
+        <StatCard
           icon={Target}
           label="Deals Won"
           value={funnel?.dealCount || 0}
           sub={`Avg ${formatDollars(funnel?.avgDealDollars)}`}
-          color="text-green-500"
+          color="text-accent-success"
         />
-        <KpiCard
+        <StatCard
           icon={Users}
           label="Total Leads"
           value={funnel?.counts ? Object.values(funnel.counts).reduce((a, b) => a + b, 0) : 0}
           sub={`+ ${hoaFunnel?.counts ? Object.values(hoaFunnel.counts).reduce((a, b) => a + b, 0) : 0} HOA`}
-          color="text-blue-400"
+          color="text-accent-primary"
         />
-        <KpiCard
+        <StatCard
           icon={TrendingUp}
           label="Contact → Reply"
           value={`${funnel?.rates?.contacted_to_replied || 0}%`}
-          color="text-purple-400"
+          color="text-accent-info"
         />
-        <KpiCard
+        <StatCard
           icon={Zap}
           label="Reply → Meeting"
           value={`${funnel?.rates?.replied_to_meeting || 0}%`}
-          color="text-yellow-400"
+          color="text-accent-warning"
         />
-        <KpiCard
+        <StatCard
           icon={Clock}
           label="Avg Days to Close"
-          value={funnel?.avgDaysToClose ?? '—'}
+          value={funnel?.avgDaysToClose ?? '\u2014'}
           sub="days"
-          color="text-orange-400"
+          color="text-accent-warning"
         />
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-bg-secondary border border-border rounded-lg p-1">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-              activeTab === tab.id
-                ? 'bg-accent-primary/20 text-accent-primary font-medium'
-                : 'text-text-muted hover:text-text-primary'
-            }`}
-          >
-            <tab.icon size={14} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={tabs.map(t => ({ key: t.id, label: t.label, icon: t.icon }))}
+        activeTab={activeTab}
+        onChange={setActiveTab}
+      />
 
       {/* Tab Content */}
       {activeTab === 'funnel' && <FunnelTab data={funnelData} funnel={funnel} hoaFunnel={hoaFunnel} />}
@@ -202,21 +196,6 @@ export default function RevenueDashboard() {
       {activeTab === 'variants' && <VariantsTab variants={variants} group={variantGroup} onGroupChange={fetchVariants} />}
       {activeTab === 'engagement' && <EngagementTab leads={engagement} />}
       {activeTab === 'cycle' && <CycleTimeTab data={cycleTime} />}
-    </div>
-  );
-}
-
-// ─── KPI Card ────────────────────────────────────────────────────────────────
-
-function KpiCard({ icon: Icon, label, value, sub, color = 'text-accent-primary' }) {
-  return (
-    <div className="p-4 bg-bg-secondary border border-border rounded-xl hover:border-accent-primary/40 transition-colors">
-      <div className="flex items-center gap-2 mb-2">
-        <Icon size={16} className={color} />
-        <span className="text-xs text-text-muted uppercase tracking-wide">{label}</span>
-      </div>
-      <div className="text-2xl font-bold text-text-primary font-mono">{value ?? '—'}</div>
-      {sub && <div className="text-xs text-text-muted mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -236,7 +215,7 @@ function FunnelTab({ data, funnel, hoaFunnel }) {
               <XAxis type="number" stroke="#94a3b8" fontSize={12} />
               <YAxis type="category" dataKey="name" stroke="#94a3b8" fontSize={12} width={80} />
               <Tooltip
-                contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }}
+                contentStyle={CHART_TOOLTIP.contentStyle}
                 labelStyle={{ color: '#e2e8f0' }}
                 itemStyle={{ color: '#94a3b8' }}
               />
@@ -368,7 +347,7 @@ function VariantsTab({ variants, group, onGroupChange }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="variant" stroke="#94a3b8" fontSize={11} angle={-20} textAnchor="end" height={60} />
                 <YAxis stroke="#94a3b8" fontSize={12} />
-                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
+                <Tooltip contentStyle={CHART_TOOLTIP.contentStyle} />
                 <Bar dataKey="reply_rate" name="Reply %" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="conversion_rate" name="Convert %" fill="#22c55e" radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -477,7 +456,7 @@ function CycleTimeTab({ data }) {
                 tickFormatter={(v) => STAGE_LABELS[v] || v} />
               <YAxis stroke="#94a3b8" fontSize={12} label={{ value: 'Days', angle: -90, position: 'insideLeft', style: { fill: '#94a3b8' } }} />
               <Tooltip
-                contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }}
+                contentStyle={CHART_TOOLTIP.contentStyle}
                 formatter={(value, name) => [`${value} days`, name === 'avg_days_in_stage' ? 'Avg Days' : name]}
                 labelFormatter={(v) => STAGE_LABELS[v] || v}
               />
@@ -522,7 +501,7 @@ function ContentPerfTab({ data }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="pillar" stroke="#94a3b8" fontSize={11} />
               <YAxis stroke="#94a3b8" fontSize={12} />
-              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
+              <Tooltip contentStyle={CHART_TOOLTIP.contentStyle} />
               <Bar dataKey="avg_score" name="Avg Score" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
               <Bar dataKey="total_leads" name="Total Leads" fill="#22c55e" radius={[4, 4, 0, 0]} />
             </BarChart>

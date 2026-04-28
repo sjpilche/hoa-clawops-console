@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import Button from '@/components/ui/Button';
+import StatCard from '@/components/ui/StatCard';
+import Badge from '@/components/ui/Badge';
 import OfficeScene from '@/components/dreamteam/OfficeScene';
 
 const AGENT_META = {

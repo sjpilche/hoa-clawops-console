@@ -6,8 +6,11 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, TrendingUp, AlertTriangle, RefreshCw } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-
-const COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1'];
+import StatCard from '@/components/ui/StatCard';
+import SectionHeader from '@/components/ui/SectionHeader';
+import Button from '@/components/ui/Button';
+import Tabs from '@/components/ui/Tabs';
+import { CHART_COLORS, CHART_TOOLTIP, CHART_GRID, CHART_AXIS } from '@/lib/chartTheme';
 
 export default function CostDashboardPage() {
   const [summary, setSummary] = useState(null);
@@ -92,40 +95,31 @@ export default function CostDashboardPage() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-bg-elevated p-4 rounded-lg border border-border">
-            <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Total Cost</div>
-            <div className="text-2xl font-bold text-accent-success font-mono">
-              {formatCurrency(summary.total_cost)}
-            </div>
-            <div className="text-xs text-text-muted mt-1">
-              {formatNumber(summary.total_runs)} runs
-            </div>
-          </div>
-
-          <div className="bg-bg-elevated p-4 rounded-lg border border-border">
-            <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Avg Cost/Run</div>
-            <div className="text-2xl font-bold text-text-primary font-mono">
-              {formatCurrency(summary.avg_cost_per_run)}
-            </div>
-            <div className="text-xs text-text-muted mt-1">
-              {formatNumber(summary.total_tokens)} tokens
-            </div>
-          </div>
-
-          <div className="bg-bg-elevated p-4 rounded-lg border border-border">
-            <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Last 24 Hours</div>
-            <div className="text-2xl font-bold text-accent-info font-mono">
-              {formatCurrency(summary.cost_last_24h)}
-            </div>
-          </div>
-
-          <div className="bg-bg-elevated p-4 rounded-lg border border-border">
-            <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Last 7 Days</div>
-            <div className="text-2xl font-bold text-purple-400 font-mono">
-              {formatCurrency(summary.cost_last_7d)}
-            </div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            icon={DollarSign}
+            label="Total Cost"
+            value={formatCurrency(summary.total_cost)}
+            sub={`${formatNumber(summary.total_runs)} runs`}
+            color="text-accent-success"
+          />
+          <StatCard
+            icon={TrendingUp}
+            label="Avg Cost/Run"
+            value={formatCurrency(summary.avg_cost_per_run)}
+            sub={`${formatNumber(summary.total_tokens)} tokens`}
+            color="text-accent-primary"
+          />
+          <StatCard
+            label="Last 24 Hours"
+            value={formatCurrency(summary.cost_last_24h)}
+            color="text-accent-info"
+          />
+          <StatCard
+            label="Last 7 Days"
+            value={formatCurrency(summary.cost_last_7d)}
+            color="text-accent-info"
+          />
         </div>
       )}
 
@@ -181,7 +175,7 @@ export default function CostDashboardPage() {
               <XAxis dataKey="period" stroke="var(--color-text-muted, #888)" fontSize={12} />
               <YAxis stroke="var(--color-text-muted, #888)" fontSize={12} />
               <Tooltip
-                contentStyle={{ background: '#1a1a2e', border: '1px solid #333', borderRadius: 8 }}
+                contentStyle={CHART_TOOLTIP.contentStyle}
                 labelStyle={{ color: '#999' }}
                 formatter={(value, name) => {
                   if (name === 'cost') return formatCurrency(value);
@@ -218,11 +212,11 @@ export default function CostDashboardPage() {
                     labelLine={{ stroke: '#555' }}
                   >
                     {byAgent.slice(0, 6).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: '#1a1a2e', border: '1px solid #333', borderRadius: 8 }}
+                    contentStyle={CHART_TOOLTIP.contentStyle}
                     formatter={(value) => formatCurrency(value)}
                   />
                 </PieChart>
@@ -231,7 +225,7 @@ export default function CostDashboardPage() {
                 {byAgent.slice(0, 5).map((agent, index) => (
                   <div key={agent.agent_id} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }} />
                       <span className="font-medium text-text-primary">{agent.agent_name || 'Unknown'}</span>
                     </div>
                     <div className="text-text-muted font-mono text-xs">

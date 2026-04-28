@@ -27,6 +27,9 @@ import {
   Wifi, WifiOff, Brain, Zap, Target, BarChart3, Users,
   Clock, Play, Eye, Award, Skull, BookOpen,
 } from 'lucide-react';
+import SharedStatCard from '@/components/ui/StatCard';
+import SharedBadge from '@/components/ui/Badge';
+import SharedTabs from '@/components/ui/Tabs';
 
 const TRADER_BASE = import.meta.env.VITE_TRADER_URL || 'http://localhost:3002';
 

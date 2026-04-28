@@ -10,19 +10,13 @@ import {
   RefreshCw, Clock, XCircle, TrendingUp,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import StatCard from '@/components/ui/StatCard';
+import Badge from '@/components/ui/Badge';
 
-function MetricCard({ icon: Icon, label, value, subtitle, color = 'text-accent-primary' }) {
-  return (
-    <div className="bg-bg-elevated border border-border rounded-xl p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <Icon size={16} className={color} />
-        <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">{label}</span>
-      </div>
-      <div className={`text-3xl font-bold font-data ${color}`}>{value}</div>
-      {subtitle && <div className="text-xs text-text-muted mt-1">{subtitle}</div>}
-    </div>
-  );
-}
+// Alias for compatibility — MonitorPage used MetricCard
+const MetricCard = ({ icon, label, value, subtitle, color }) => (
+  <StatCard icon={icon} label={label} value={value} sub={subtitle} color={color} />
+);
 
 const STATUS_ICON = {
   running: <RefreshCw size={14} className="text-accent-warning animate-spin" />,

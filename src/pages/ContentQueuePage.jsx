@@ -26,20 +26,15 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-// ── Status badge ────────────────────────────────────────────────────────────
+import Badge from '@/components/ui/Badge';
 
+// StatusBadge wrapper using shared Badge
 function StatusBadge({ status }) {
-  const map = {
-    pending:  { label: 'Pending',  cls: 'bg-yellow-500/20 text-yellow-400' },
-    posted:   { label: 'Posted',   cls: 'bg-green-500/20 text-green-400' },
-    failed:   { label: 'Failed',   cls: 'bg-red-500/20 text-red-400' },
-    skipped:  { label: 'Skipped',  cls: 'bg-gray-500/20 text-gray-400' },
-  };
-  const { label, cls } = map[status] || { label: status, cls: 'bg-gray-500/20 text-gray-400' };
+  const labelMap = { pending: 'Pending', posted: 'Posted', failed: 'Failed', skipped: 'Skipped' };
   return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${cls}`}>
-      {label}
-    </span>
+    <Badge variant={Badge.variantFromStatus(status === 'posted' ? 'success' : status)}>
+      {labelMap[status] || status}
+    </Badge>
   );
 }
 

@@ -19,6 +19,7 @@ import {
   Archive, Search, HardDrive, AlertTriangle
 } from 'lucide-react';
 import { api } from '../lib/api';
+import Badge from '@/components/ui/Badge';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

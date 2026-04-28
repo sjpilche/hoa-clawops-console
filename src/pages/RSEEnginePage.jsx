@@ -18,6 +18,8 @@ import {
   ChevronDown, ChevronRight, Lightbulb, Code, DollarSign,
   SlidersHorizontal, RefreshCw, Power,
 } from 'lucide-react';
+import SharedStatCard from '@/components/ui/StatCard';
+import Badge from '@/components/ui/Badge';
 
 // ── Fetch helpers ───────────────────────────────────────────────────────────
 

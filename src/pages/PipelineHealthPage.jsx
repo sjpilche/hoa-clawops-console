@@ -17,6 +17,9 @@ import {
   Zap, AlertTriangle, Clock, CheckCircle2, Activity,
   RefreshCw, Users, BarChart2, TrendingUp, Send,
 } from 'lucide-react';
+import StatCard from '@/components/ui/StatCard';
+import Badge from '@/components/ui/Badge';
+import { CHART_TOOLTIP } from '@/lib/chartTheme';
 
 // ── Stage colour palette (consistent across Jake + HOA) ──────────────────────
 const STAGE_COLORS = {
@@ -40,19 +43,7 @@ async function fetchPipelineHealth() {
   return api.get('/pipeline/health');
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ label, value, icon: Icon, color = 'text-text-primary', sub }) {
-  return (
-    <div className="bg-bg-secondary border border-border rounded-lg p-4 flex flex-col gap-1">
-      <div className="flex items-center gap-2 text-text-muted text-xs font-medium uppercase tracking-wide">
-        {Icon && <Icon size={14} />}
-        {label}
-      </div>
-      <div className={`text-2xl font-bold ${color}`}>{value ?? '—'}</div>
-      {sub && <div className="text-xs text-text-muted">{sub}</div>}
-    </div>
-  );
-}
+// StatCard imported from shared components
 
 // ── Stage distribution pie ────────────────────────────────────────────────────
 function StagePie({ byStage, title }) {

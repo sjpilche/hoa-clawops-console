@@ -1,46 +1,17 @@
+/**
+ * @file DiscoveryDashboard.jsx
+ * @description HOA Discovery Pipeline dashboard — migrated to shared components + Tailwind.
+ */
 import { useState, useEffect, useCallback } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, MapPin, Globe, Star, ExternalLink } from "lucide-react";
+import StatCard from "@/components/ui/StatCard";
+import Badge from "@/components/ui/Badge";
+import Tabs from "@/components/ui/Tabs";
+import ProgressBar from "@/components/ui/ProgressBar";
+import SectionHeader from "@/components/ui/SectionHeader";
+import Button from "@/components/ui/Button";
 
 const API_BASE = "/api/discovery";
-
-// ── Status badge ─────────────────────────────────────────────────
-const STATUS_CLASSES = {
-  success: "bg-accent-success/10 text-accent-success border-accent-success/30",
-  running: "bg-accent-info/10 text-accent-info border-accent-info/30",
-  failed: "bg-accent-danger/10 text-accent-danger border-accent-danger/30",
-  pending: "bg-bg-secondary text-text-muted border-border",
-};
-
-function StatusBadge({ status }) {
-  const cls = STATUS_CLASSES[status] || STATUS_CLASSES.pending;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider border ${cls}`}>
-      <span className={`w-1.5 h-1.5 rounded-full bg-current ${status === "running" ? "animate-pulse" : ""}`} />
-      {status}
-    </span>
-  );
-}
-
-// ── Stat card ────────────────────────────────────────────────────
-const ACCENT_CLASSES = {
-  "#f97316": "text-accent-warning",
-  "#22c55e": "text-accent-success",
-  "#60a5fa": "text-accent-info",
-  "#8b5cf6": "text-purple-400",
-};
-
-function StatCard({ label, value, sub, accent = "#f97316" }) {
-  const accentClass = ACCENT_CLASSES[accent] || "text-accent-warning";
-  return (
-    <div className="bg-bg-elevated border border-border rounded-lg p-4 min-w-[160px] flex-1">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-2">{label}</div>
-      <div className={`text-3xl font-bold leading-none font-mono ${accentClass}`}>
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </div>
-      {sub && <div className="text-xs text-text-muted mt-1.5">{sub}</div>}
-    </div>
-  );
-}
 
 // ── Communities Browser ──────────────────────────────────────────
 function CommunitiesBrowser() {
@@ -72,131 +43,90 @@ function CommunitiesBrowser() {
   }, [page, sortBy, search, state, geoTargetId, maxRating]);
 
   useEffect(() => { fetchCommunities(); }, [fetchCommunities]);
-
-  // Reset page when filters change
   useEffect(() => { setPage(1); }, [search, state, geoTargetId, maxRating]);
 
   const ratingColor = (r) => {
-    if (!r) return "#555";
-    if (r <= 2.5) return "#ef4444";
-    if (r <= 3.5) return "#f97316";
-    return "#22c55e";
+    if (!r) return "text-text-muted";
+    if (r <= 2.5) return "text-accent-danger";
+    if (r <= 3.5) return "text-accent-warning";
+    return "text-accent-success";
   };
+
+  const selectClass = "px-3 py-2 bg-bg-elevated border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:border-accent-primary";
 
   return (
     <div>
       {/* Filters */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+      <div className="flex gap-2.5 mb-4 flex-wrap">
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search name, city, address..."
-          style={{
-            flex: "2 1 220px", padding: "8px 12px", background: "#111",
-            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
-            fontSize: 13, outline: "none",
-          }}
+          className="flex-[2_1_220px] px-3 py-2 bg-bg-elevated border border-border rounded-lg text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary"
         />
-        <select
-          value={geoTargetId}
-          onChange={e => setGeoTargetId(e.target.value)}
-          style={{
-            flex: "1 1 180px", padding: "8px 12px", background: "#111",
-            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
-            fontSize: 13, cursor: "pointer",
-          }}
-        >
+        <select value={geoTargetId} onChange={e => setGeoTargetId(e.target.value)} className={`flex-[1_1_180px] ${selectClass}`}>
           <option value="">All Markets</option>
           {(data?.geoTargets || []).map(g => (
             <option key={g.id} value={g.id}>{g.name} ({g.count})</option>
           ))}
         </select>
-        <select
-          value={state}
-          onChange={e => setState(e.target.value)}
-          style={{
-            flex: "0 1 110px", padding: "8px 12px", background: "#111",
-            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
-            fontSize: 13, cursor: "pointer",
-          }}
-        >
+        <select value={state} onChange={e => setState(e.target.value)} className={`flex-[0_1_110px] ${selectClass}`}>
           <option value="">All States</option>
           {(data?.states || []).map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select
-          value={maxRating}
-          onChange={e => setMaxRating(e.target.value)}
-          style={{
-            flex: "0 1 170px", padding: "8px 12px", background: "#111",
-            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
-            fontSize: 13, cursor: "pointer",
-          }}
-        >
+        <select value={maxRating} onChange={e => setMaxRating(e.target.value)} className={`flex-[0_1_170px] ${selectClass}`}>
           <option value="">All Ratings</option>
-          <option value="2.5">Low (≤ 2.5★) — Hot leads</option>
-          <option value="3.0">Under 3.0★</option>
-          <option value="3.5">Under 3.5★</option>
+          <option value="2.5">Low (≤ 2.5) — Hot leads</option>
+          <option value="3.0">Under 3.0</option>
+          <option value="3.5">Under 3.5</option>
         </select>
-        <select
-          value={sortBy}
-          onChange={e => setSortBy(e.target.value)}
-          style={{
-            flex: "0 1 160px", padding: "8px 12px", background: "#111",
-            border: "1px solid #2a2a2a", borderRadius: 6, color: "#e5e5e5",
-            fontSize: 13, cursor: "pointer",
-          }}
-        >
-          <option value="google_rating">Sort: Rating ↓</option>
-          <option value="review_count">Sort: Reviews ↓</option>
-          <option value="name">Sort: Name A–Z</option>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className={`flex-[0_1_160px] ${selectClass}`}>
+          <option value="google_rating">Sort: Rating</option>
+          <option value="review_count">Sort: Reviews</option>
+          <option value="name">Sort: Name A-Z</option>
           <option value="discovered_at">Sort: Newest</option>
         </select>
       </div>
 
-      {/* Results count */}
-      <div style={{ fontSize: 12, color: "#555", marginBottom: 12 }}>
+      <div className="text-xs text-text-muted mb-3">
         {loading ? "Loading..." : `${(data?.total || 0).toLocaleString()} communities${data?.pages > 1 ? ` — page ${page} of ${data.pages}` : ""}`}
       </div>
 
       {/* Table */}
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
           <thead>
-            <tr style={{ borderBottom: "1px solid #222", color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Name</th>
-              <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>City, State</th>
-              <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Market</th>
-              <th style={{ textAlign: "right", padding: "8px 0", paddingRight: 16 }}>Rating</th>
-              <th style={{ textAlign: "right", padding: "8px 0", paddingRight: 16 }}>Reviews</th>
-              <th style={{ textAlign: "left", padding: "8px 0" }}>Links</th>
+            <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wider">
+              <th className="text-left py-2 pr-4 font-medium">Name</th>
+              <th className="text-left py-2 pr-4 font-medium">City, State</th>
+              <th className="text-left py-2 pr-4 font-medium hidden md:table-cell">Market</th>
+              <th className="text-right py-2 pr-4 font-medium">Rating</th>
+              <th className="text-right py-2 pr-4 font-medium hidden sm:table-cell">Reviews</th>
+              <th className="text-left py-2 font-medium">Links</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-border">
             {(data?.communities || []).map((c, i) => (
-              <tr key={c.id || i} style={{ borderBottom: "1px solid #161616" }}>
-                <td style={{ padding: "9px 0", paddingRight: 16, fontWeight: 500, color: "#ddd", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {c.name}
+              <tr key={c.id || i} className="hover:bg-bg-elevated transition-colors">
+                <td className="py-2.5 pr-4 font-medium text-text-primary max-w-[220px] truncate">{c.name}</td>
+                <td className="py-2.5 pr-4 text-text-secondary whitespace-nowrap">
+                  {c.city ? `${c.city}, ${c.state || ""}` : (c.state || "\u2014")}
                 </td>
-                <td style={{ padding: "9px 0", paddingRight: 16, color: "#888", whiteSpace: "nowrap" }}>
-                  {c.city ? `${c.city}, ${c.state || ""}` : (c.state || "—")}
+                <td className="py-2.5 pr-4 text-text-muted text-xs hidden md:table-cell whitespace-nowrap max-w-[140px] truncate">
+                  {c.geo_target_id ? c.geo_target_id.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()) : "\u2014"}
                 </td>
-                <td style={{ padding: "9px 0", paddingRight: 16, color: "#555", fontSize: 11, whiteSpace: "nowrap", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {c.geo_target_id
-                    ? c.geo_target_id.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase())
-                    : "—"}
+                <td className={`py-2.5 pr-4 text-right font-mono font-semibold ${ratingColor(c.google_rating)}`}>
+                  {c.google_rating ? `${c.google_rating}` : "\u2014"}
                 </td>
-                <td style={{ padding: "9px 0", paddingRight: 16, textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: ratingColor(c.google_rating) }}>
-                  {c.google_rating ? `★ ${c.google_rating}` : "—"}
+                <td className="py-2.5 pr-4 text-right font-mono text-text-muted hidden sm:table-cell">
+                  {c.review_count?.toLocaleString() || "\u2014"}
                 </td>
-                <td style={{ padding: "9px 0", paddingRight: 16, textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#666" }}>
-                  {c.review_count?.toLocaleString() || "—"}
-                </td>
-                <td style={{ padding: "9px 0" }}>
+                <td className="py-2.5 flex items-center gap-2">
                   {c.google_maps_url && (
-                    <a href={c.google_maps_url} target="_blank" rel="noopener" style={{ color: "#60a5fa", fontSize: 12, marginRight: 8, textDecoration: "none" }}>Maps</a>
+                    <a href={c.google_maps_url} target="_blank" rel="noopener" className="text-accent-primary text-xs hover:underline">Maps</a>
                   )}
                   {c.website_url && (
-                    <a href={c.website_url} target="_blank" rel="noopener" style={{ color: "#a78bfa", fontSize: 12, textDecoration: "none" }}>Site</a>
+                    <a href={c.website_url} target="_blank" rel="noopener" className="text-accent-info text-xs hover:underline">Site</a>
                   )}
                 </td>
               </tr>
@@ -207,24 +137,10 @@ function CommunitiesBrowser() {
 
       {/* Pagination */}
       {data?.pages > 1 && (
-        <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "center" }}>
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            style={{ padding: "6px 14px", background: "#161616", color: page === 1 ? "#333" : "#888", border: "1px solid #2a2a2a", borderRadius: 6, cursor: page === 1 ? "default" : "pointer", fontSize: 13 }}
-          >
-            ← Prev
-          </button>
-          <span style={{ padding: "6px 14px", color: "#666", fontSize: 13 }}>
-            {page} / {data.pages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(data.pages, p + 1))}
-            disabled={page === data.pages}
-            style={{ padding: "6px 14px", background: "#161616", color: page === data.pages ? "#333" : "#888", border: "1px solid #2a2a2a", borderRadius: 6, cursor: page === data.pages ? "default" : "pointer", fontSize: 13 }}
-          >
-            Next →
-          </button>
+        <div className="flex gap-2 mt-4 justify-center items-center">
+          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Prev</Button>
+          <span className="text-sm text-text-muted px-3">{page} / {data.pages}</span>
+          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages}>Next</Button>
         </div>
       )}
     </div>
@@ -253,13 +169,13 @@ export default function DiscoveryDashboard() {
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 30000); // Refresh every 30s
+    const interval = setInterval(fetchStats, 30000);
     return () => clearInterval(interval);
   }, [fetchStats]);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg-primary flex items-center justify-center text-text-muted text-sm gap-2">
+      <div className="flex items-center justify-center h-64 text-text-muted text-sm gap-2">
         <RefreshCw size={16} className="animate-spin" /> Loading pipeline data...
       </div>
     );
@@ -267,645 +183,184 @@ export default function DiscoveryDashboard() {
 
   if (error && !stats) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          background: "#0a0a0a",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#ef4444",
-          fontFamily: "'Inter', system-ui, sans-serif",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
-        <div style={{ fontSize: 18, fontWeight: 600 }}>Connection Error</div>
-        <div style={{ fontSize: 13, color: "#888" }}>{error}</div>
-        <button
-          onClick={fetchStats}
-          style={{
-            marginTop: 8,
-            padding: "8px 20px",
-            background: "#222",
-            color: "#ccc",
-            border: "1px solid #333",
-            borderRadius: 6,
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          Retry
-        </button>
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <div className="text-lg font-semibold text-accent-danger">Connection Error</div>
+        <div className="text-sm text-text-muted">{error}</div>
+        <Button variant="outline" size="sm" onClick={fetchStats}>Retry</Button>
       </div>
     );
   }
 
-  // Use mock data for preview when no API is available
   const data = stats || {
-    totalCommunities: 0,
-    awaitingScrape: 0,
-    awaitingReviewScan: 0,
-    awaitingContactEnrichment: 0,
-    managementCompanies: 0,
-    byState: [],
-    recentRuns: [],
-    lowRatedCommunities: [],
+    totalCommunities: 0, awaitingScrape: 0, awaitingReviewScan: 0,
+    awaitingContactEnrichment: 0, managementCompanies: 0,
+    byState: [], recentRuns: [], lowRatedCommunities: [],
   };
 
   const tabs = [
-    { id: "overview", label: "Overview" },
-    { id: "communities", label: "Communities" },
-    { id: "runs", label: "Run History" },
-    { id: "signals", label: "Hot Signals" },
-    { id: "geo", label: "Geo Coverage" },
+    { key: "overview", label: "Overview" },
+    { key: "communities", label: "Communities" },
+    { key: "runs", label: "Run History" },
+    { key: "signals", label: "Hot Signals" },
+    { key: "geo", label: "Geo Coverage" },
+  ];
+
+  const pipelineFunnel = [
+    { label: "Discovered", value: data.totalCommunities, color: "bg-accent-warning", pct: 100 },
+    { label: "Website Scraped", value: data.totalCommunities - data.awaitingScrape, color: "bg-accent-primary", pct: data.totalCommunities > 0 ? Math.round(((data.totalCommunities - data.awaitingScrape) / data.totalCommunities) * 100) : 0 },
+    { label: "Reviews Scanned", value: data.totalCommunities - data.awaitingReviewScan, color: "bg-accent-info", pct: data.totalCommunities > 0 ? Math.round(((data.totalCommunities - data.awaitingReviewScan) / data.totalCommunities) * 100) : 0 },
+    { label: "Contacts Enriched", value: data.totalCommunities - data.awaitingContactEnrichment, color: "bg-accent-success", pct: data.totalCommunities > 0 ? Math.round(((data.totalCommunities - data.awaitingContactEnrichment) / data.totalCommunities) * 100) : 0 },
   ];
 
   return (
-    <div className="min-h-screen bg-bg-primary text-text-primary px-8 py-6">
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-      `}</style>
-
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          marginBottom: 32,
-        }}
-      >
+      <div className="flex items-center justify-between">
         <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "1.5px",
-              color: "#f97316",
-              marginBottom: 6,
-            }}
-          >
-            HOA Lead Engine
-          </div>
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              color: "#fff",
-              margin: 0,
-              letterSpacing: "-0.5px",
-            }}
-          >
-            Discovery Pipeline
-          </h1>
-          <div style={{ fontSize: 13, color: "#555", marginTop: 4 }}>
-            Google Maps → Contact Scrape → Email Enrichment → Review Monitor
-          </div>
+          <div className="text-xs font-semibold uppercase tracking-widest text-accent-warning mb-1">HOA Lead Engine</div>
+          <h1 className="text-2xl font-bold text-text-primary">Discovery Pipeline</h1>
+          <p className="text-sm text-text-muted mt-0.5">Google Maps &rarr; Contact Scrape &rarr; Email Enrichment &rarr; Review Monitor</p>
         </div>
-        <button
-          onClick={fetchStats}
-          style={{
-            padding: "8px 16px",
-            background: "#161616",
-            color: "#888",
-            border: "1px solid #2a2a2a",
-            borderRadius: 6,
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          ↻ Refresh
-        </button>
+        <Button variant="outline" size="sm" onClick={fetchStats}>
+          <RefreshCw size={14} /> Refresh
+        </Button>
       </div>
 
       {/* Stat Cards */}
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          marginBottom: 28,
-          flexWrap: "wrap",
-        }}
-      >
-        <StatCard
-          label="Communities Found"
-          value={data.totalCommunities}
-          accent="#f97316"
-        />
-        <StatCard
-          label="Awaiting Scrape"
-          value={data.awaitingScrape}
-          sub="Website → Board contacts"
-          accent="#60a5fa"
-        />
-        <StatCard
-          label="Awaiting Reviews"
-          value={data.awaitingReviewScan}
-          sub="Google Reviews scan"
-          accent="#a78bfa"
-        />
-        <StatCard
-          label="Needs Contacts"
-          value={data.awaitingContactEnrichment}
-          sub="Email enrichment"
-          accent="#34d399"
-        />
-        <StatCard
-          label="Mgmt Companies"
-          value={data.managementCompanies}
-          sub="Potential partners"
-          accent="#fbbf24"
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+        <StatCard icon={MapPin} label="Communities Found" value={data.totalCommunities.toLocaleString()} color="text-accent-warning" />
+        <StatCard label="Awaiting Scrape" value={data.awaitingScrape.toLocaleString()} sub="Website → Board contacts" color="text-accent-primary" />
+        <StatCard label="Awaiting Reviews" value={data.awaitingReviewScan.toLocaleString()} sub="Google Reviews scan" color="text-accent-info" />
+        <StatCard label="Needs Contacts" value={data.awaitingContactEnrichment.toLocaleString()} sub="Email enrichment" color="text-accent-success" />
+        <StatCard label="Mgmt Companies" value={data.managementCompanies.toLocaleString()} sub="Potential partners" color="text-accent-warning" />
       </div>
 
       {/* Tabs */}
-      <div
-        style={{
-          display: "flex",
-          gap: 0,
-          marginBottom: 24,
-          borderBottom: "1px solid #1a1a1a",
-        }}
-      >
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: "10px 20px",
-              background: "transparent",
-              color: activeTab === tab.id ? "#f97316" : "#555",
-              border: "none",
-              borderBottom:
-                activeTab === tab.id
-                  ? "2px solid #f97316"
-                  : "2px solid transparent",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              letterSpacing: "0.3px",
-              transition: "all 0.2s",
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 
       {/* Tab Content */}
       {activeTab === "overview" && (
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* State breakdown */}
-          <div
-            style={{
-              background: "#111",
-              border: "1px solid #1e1e1e",
-              borderRadius: 10,
-              padding: 20,
-              flex: "2 1 400px",
-            }}
-          >
-            <h3
-              style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: "#888",
-                marginTop: 0,
-                marginBottom: 16,
-              }}
-            >
-              Communities by State
-            </h3>
+          <div className="lg:col-span-2 bg-bg-secondary border border-border rounded-xl p-5">
+            <SectionHeader title="Communities by State" />
             {data.byState.length === 0 ? (
-              <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>
-                No communities discovered yet. Run the discovery agent to
-                populate.
-              </div>
+              <div className="text-text-muted text-sm py-8 text-center">No communities discovered yet. Run the discovery agent to populate.</div>
             ) : (
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 13,
-                }}
-              >
-                <thead>
-                  <tr
-                    style={{
-                      borderBottom: "1px solid #222",
-                      color: "#555",
-                      fontSize: 11,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.5px",
-                    }}
-                  >
-                    <th style={{ textAlign: "left", padding: "8px 0" }}>
-                      State
-                    </th>
-                    <th style={{ textAlign: "right", padding: "8px 0" }}>
-                      Count
-                    </th>
-                    <th style={{ textAlign: "right", padding: "8px 0" }}>
-                      Avg Rating
-                    </th>
-                    <th style={{ textAlign: "right", padding: "8px 0" }}>
-                      Total Reviews
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.byState.map((row) => (
-                    <tr
-                      key={row.state}
-                      style={{ borderBottom: "1px solid #1a1a1a" }}
-                    >
-                      <td style={{ padding: "10px 0", fontWeight: 600 }}>
-                        {row.state}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          padding: "10px 0",
-                          fontFamily: "'JetBrains Mono', monospace",
-                          color: "#f97316",
-                        }}
-                      >
-                        {row.count.toLocaleString()}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          padding: "10px 0",
-                          color: row.avg_rating <= 3.0 ? "#ef4444" : "#888",
-                        }}
-                      >
-                        {row.avg_rating ? `★ ${row.avg_rating}` : "—"}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          padding: "10px 0",
-                          color: "#666",
-                        }}
-                      >
-                        {(row.total_reviews || 0).toLocaleString()}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wider">
+                      <th className="text-left py-2 font-medium">State</th>
+                      <th className="text-right py-2 font-medium">Count</th>
+                      <th className="text-right py-2 font-medium">Avg Rating</th>
+                      <th className="text-right py-2 font-medium">Total Reviews</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {data.byState.map((row) => (
+                      <tr key={row.state} className="hover:bg-bg-elevated transition-colors">
+                        <td className="py-2.5 font-semibold text-text-primary">{row.state}</td>
+                        <td className="py-2.5 text-right font-mono text-accent-warning">{row.count.toLocaleString()}</td>
+                        <td className={`py-2.5 text-right ${row.avg_rating <= 3.0 ? 'text-accent-danger' : 'text-text-secondary'}`}>
+                          {row.avg_rating ? `${row.avg_rating}` : "\u2014"}
+                        </td>
+                        <td className="py-2.5 text-right text-text-muted">{(row.total_reviews || 0).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
           {/* Pipeline funnel */}
-          <div
-            style={{
-              background: "#111",
-              border: "1px solid #1e1e1e",
-              borderRadius: 10,
-              padding: 20,
-              flex: "1 1 280px",
-            }}
-          >
-            <h3
-              style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: "#888",
-                marginTop: 0,
-                marginBottom: 16,
-              }}
-            >
-              Pipeline Funnel
-            </h3>
-            {[
-              {
-                label: "Discovered",
-                count: data.totalCommunities,
-                color: "#f97316",
-                pct: 100,
-              },
-              {
-                label: "Website Scraped",
-                count:
-                  data.totalCommunities - data.awaitingScrape,
-                color: "#60a5fa",
-                pct:
-                  data.totalCommunities > 0
-                    ? Math.round(
-                        ((data.totalCommunities - data.awaitingScrape) /
-                          data.totalCommunities) *
-                          100
-                      )
-                    : 0,
-              },
-              {
-                label: "Reviews Scanned",
-                count:
-                  data.totalCommunities - data.awaitingReviewScan,
-                color: "#a78bfa",
-                pct:
-                  data.totalCommunities > 0
-                    ? Math.round(
-                        ((data.totalCommunities - data.awaitingReviewScan) /
-                          data.totalCommunities) *
-                          100
-                      )
-                    : 0,
-              },
-              {
-                label: "Contacts Enriched",
-                count:
-                  data.totalCommunities - data.awaitingContactEnrichment,
-                color: "#34d399",
-                pct:
-                  data.totalCommunities > 0
-                    ? Math.round(
-                        ((data.totalCommunities -
-                          data.awaitingContactEnrichment) /
-                          data.totalCommunities) *
-                          100
-                      )
-                    : 0,
-              },
-            ].map((stage) => (
-              <div key={stage.label} style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 12,
-                    marginBottom: 4,
-                  }}
-                >
-                  <span style={{ color: "#aaa" }}>{stage.label}</span>
-                  <span
-                    style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      color: stage.color,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {stage.count.toLocaleString()} ({stage.pct}%)
-                  </span>
+          <div className="bg-bg-secondary border border-border rounded-xl p-5">
+            <SectionHeader title="Pipeline Funnel" />
+            <div className="space-y-4">
+              {pipelineFunnel.map((stage) => (
+                <div key={stage.label}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-text-secondary">{stage.label}</span>
+                    <span className="font-mono font-semibold text-text-primary">
+                      {stage.value.toLocaleString()} <span className="text-text-muted font-normal">({stage.pct}%)</span>
+                    </span>
+                  </div>
+                  <ProgressBar value={stage.pct} color={stage.color} size="sm" />
                 </div>
-                <div
-                  style={{
-                    height: 6,
-                    background: "#1a1a1a",
-                    borderRadius: 3,
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${stage.pct}%`,
-                      background: stage.color,
-                      borderRadius: 3,
-                      transition: "width 0.5s ease",
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {activeTab === "communities" && (
-        <div
-          style={{
-            background: "#111",
-            border: "1px solid #1e1e1e",
-            borderRadius: 10,
-            padding: 20,
-          }}
-        >
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#888", marginTop: 0, marginBottom: 16 }}>
-            Discovered Communities
-          </h3>
+        <div className="bg-bg-secondary border border-border rounded-xl p-5">
+          <SectionHeader title="Discovered Communities" />
           <CommunitiesBrowser />
         </div>
       )}
 
       {activeTab === "runs" && (
-        <div
-          style={{
-            background: "#111",
-            border: "1px solid #1e1e1e",
-            borderRadius: 10,
-            padding: 20,
-          }}
-        >
-          <h3
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#888",
-              marginTop: 0,
-              marginBottom: 16,
-            }}
-          >
-            Recent Discovery Runs
-          </h3>
+        <div className="bg-bg-secondary border border-border rounded-xl p-5">
+          <SectionHeader title="Recent Discovery Runs" />
           {data.recentRuns.length === 0 ? (
-            <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>
-              No runs yet. Start the discovery agent via OpenClaw or the API.
-            </div>
+            <div className="text-text-muted text-sm py-8 text-center">No runs yet. Start the discovery agent via OpenClaw or the API.</div>
           ) : (
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 13,
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: "1px solid #222",
-                    color: "#555",
-                    fontSize: 11,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  <th style={{ textAlign: "left", padding: "8px 0" }}>
-                    Geo Target
-                  </th>
-                  <th style={{ textAlign: "left", padding: "8px 0" }}>
-                    Status
-                  </th>
-                  <th style={{ textAlign: "right", padding: "8px 0" }}>
-                    Results
-                  </th>
-                  <th style={{ textAlign: "right", padding: "8px 0" }}>New</th>
-                  <th style={{ textAlign: "right", padding: "8px 0" }}>
-                    Updated
-                  </th>
-                  <th style={{ textAlign: "right", padding: "8px 0" }}>
-                    Started
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recentRuns.map((run) => (
-                  <tr
-                    key={run.id}
-                    style={{ borderBottom: "1px solid #1a1a1a" }}
-                  >
-                    <td style={{ padding: "10px 0", fontWeight: 500 }}>
-                      {run.geo_target || "—"}
-                    </td>
-                    <td style={{ padding: "10px 0" }}>
-                      <StatusBadge status={run.status} />
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        padding: "10px 0",
-                        fontFamily: "'JetBrains Mono', monospace",
-                      }}
-                    >
-                      {(run.results_count || 0).toLocaleString()}
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        padding: "10px 0",
-                        fontFamily: "'JetBrains Mono', monospace",
-                        color: "#34d399",
-                      }}
-                    >
-                      +{run.new_records || 0}
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        padding: "10px 0",
-                        fontFamily: "'JetBrains Mono', monospace",
-                        color: "#888",
-                      }}
-                    >
-                      {run.updated_records || 0}
-                    </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        padding: "10px 0",
-                        color: "#555",
-                        fontSize: 12,
-                      }}
-                    >
-                      {run.started_at
-                        ? new Date(run.started_at).toLocaleString()
-                        : "—"}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wider">
+                    <th className="text-left py-2 font-medium">Geo Target</th>
+                    <th className="text-left py-2 font-medium">Status</th>
+                    <th className="text-right py-2 font-medium">Results</th>
+                    <th className="text-right py-2 font-medium">New</th>
+                    <th className="text-right py-2 font-medium hidden sm:table-cell">Updated</th>
+                    <th className="text-right py-2 font-medium hidden md:table-cell">Started</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {data.recentRuns.map((run) => (
+                    <tr key={run.id} className="hover:bg-bg-elevated transition-colors">
+                      <td className="py-2.5 font-medium text-text-primary">{run.geo_target || "\u2014"}</td>
+                      <td className="py-2.5"><Badge variant={Badge.variantFromStatus(run.status)} dot>{run.status}</Badge></td>
+                      <td className="py-2.5 text-right font-mono text-text-primary">{(run.results_count || 0).toLocaleString()}</td>
+                      <td className="py-2.5 text-right font-mono text-accent-success">+{run.new_records || 0}</td>
+                      <td className="py-2.5 text-right font-mono text-text-muted hidden sm:table-cell">{run.updated_records || 0}</td>
+                      <td className="py-2.5 text-right text-text-muted text-xs hidden md:table-cell">
+                        {run.started_at ? new Date(run.started_at).toLocaleString() : "\u2014"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
       {activeTab === "signals" && (
-        <div
-          style={{
-            background: "#111",
-            border: "1px solid #1e1e1e",
-            borderRadius: 10,
-            padding: 20,
-          }}
-        >
-          <h3
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#888",
-              marginTop: 0,
-              marginBottom: 4,
-            }}
-          >
-            Low-Rated Communities
-          </h3>
-          <div style={{ fontSize: 12, color: "#555", marginBottom: 16 }}>
-            ★ ≤ 3.0 with 5+ reviews — high probability of deferred maintenance
-          </div>
+        <div className="bg-bg-secondary border border-border rounded-xl p-5">
+          <SectionHeader title="Low-Rated Communities" />
+          <p className="text-xs text-text-muted mb-4">Rating 3.0 or below with 5+ reviews — high probability of deferred maintenance</p>
           {data.lowRatedCommunities.length === 0 ? (
-            <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>
-              No low-rated communities found yet.
-            </div>
+            <div className="text-text-muted text-sm py-8 text-center">No low-rated communities found yet.</div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="flex flex-col gap-2">
               {data.lowRatedCommunities.map((comm, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "12px 16px",
-                    background: "#0d0d0d",
-                    borderRadius: 8,
-                    border: "1px solid #1a1a1a",
-                  }}
-                >
+                <div key={i} className="flex items-center justify-between p-4 bg-bg-elevated rounded-xl border border-border hover:border-accent-danger/30 transition-colors">
                   <div>
-                    <div
-                      style={{
-                        fontWeight: 600,
-                        fontSize: 14,
-                        color: "#e5e5e5",
-                      }}
-                    >
-                      {comm.name}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
+                    <div className="font-semibold text-text-primary">{comm.name}</div>
+                    <div className="text-xs text-text-muted mt-0.5">
                       {comm.city}, {comm.state}
                       {comm.website_url && (
-                        <>
-                          {" "}
-                          ·{" "}
-                          <a
-                            href={comm.website_url}
-                            target="_blank"
-                            rel="noopener"
-                            style={{
-                              color: "#60a5fa",
-                              textDecoration: "none",
-                            }}
-                          >
-                            website
-                          </a>
-                        </>
+                        <> &middot; <a href={comm.website_url} target="_blank" rel="noopener" className="text-accent-primary hover:underline">website</a></>
                       )}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div
-                      style={{
-                        fontSize: 18,
-                        fontWeight: 700,
-                        color: "#ef4444",
-                        fontFamily: "'JetBrains Mono', monospace",
-                      }}
-                    >
-                      ★ {comm.google_rating}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#555" }}>
-                      {comm.review_count} reviews
-                    </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-accent-danger font-mono">{comm.google_rating}</div>
+                    <div className="text-xs text-text-muted">{comm.review_count} reviews</div>
                   </div>
                 </div>
               ))}
@@ -915,69 +370,48 @@ export default function DiscoveryDashboard() {
       )}
 
       {activeTab === "geo" && (
-        <div
-          style={{
-            background: "#111",
-            border: "1px solid #1e1e1e",
-            borderRadius: 10,
-            padding: 20,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#888", margin: 0 }}>
-              Market Coverage — {data.geoTargets?.length || 19} Geo-Targets
-            </h3>
-            <div style={{ fontSize: 12, color: "#555" }}>
-              2 runs/day · full cycle ~10 days
-            </div>
+        <div className="bg-bg-secondary border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <SectionHeader title={`Market Coverage — ${data.geoTargets?.length || 0} Geo-Targets`} />
+            <span className="text-xs text-text-muted">2 runs/day &middot; full cycle ~10 days</span>
           </div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #222", color: "#555", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Market</th>
-                <th style={{ textAlign: "right", padding: "8px 0", paddingRight: 16 }}>HOAs Found</th>
-                <th style={{ textAlign: "left", padding: "8px 0", paddingRight: 16 }}>Last Sweep</th>
-                <th style={{ textAlign: "left", padding: "8px 0" }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data.geoTargets || []).map((gt) => {
-                const swept = !!gt.last_sweep_at;
-                const sweepDate = swept ? new Date(gt.last_sweep_at).toLocaleDateString() : null;
-                const daysSince = swept
-                  ? Math.floor((Date.now() - new Date(gt.last_sweep_at)) / 86400000)
-                  : null;
-                return (
-                  <tr key={gt.id} style={{ borderBottom: "1px solid #161616" }}>
-                    <td style={{ padding: "9px 0", paddingRight: 16, fontWeight: 500, color: "#ddd" }}>
-                      {gt.name}
-                    </td>
-                    <td style={{ padding: "9px 0", paddingRight: 16, textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: gt.community_count > 0 ? "#f97316" : "#333" }}>
-                      {gt.community_count > 0 ? gt.community_count.toLocaleString() : "—"}
-                    </td>
-                    <td style={{ padding: "9px 0", paddingRight: 16, color: "#666", fontSize: 12 }}>
-                      {sweepDate ? `${sweepDate} (${daysSince}d ago)` : "—"}
-                    </td>
-                    <td style={{ padding: "9px 0" }}>
-                      {swept ? (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#0d2818", color: "#22c55e", border: "1px solid #166534" }}>
-                          ● done
-                        </span>
-                      ) : (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: "#1c1917", color: "#a3a3a3", border: "1px solid #404040" }}>
-                          ○ pending
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-text-muted uppercase tracking-wider">
+                  <th className="text-left py-2 pr-4 font-medium">Market</th>
+                  <th className="text-right py-2 pr-4 font-medium">HOAs Found</th>
+                  <th className="text-left py-2 pr-4 font-medium hidden sm:table-cell">Last Sweep</th>
+                  <th className="text-left py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(data.geoTargets || []).map((gt) => {
+                  const swept = !!gt.last_sweep_at;
+                  const sweepDate = swept ? new Date(gt.last_sweep_at).toLocaleDateString() : null;
+                  const daysSince = swept ? Math.floor((Date.now() - new Date(gt.last_sweep_at)) / 86400000) : null;
+                  return (
+                    <tr key={gt.id} className="hover:bg-bg-elevated transition-colors">
+                      <td className="py-2.5 pr-4 font-medium text-text-primary">{gt.name}</td>
+                      <td className={`py-2.5 pr-4 text-right font-mono ${gt.community_count > 0 ? 'text-accent-warning' : 'text-text-muted'}`}>
+                        {gt.community_count > 0 ? gt.community_count.toLocaleString() : "\u2014"}
+                      </td>
+                      <td className="py-2.5 pr-4 text-text-muted text-xs hidden sm:table-cell">
+                        {sweepDate ? `${sweepDate} (${daysSince}d ago)` : "\u2014"}
+                      </td>
+                      <td className="py-2.5">
+                        <Badge variant={swept ? "success" : "neutral"} dot size="sm">
+                          {swept ? "done" : "pending"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {(!data.geoTargets || data.geoTargets.length === 0) && (
-            <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>
-              No geo-targets found. Run: node scripts/seed-geo-targets.js
-            </div>
+            <div className="text-text-muted text-sm py-8 text-center">No geo-targets found. Run: node scripts/seed-geo-targets.js</div>
           )}
         </div>
       )}

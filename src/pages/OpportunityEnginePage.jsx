@@ -15,6 +15,8 @@ import {
   Activity, CheckCircle2, XCircle, Radio, ToggleLeft, ToggleRight,
   ExternalLink, Hash, Clock, Filter,
 } from 'lucide-react';
+import StatCard from '@/components/ui/StatCard';
+import Badge from '@/components/ui/Badge';
 
 // ── Fetch helpers ───────────────────────────────────────────────────────────
 
@@ -27,20 +29,7 @@ const fetchSignals = (limit, offset, source) => {
 const fetchClusters = (limit, minScore) => api.get(`/opportunities/clusters?limit=${limit}&min_score=${minScore}`);
 const fetchScanners = () => api.get('/opportunities/scanners');
 
-// ── Stat Card ───────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, icon: Icon, color = 'text-text-primary', sub }) {
-  return (
-    <div className="bg-bg-secondary border border-border rounded-lg p-4 flex flex-col gap-1">
-      <div className="flex items-center gap-2 text-text-muted text-xs font-medium uppercase tracking-wide">
-        {Icon && <Icon size={14} />}
-        {label}
-      </div>
-      <div className={`text-2xl font-bold ${color}`}>{value}</div>
-      {sub && <div className="text-xs text-text-muted">{sub}</div>}
-    </div>
-  );
-}
+// StatCard imported from shared components
 
 // ── Score Badge ─────────────────────────────────────────────────────────────
 
