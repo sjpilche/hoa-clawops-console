@@ -431,7 +431,7 @@ async function toddOvernightActions(scorecards) {
             title: `⚠️ Agent Auto-Disabled: ${ar.agent_name}`,
             description: `Todd disabled schedule **${schedule.name}** after 2 consecutive F grades and ${ar.fails} failures in 7 days.\n\nRe-enable manually after investigating.`,
             color: 0xe74c3c,
-          }).catch(() => {});
+          }).catch(e => console.warn('[DreamTeam] fire-and-forget failed:', e.message));
         } catch {}
       }
     }
@@ -578,16 +578,17 @@ async function buildMorningReport(diagnostics = []) {
     }
   } catch {}
 
-  // ── PAPER TRADING (compact) ──
+  // ── PAPER TRADING (compact — via trader HTTP API) ──
   try {
-    const pathMod = require('path');
-    const Database = require('better-sqlite3');
-    const brainDbPath = pathMod.join(__dirname, '../../services/trader-service/data/trader-brain.sqlite');
-    const brainDb = new Database(brainDbPath, { readonly: true });
-    const last = brainDb.prepare('SELECT * FROM performance_daily ORDER BY date DESC LIMIT 1').get();
-    brainDb.close();
-    if (last) {
-      lines.push('', `TRADING: $${last.portfolio_value.toFixed(2)} | ${last.daily_return >= 0 ? '+' : ''}${last.daily_return.toFixed(2)}% today | DD: -${last.max_drawdown.toFixed(2)}%`);
+    const traderUrl = process.env.TRADER_URL || 'http://localhost:3002';
+    const perfRes = await fetch(`${traderUrl}/api/performance/summary`, { signal: AbortSignal.timeout(5000) });
+    if (perfRes.ok) {
+      const perf = await perfRes.json();
+      if (perf.currentBalance) {
+        const dailyPct = perf.totalPnlPercent || 0;
+        const dd = perf.maxDrawdownPercent || 0;
+        lines.push('', `TRADING: $${perf.currentBalance.toFixed(2)} | ${dailyPct >= 0 ? '+' : ''}${dailyPct.toFixed(2)}% total | DD: ${dd.toFixed(2)}%`);
+      }
     }
   } catch {}
 
@@ -600,7 +601,7 @@ async function buildMorningReport(diagnostics = []) {
   // ── REVENUE RADAR ──
   try {
     const { runRevenueScan, formatForReport } = require('./revenueRadar');
-    const scan = runRevenueScan();
+    const scan = await runRevenueScan();
     if (scan.moneyMoves?.length > 0) lines.push('', formatForReport(scan));
   } catch {}
 
@@ -768,6 +769,20 @@ function runDiagnostics() {
       sev('medium', 'health', `${dormantCount} enabled schedules haven't fired in 3+ days`,
         'These schedules are enabled but idle. Some may have cron expressions that only fire on specific days, but others may be broken.',
         'Review schedule list — disable ones that serve no purpose.');
+    }
+  } catch {}
+
+  // ── 7b. AUTO-PAUSED SCHEDULES ─────────────────────────────────────────
+  try {
+    const paused = all(`
+      SELECT name, agent_name, auto_pause_reason, auto_paused_at
+      FROM schedules WHERE auto_paused = 1
+    `);
+    if (paused.length > 0) {
+      const pausedList = paused.map(p => `${p.name}: ${p.auto_pause_reason || 'no reason'}`).join('; ');
+      sev('medium', 'health', `${paused.length} schedule(s) auto-paused by performance gate`,
+        pausedList,
+        'Review each paused schedule — re-enable if the underlying issue is fixed, or disable permanently if the agent has no work.');
     }
   } catch {}
 

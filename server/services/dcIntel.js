@@ -17,10 +17,14 @@
 
 'use strict';
 
+const { exaSearch } = require('./exaSearcher');
+
 const DC_API = process.env.DC_SITE_INTEL_URL || 'http://localhost:8095';
 const DC_SECRET = process.env.DC_SITE_INTEL_SECRET || '';
 const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
 const BRAVE_API_URL = 'https://api.search.brave.com/res/v1/web/search';
+// Use Exa for exploratory/semantic queries, Brave for site:-scoped and county recorder queries
+const USE_EXA = process.env.DC_INTEL_USE_EXA !== 'false'; // on by default
 
 // ── County recorder / assessor site prefixes for high-credibility queries ─────
 const COUNTY_RECORD_SITES = {
@@ -54,6 +58,8 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const DC_TIMEOUT_MS = 30000; // 30s timeout for DC Site Intel calls
+
 /** POST to DC Site Intel webhook. Returns parsed JSON or throws. */
 async function dcPost(path, body) {
   const headers = { 'Content-Type': 'application/json' };
@@ -62,6 +68,7 @@ async function dcPost(path, body) {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(DC_TIMEOUT_MS),
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -74,7 +81,7 @@ async function dcPost(path, body) {
 async function dcGet(path) {
   const headers = {};
   if (DC_SECRET) headers['X-OpenClaw-Secret'] = DC_SECRET;
-  const resp = await fetch(`${DC_API}${path}`, { headers });
+  const resp = await fetch(`${DC_API}${path}`, { headers, signal: AbortSignal.timeout(DC_TIMEOUT_MS) });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
     throw new Error(`DC API GET ${path} failed: ${resp.status} — ${text.slice(0, 200)}`);
@@ -95,10 +102,40 @@ async function braveSearch(query, count = 10, freshness = null) {
   const params = new URLSearchParams(p);
   const resp = await fetch(`${BRAVE_API_URL}?${params}`, {
     headers: { 'Accept': 'application/json', 'X-Subscription-Token': BRAVE_API_KEY },
+    signal: AbortSignal.timeout(DC_TIMEOUT_MS),
   });
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data.web && data.web.results) ? data.web.results : [];
+}
+
+/**
+ * Smart search — routes to Exa for semantic queries, Brave for site:-scoped queries.
+ * Falls back to Brave only on Exa errors (not on 0 results) to avoid posting
+ * low-quality Brave results when Exa legitimately finds nothing for a specific query.
+ * Returns same shape as braveSearch.
+ */
+async function smartSearch(query, count = 10, freshness = null) {
+  const isSiteScoped = /site:\S+/.test(query);
+  if (!USE_EXA || isSiteScoped) {
+    return braveSearch(query, count, freshness);
+  }
+  try {
+    const results = await exaSearch(query, count);
+    if (results.length > 0) {
+      console.log(`[dcIntel] Exa: ${results.length} results for "${query.slice(0, 60)}..."`);
+      return results;
+    }
+    // Exa returned 0 results — this means nothing relevant exists right now.
+    // Do NOT fall back to Brave with the same query: Brave would return broad,
+    // low-quality matches that pass the 0.35 quality gate and pollute intel notes.
+    console.log(`[dcIntel] Exa found nothing for "${query.slice(0, 60)}..." — skipping (no Brave fallback)`);
+    return [];
+  } catch (err) {
+    // Only fall back to Brave on actual errors (network, timeout, mcporter down)
+    console.warn(`[dcIntel] Exa error (${err.message}), falling back to Brave`);
+    return braveSearch(query, count, freshness);
+  }
 }
 
 /** Extract a simple signal from search results — returns null if nothing useful found. */
@@ -368,7 +405,8 @@ async function dcIntelDealMonitor({ message, runId, agent }) {
       try {
         await sleep(1500);
         // freshness=pw — past week only, so we never re-surface old news
-        const results = await braveSearch(query, 10, 'pw');
+        // smartSearch routes semantic queries to Exa (free, unlimited), site:-scoped to Brave
+        const results = await smartSearch(query, 10, 'pw');
         const signals = extractAllSignals(results, 5);
         if (signals.length === 0) continue;
 
@@ -747,7 +785,8 @@ async function dcIntelOpportunityScout({ message, runId, agent }) {
       try {
         await sleep(2000);
         // freshness=pm — only surface news from past month, not stale articles
-        const results = await braveSearch(query, 8, 'pm');
+        // smartSearch routes semantic queries to Exa (free, unlimited), site:-scoped to Brave
+        const results = await smartSearch(query, 8, 'pm');
         if (results.length === 0) continue;
 
         // Mine all signals from this query, not just first 3
@@ -837,7 +876,7 @@ async function dcIntelOpportunityScout({ message, runId, agent }) {
 
               // Apollo: try to find decision-maker at any company mentioned in the snippet
               const company = extractCompanyFromSnippet(signal.snippet);
-              if (company) apolloEnrich(company).catch(() => {}); // fire-and-forget
+              if (company) apolloEnrich(company).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message)); // fire-and-forget
 
               // Also post the discovery as an intel note with full keyword content
               await dcPost('/webhooks/openclaw/intel-note', {
@@ -846,7 +885,7 @@ async function dcIntelOpportunityScout({ message, runId, agent }) {
                 content: noteContent,
                 confidence: signal.url?.includes('.gov') || signal.url?.includes('sec.gov') ? 'high' : 'low',
                 source_url: signal.url,
-              }).catch(() => {});
+              }).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message));
               notesCreated++;
             } catch (err) {
               console.warn(`[dcIntelOpportunityScout] Failed to create opportunity: ${err.message}`);
@@ -863,7 +902,7 @@ async function dcIntelOpportunityScout({ message, runId, agent }) {
                   content: buildNoteContent({ county, state, signal }),
                   confidence: 'low',
                   source_url: signal.url,
-                }).catch(() => {});
+                }).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message));
                 notesCreated++;
               } catch {}
             }
@@ -918,14 +957,48 @@ async function dcIntelOpportunityScout({ message, runId, agent }) {
  */
 async function dcIntelDailyScorecard({ message, runId, agent }) {
   const startTime = Date.now();
+  const DASHBOARD_URL = 'https://dcsi-dashboard.blackbush-bb9e213f.centralus.azurecontainerapps.io/';
 
-  const scorecard = await dcGet('/scorecard/daily?hours=24');
+  // Fetch all data in parallel for a rich daily briefing
+  const [scorecard, pipeline, actionsDue, statsRaw, motivated, topOpps] = await Promise.all([
+    dcGet('/scorecard/daily?hours=24'),
+    dcGet('/opportunities/pipeline').catch(() => []),
+    dcGet('/opportunities/actions-due').catch(() => []),
+    dcGet('/scoring/dashboard/stats?angle=data_center').catch(() => ({})),
+    dcGet('/owners/motivated?limit=5').catch(() => []),
+    dcGet('/opportunities?limit=5&sort_by=pursuit_priority_score&angle=data_center').catch(() => []),
+  ]);
 
   const { total, by_grade, summary, opportunities } = scorecard;
 
-  if (total === 0) {
+  // Pipeline stats
+  const pipelineArr = Array.isArray(pipeline) ? pipeline : [];
+  const stageMap = {};
+  pipelineArr.forEach(s => { stageMap[s.stage] = s; });
+  const activeStages = ['triage','underwriting','owner_identified','outreach_started','qualified_conversation','site_package','buyer_circulated','negotiation_control'];
+  const totalActive = activeStages.reduce((sum, s) => sum + (stageMap[s]?.count || 0), 0);
+  const newLeads = stageMap.new_lead?.count || 0;
+  const weightedPipeline = activeStages.reduce((sum, s) => sum + (stageMap[s]?.total_weighted_fee_usd || 0), 0);
+
+  // Actions due
+  const actionsArr = Array.isArray(actionsDue) ? actionsDue : [];
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const overdue = actionsArr.filter(a => a.next_action_due && a.next_action_due < todayStr);
+  const dueToday = actionsArr.filter(a => a.next_action_due === todayStr);
+
+  // Motivated sellers
+  const motivatedArr = Array.isArray(motivated) ? motivated : [];
+
+  // Top opportunities (for "what to focus on")
+  const topOppsArr = Array.isArray(topOpps) ? topOpps : [];
+
+  // Stats
+  const stats = statsRaw || {};
+  const qualifiedCount = stats.qualified_count || 0;
+
+  if (total === 0 && totalActive === 0 && overdue.length === 0) {
     return {
-      outputText: 'DC Intel Daily Scorecard: no new leads in the last 24h.',
+      outputText: 'DC Intel Daily Scorecard: no new leads, no active deals, no overdue actions.',
       durationMs: Date.now() - startTime,
       costUsd: 0,
       extra: { total: 0 },
@@ -933,73 +1006,238 @@ async function dcIntelDailyScorecard({ message, runId, agent }) {
   }
 
   // Build HTML email
-  const gradeColors = { A: '#1a7a4a', B: '#2563eb', C: '#d97706', D: '#6b7280' };
-  const gradeBgs    = { A: '#f0fdf4', B: '#eff6ff', C: '#fffbeb', D: '#f9fafb' };
+  const gradeColors = { A: '#16A34A', B: '#2563EB', C: '#D97706', D: '#94A3B8' };
+  const gradeBgs    = { A: '#F0FDF4', B: '#EFF6FF', C: '#FFFBEB', D: '#F8FAFC' };
+  const stageLabels = {
+    new_lead: 'New Lead', triage: 'Triage', underwriting: 'Underwriting',
+    owner_identified: "Owner ID'd", outreach_started: 'Outreach',
+    qualified_conversation: 'Qualified', site_package: 'Site Package',
+    buyer_circulated: 'Buyer Circ.', negotiation_control: 'Negotiation',
+  };
 
-  const rows = opportunities.map(opp => {
+  // New lead rows
+  const rows = (opportunities || []).slice(0, 10).map(opp => {
     const qs = opp.quick_score;
-    const color = gradeColors[qs.grade] || '#6b7280';
-    const bg    = gradeBgs[qs.grade] || '#f9fafb';
-    const dims  = qs.dimensions;
-    const drivers = qs.drivers?.length ? `<br><small style="color:#6b7280">${qs.drivers.join(' · ')}</small>` : '';
-    const zone = opp.micro_zone ? `<br><span style="color:#6b7280;font-size:12px">${opp.micro_zone}</span>` : '';
+    const color = gradeColors[qs.grade] || '#94A3B8';
+    const bg    = gradeBgs[qs.grade] || '#F8FAFC';
+    const dims  = qs.dimensions || {};
+    const drivers = qs.drivers?.length ? `<br><small style="color:#64748B">${qs.drivers.join(' · ')}</small>` : '';
+    const zone = opp.micro_zone ? ` · <span style="color:#64748B">${opp.micro_zone}</span>` : '';
+    const notes = opp.intel_note_count ? `<br><span style="font-size:11px;color:#64748B">📝 ${opp.intel_note_count} intel note${opp.intel_note_count > 1 ? 's' : ''}</span>` : '';
     return `
       <tr style="background:${bg}">
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb">
-          <strong style="color:${color};font-size:18px">${qs.grade}</strong>
+        <td style="padding:12px;border-bottom:1px solid #E2E8F0">
+          <strong style="color:${color};font-size:20px">${qs.grade}</strong>
         </td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb">
-          <strong>${opp.name}</strong>${zone}${drivers}
+        <td style="padding:12px;border-bottom:1px solid #E2E8F0">
+          <strong>${opp.name}</strong>${zone}${drivers}${notes}
         </td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151">
-          ${(qs.overall * 100).toFixed(0)}%
+        <td style="padding:12px;border-bottom:1px solid #E2E8F0;text-align:center">
+          <span style="font-size:18px;font-weight:700;color:${color}">${(qs.overall * 100).toFixed(0)}%</span>
         </td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#6b7280">
-          Specificity: ${(dims.signal_specificity * 100).toFixed(0)}% ·
-          Source: ${(dims.source_credibility * 100).toFixed(0)}% ·
-          Market: ${(dims.market_heat * 100).toFixed(0)}%
-        </td>
-        <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:12px">
-          ${opp.thesis_type || '—'}
+        <td style="padding:12px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B">
+          ${dims.signal_specificity != null ? `Signal: ${(dims.signal_specificity * 100).toFixed(0)}%` : ''}
+          ${dims.source_credibility != null ? ` · Source: ${(dims.source_credibility * 100).toFixed(0)}%` : ''}
+          ${dims.market_heat != null ? ` · Market: ${(dims.market_heat * 100).toFixed(0)}%` : ''}
         </td>
       </tr>`;
   }).join('');
 
-  const gradeSummaryItems = ['A', 'B', 'C', 'D']
-    .map(g => `<span style="color:${gradeColors[g]};margin-right:16px"><strong>${by_grade[g]}</strong> ${g}</span>`)
-    .join('');
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  // Overdue action rows (top 5)
+  const overdueRows = overdue.slice(0, 5).map(a => {
+    const daysLate = Math.floor((new Date() - new Date(a.next_action_due)) / 86400000);
+    return `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-weight:600;font-size:13px">${(a.name || '?').slice(0, 40)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:13px">${a.next_action || 'Follow up'}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;color:#DC2626;font-weight:700;font-size:13px">${daysLate}d late</td>
+      </tr>`;
+  }).join('');
+
+  // Top opportunities rows (top 3)
+  const topOppRows = topOppsArr.slice(0, 3).map((o, i) => {
+    const pp = o.pursuit_priority_score ? (o.pursuit_priority_score * 100).toFixed(0) + '%' : '—';
+    const fee = o.target_fee_usd ? `$${(o.target_fee_usd / 1000).toFixed(0)}K` : '—';
+    const stage = stageLabels[o.pipeline_stage] || o.pipeline_stage || '—';
+    return `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-weight:700;font-size:14px">#${i+1}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-weight:600;font-size:13px">${(o.name || '?').slice(0, 45)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:13px">${stage}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:13px;font-weight:600;color:#2563EB">${pp}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:13px;color:#16A34A;font-weight:600">${fee}</td>
+      </tr>`;
+  }).join('');
+
+  // Motivated sellers (top 3)
+  const motivatedRows = motivatedArr.slice(0, 3).map(owner => {
+    const signals = (owner.distress_signals || []).slice(0, 2).map(s =>
+      s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    ).join(', ');
+    const acres = owner.assemblage_acres ? `${owner.assemblage_acres.toFixed(0)} ac` : '';
+    return `
+      <tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-weight:600;font-size:13px">${(owner.owner_name || '?').slice(0, 35)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#DC2626;font-weight:600">${signals}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#64748B">${acres}</td>
+      </tr>`;
+  }).join('');
+
+  // Pipeline funnel bar
+  const pipelineSegments = activeStages
+    .filter(s => stageMap[s]?.count > 0)
+    .map(s => {
+      const c = stageMap[s].count;
+      const label = stageLabels[s] || s;
+      const colors = {
+        triage: '#3B82F6', underwriting: '#2563EB', owner_identified: '#7C3AED',
+        outreach_started: '#EA580C', qualified_conversation: '#C2410C',
+        site_package: '#D97706', buyer_circulated: '#0D9488', negotiation_control: '#16A34A',
+      };
+      return `<td style="background:${colors[s] || '#94A3B8'};color:white;padding:8px 12px;text-align:center;font-size:12px;font-weight:600">${label} (${c})</td>`;
+    }).join('');
+
+  const fmtMoney = (v) => {
+    if (!v || v === 0) return '$0';
+    if (v >= 1000000) return `$${(v/1000000).toFixed(1)}M`;
+    if (v >= 1000) return `$${(v/1000).toFixed(0)}K`;
+    return `$${v.toLocaleString()}`;
+  };
 
   const html = `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:20px;background:#f3f4f6">
-  <div style="max-width:800px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
-    <div style="background:#111827;padding:20px 24px">
-      <h1 style="color:#fff;margin:0;font-size:20px">🏗 DC Site Intel — Daily Lead Scorecard</h1>
-      <p style="color:#9ca3af;margin:4px 0 0">${today} · ${total} new lead${total !== 1 ? 's' : ''}</p>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:20px;background:#F1F5F9">
+  <div style="max-width:800px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
+
+    <!-- Header -->
+    <div style="background:#0F172A;padding:24px 28px">
+      <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700">⚡ DC Site Intel — Morning Briefing</h1>
+      <p style="color:#94A3B8;margin:6px 0 0;font-size:14px">${today}</p>
     </div>
-    <div style="padding:16px 24px;background:#f9fafb;border-bottom:1px solid #e5e7eb">
-      <strong>${summary}</strong>&nbsp;&nbsp;&nbsp;${gradeSummaryItems}
-    </div>
-    <table style="width:100%;border-collapse:collapse">
-      <thead>
-        <tr style="background:#f9fafb">
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">GRADE</th>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">OPPORTUNITY</th>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">SCORE</th>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">DIMENSIONS</th>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600">THESIS</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
+
+    <!-- Hero KPIs -->
+    <table style="width:100%;border-collapse:collapse;background:#F8FAFC;border-bottom:2px solid #E2E8F0">
+      <tr>
+        <td style="padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0">
+          <div style="font-size:28px;font-weight:800;color:${overdue.length > 0 ? '#DC2626' : '#16A34A'}">${overdue.length}</div>
+          <div style="font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:.5px">Overdue</div>
+        </td>
+        <td style="padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0">
+          <div style="font-size:28px;font-weight:800;color:#0F172A">${totalActive + newLeads}</div>
+          <div style="font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:.5px">Active Deals</div>
+        </td>
+        <td style="padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0">
+          <div style="font-size:28px;font-weight:800;color:#2563EB">${fmtMoney(weightedPipeline)}</div>
+          <div style="font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:.5px">Pipeline</div>
+        </td>
+        <td style="padding:16px 12px;text-align:center;border-right:1px solid #E2E8F0">
+          <div style="font-size:28px;font-weight:800;color:#D97706">${total}</div>
+          <div style="font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:.5px">New Leads</div>
+        </td>
+        <td style="padding:16px 12px;text-align:center">
+          <div style="font-size:28px;font-weight:800;color:#0F172A">${qualifiedCount.toLocaleString()}</div>
+          <div style="font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:.5px">Scored Parcels</div>
+        </td>
+      </tr>
     </table>
-    <div style="padding:16px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af">
-      Grades: A=Priority (≥75%) · B=Worth a look (≥55%) · C=Low signal (≥35%) · D=Noise
-      · Generated by OpenClaw dc-intel-daily-scorecard
+
+    <!-- Pipeline Funnel -->
+    ${pipelineSegments ? `
+    <table style="width:100%;border-collapse:collapse;border-bottom:1px solid #E2E8F0">
+      <tr>${pipelineSegments}</tr>
+    </table>` : ''}
+
+    <!-- Section: OVERDUE ACTIONS (attention grabber) -->
+    ${overdue.length > 0 ? `
+    <div style="padding:20px 28px 0">
+      <h2 style="margin:0 0 10px;font-size:16px;color:#DC2626">🔴 ${overdue.length} Overdue Action${overdue.length > 1 ? 's' : ''} — Needs Attention</h2>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#FEF2F2">
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#991B1B;text-transform:uppercase">Deal</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#991B1B;text-transform:uppercase">Action</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#991B1B;text-transform:uppercase">Overdue</th>
+        </tr></thead>
+        <tbody>${overdueRows}</tbody>
+      </table>
+      ${overdue.length > 5 ? `<p style="font-size:12px;color:#DC2626;margin:4px 0">+ ${overdue.length - 5} more overdue...</p>` : ''}
+    </div>` : `
+    <div style="padding:16px 28px 0">
+      <div style="background:#F0FDF4;border-left:4px solid #16A34A;padding:12px 16px;border-radius:0 8px 8px 0">
+        ✅ <strong>No overdue actions</strong> — you're caught up.${dueToday.length > 0 ? ` (${dueToday.length} due today)` : ''}
+      </div>
+    </div>`}
+
+    <!-- Section: TOP OPPORTUNITIES -->
+    ${topOppRows ? `
+    <div style="padding:20px 28px 0">
+      <h2 style="margin:0 0 10px;font-size:16px;color:#0F172A">🏆 Top Pursuit Priorities</h2>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#F8FAFC">
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#64748B;text-transform:uppercase">#</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#64748B;text-transform:uppercase">Opportunity</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#64748B;text-transform:uppercase">Stage</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#64748B;text-transform:uppercase">Priority</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#64748B;text-transform:uppercase">Fee</th>
+        </tr></thead>
+        <tbody>${topOppRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- Section: MOTIVATED SELLERS -->
+    ${motivatedRows ? `
+    <div style="padding:20px 28px 0">
+      <h2 style="margin:0 0 10px;font-size:16px;color:#DC2626">🎯 Motivated Sellers — Call Today</h2>
+      <p style="margin:0 0 8px;font-size:12px;color:#64748B">Owners flagged with distress signals — highest conviction outreach targets</p>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#FEF2F2">
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#991B1B;text-transform:uppercase">Owner</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#991B1B;text-transform:uppercase">Signals</th>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:#991B1B;text-transform:uppercase">Land</th>
+        </tr></thead>
+        <tbody>${motivatedRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- Section: NEW LEADS (scorecard) -->
+    ${rows ? `
+    <div style="padding:20px 28px 0">
+      <h2 style="margin:0 0 4px;font-size:16px;color:#0F172A">📊 New Leads Scored (Last 24h)</h2>
+      <p style="margin:0 0 10px;font-size:13px;color:#64748B">
+        <strong>${summary}</strong> —
+        <span style="color:#16A34A;font-weight:700">${by_grade.A} Priority</span> ·
+        <span style="color:#2563EB;font-weight:700">${by_grade.B} Watch</span> ·
+        <span style="color:#D97706">${by_grade.C} Low</span> ·
+        <span style="color:#94A3B8">${by_grade.D} Noise</span>
+      </p>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#F8FAFC">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#64748B;font-weight:600;text-transform:uppercase">Grade</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#64748B;font-weight:600;text-transform:uppercase">Opportunity</th>
+          <th style="padding:8px 12px;text-align:center;font-size:11px;color:#64748B;font-weight:600;text-transform:uppercase">Score</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#64748B;font-weight:600;text-transform:uppercase">Dimensions</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- CTA: Open Dashboard -->
+    <div style="padding:28px;text-align:center">
+      <a href="${DASHBOARD_URL}" style="display:inline-block;background:#2563EB;color:white;padding:14px 36px;border-radius:8px;text-decoration:none;font-size:16px;font-weight:700;letter-spacing:.3px">Open Dashboard →</a>
+      <p style="margin:10px 0 0;font-size:12px;color:#94A3B8">
+        <a href="${DASHBOARD_URL}" style="color:#64748B">dcsi-dashboard.blackbush-bb9e213f.centralus.azurecontainerapps.io</a>
+      </p>
     </div>
+
+    <!-- Footer -->
+    <div style="border-top:2px solid #E2E8F0;padding:16px 28px;font-size:11px;color:#94A3B8;text-align:center;background:#F8FAFC">
+      DC Site Intel · Privium Pilch · Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC
+      <br>10 AI agents scanned overnight · ${qualifiedCount.toLocaleString()} parcels scored · Act on fresh signals first
+    </div>
+
   </div>
 </body>
 </html>`;
@@ -1008,6 +1246,15 @@ async function dcIntelDailyScorecard({ message, runId, agent }) {
   let emailSent = false;
   const sendgridKey = process.env.SENDGRID_API_KEY;
   const toEmails = ['steve.j.pilcher@gmail.com', 'doug.pilcher@gmail.com'];
+
+  // Build a punchy subject line
+  const subjectParts = [];
+  if (overdue.length > 0) subjectParts.push(`🔴 ${overdue.length} overdue`);
+  if (by_grade.A > 0) subjectParts.push(`${by_grade.A} Priority lead${by_grade.A > 1 ? 's' : ''}`);
+  if (motivatedArr.length > 0) subjectParts.push(`${motivatedArr.length} motivated sellers`);
+  if (!subjectParts.length) subjectParts.push(`${totalActive + newLeads} active deals`);
+  subjectParts.push(fmtMoney(weightedPipeline) + ' pipeline');
+  const subject = `DC Intel — ${subjectParts.join(' · ')}`;
 
   if (sendgridKey) {
     try {
@@ -1020,7 +1267,7 @@ async function dcIntelDailyScorecard({ message, runId, agent }) {
         body: JSON.stringify({
           personalizations: [{ to: toEmails.map(e => ({ email: e })) }],
           from: { email: 'info@hoaprojectfunding.com', name: 'DC Site Intel' },
-          subject: `DC Intel Scorecard — ${by_grade.A} Priority, ${by_grade.B} Watch · ${today}`,
+          subject,
           content: [{ type: 'text/html', value: html }],
         }),
       });
@@ -1037,17 +1284,17 @@ async function dcIntelDailyScorecard({ message, runId, agent }) {
       `dc-intel-${new Date().toISOString().slice(0, 10)}`,
       'dc-intel-daily-scorecard', 'market_insight',
       {
-        subject: `Daily scorecard: ${total} leads, ${by_grade.A} priority`,
-        content: `${summary} | Grades: A=${by_grade.A} B=${by_grade.B} C=${by_grade.C} D=${by_grade.D}`,
+        subject: `Daily briefing: ${total} leads, ${overdue.length} overdue, ${totalActive} active, ${fmtMoney(weightedPipeline)} pipeline`,
+        content: `${summary} | Grades: A=${by_grade.A} B=${by_grade.B} C=${by_grade.C} D=${by_grade.D} | Overdue: ${overdue.length} | Motivated: ${motivatedArr.length}`,
         confidence: 1.0,
-        metadata: { total, by_grade, email_sent: emailSent },
+        metadata: { total, by_grade, email_sent: emailSent, overdue: overdue.length, activeDeals: totalActive, pipeline: weightedPipeline },
       }
     );
   } catch {}
 
   const durationMs = Date.now() - startTime;
-  const outputText = `DC Intel Daily Scorecard: ${total} leads — ${by_grade.A}×A ${by_grade.B}×B ${by_grade.C}×C ${by_grade.D}×D · email ${emailSent ? 'sent ✓' : 'SKIPPED (no key)'}`;
-  return { outputText, durationMs, costUsd: 0, extra: { total, by_grade, emailSent } };
+  const outputText = `DC Intel Morning Briefing: ${total} new leads (${by_grade.A}A/${by_grade.B}B) · ${overdue.length} overdue · ${totalActive} active deals · ${fmtMoney(weightedPipeline)} pipeline · ${motivatedArr.length} motivated sellers · email ${emailSent ? 'sent ✓' : 'SKIPPED (no key)'}`;
+  return { outputText, durationMs, costUsd: 0, extra: { total, by_grade, emailSent, overdue: overdue.length, activeDeals: totalActive, motivatedSellers: motivatedArr.length } };
 }
 
 
@@ -1279,11 +1526,11 @@ async function dcIntelAutoGenerate({ message, runId, agent }) {
         await dcPost('/apollo/find-decision-makers', {
           organization_name: opp.owner_name,
           owner_id: opp.owner_id || null,
-        }).catch(() => {});
+        }).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message));
       }
       if (opp.owner_id) {
         // Skip-trace: get phone/email for any owner (individual or corporate)
-        await dcPost(`/owners/${opp.owner_id}/skip-trace`, {}).catch(() => {});
+        await dcPost(`/owners/${opp.owner_id}/skip-trace`, {}).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message));
       }
       enriched++;
     } catch (err) {
@@ -1410,7 +1657,7 @@ async function dcIntelRTOScanner({ message, runId, agent }) {
           content: noteContent,
           confidence,
           source_url: null,
-        }).catch(() => {});
+        }).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message));
       }
 
       createdThisRun.add(dedupeKey);
@@ -1544,7 +1791,7 @@ async function dcIntelPlanningScanner({ message, runId, agent }) {
           content: noteContent,
           confidence: 'high', // primary source = county filing system
           source_url: evt.source_url || null,
-        }).catch(() => {});
+        }).catch(e => console.warn('[dcIntel] fire-and-forget failed:', e.message));
         notesCreated++;
       }
     } catch (err) {
@@ -2014,7 +2261,7 @@ async function dcIntelDominionMonitor({ message, runId, agent }) {
       break;
     }
     try {
-      const results = await braveSearch(query, 5, 'pm'); // past month
+      const results = await smartSearch(query, 5, 'pm'); // past month
       await sleep(1500);
 
       for (const r of results) {

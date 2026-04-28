@@ -20,39 +20,38 @@ const { get, all } = require('../db/connection');
 
 // ── Lane 1: Trading Performance ─────────────────────────────────────────────
 
-function scanTradingLane() {
+async function scanTradingLane() {
   const result = { lane: 'Trading', status: 'inactive', signals: [], actions: [] };
 
   try {
-    const path = require('path');
-    const initSqlJs = require('sql.js');
+    const traderUrl = process.env.TRADER_URL || 'http://localhost:3002';
+    const [healthRes, perfRes] = await Promise.all([
+      fetch(`${traderUrl}/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
+      fetch(`${traderUrl}/api/performance/summary`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+    ]);
 
-    // Use synchronous approach for sql.js
-    const fs = require('fs');
-    const brainDbPath = path.join(__dirname, '../../services/trader-service/data/trader-brain.sqlite');
-    if (!fs.existsSync(brainDbPath)) {
+    if (!healthRes || !healthRes.ok) {
       result.status = 'no_data';
       result.actions.push({ priority: 'low', action: 'Start paper trading to generate performance data' });
       return result;
     }
 
-    // Read performance data from the main DB if available
-    const perfRows = all("SELECT name FROM sqlite_master WHERE type='table' AND name='performance_daily'").length;
-    if (!perfRows) {
-      result.status = 'no_data';
-      return result;
+    result.status = 'active';
+    result.signals.push('Paper trading service online');
+
+    if (perfRes && perfRes.ok) {
+      const perf = await perfRes.json();
+      if (perf.sharpeRatio) result.signals.push(`Sharpe: ${perf.sharpeRatio.toFixed(2)}`);
+      if (perf.totalPnl) result.signals.push(`Total P&L: $${perf.totalPnl.toFixed(2)}`);
     }
-  } catch {}
 
-  // Check if trader service is running (port 3002)
-  result.status = 'active';
-  result.signals.push('Paper trading service configured');
-
-  // Fund-readiness check from env
-  result.actions.push({
-    priority: 'medium',
-    action: 'Check paper trading scorecard — need Sharpe > 0.5 for 14 days before funding $50',
-  });
+    result.actions.push({
+      priority: 'medium',
+      action: 'Check paper trading scorecard — need Sharpe > 0.5 for 14 days before funding $50',
+    });
+  } catch {
+    result.status = 'no_data';
+  }
 
   return result;
 }
@@ -262,8 +261,8 @@ function scanLeadPipeline() {
  * Run full revenue radar scan across all lanes.
  * Returns prioritized "Money Moves" for Steve's morning report.
  */
-function runRevenueScan() {
-  const trading = scanTradingLane();
+async function runRevenueScan() {
+  const trading = await scanTradingLane();
   const saas = scanSaaSLane();
   const service = scanServiceLane();
   const pipeline = scanLeadPipeline();
