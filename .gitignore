@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .env.local
+.env.trader
 data/
+logs/
 *.db
 *.sqlite
 *.log
@@ -13,5 +15,10 @@ backups/*.db
 backups/*.sqlite
 nul
 *.tar.gz
-.env.local
-.env.trader
+
+# Sensitive — auth tokens / session responses
+login_response.json
+*_response.json
+
+# Stale trader-service leftovers (trader lives in ../openclaw-trader)
+services/trader-service/
