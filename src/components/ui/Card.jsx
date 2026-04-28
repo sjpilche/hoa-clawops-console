@@ -3,11 +3,53 @@
  *
  * Usage:
  *   <Card>Content</Card>
- *   <Card className="p-6">Bigger padding</Card>
+ *   <Card variant="elevated" padding="lg">Bigger padding</Card>
+ *   <Card interactive to="/agents">Clickable card</Card>
  */
-export default function Card({ children, className = '' }) {
+import { Link } from 'react-router-dom';
+
+const variants = {
+  default:  'bg-bg-secondary border border-border',
+  elevated: 'bg-bg-elevated border border-border',
+  ghost:    'bg-transparent border border-transparent',
+  accent:   'bg-bg-secondary border border-accent-primary/30',
+};
+
+const paddings = {
+  none: '',
+  sm:   'p-3',
+  md:   'p-4',
+  lg:   'p-5',
+  xl:   'p-6',
+};
+
+export default function Card({
+  children,
+  variant = 'default',
+  padding = 'md',
+  interactive = false,
+  to,
+  className = '',
+  ...props
+}) {
+  const classes = `
+    ${variants[variant] || variants.default}
+    ${paddings[padding] || paddings.md}
+    rounded-xl
+    ${interactive ? 'hover:border-accent-primary/40 transition-colors cursor-pointer' : ''}
+    ${className}
+  `.trim();
+
+  if (to) {
+    return (
+      <Link to={to} className={classes} {...props}>
+        {children}
+      </Link>
+    );
+  }
+
   return (
-    <div className={`bg-bg-elevated border border-border rounded-lg p-4 ${className}`}>
+    <div className={classes} {...props}>
       {children}
     </div>
   );

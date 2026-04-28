@@ -77,7 +77,6 @@ async function request(endpoint, options = {}) {
     // Handle 401 — token missing or expired
     if (response.status === 401) {
       removeToken();
-      // Only redirect if we're NOT already on the login page (prevents infinite loop)
       if (!window.location.pathname.startsWith('/login')) {
         window.location.href = '/login';
       }

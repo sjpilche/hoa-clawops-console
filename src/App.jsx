@@ -97,6 +97,8 @@ import MgmtResearchPage from '@/pages/MgmtResearchPage';
 import CfoMarketingPage from '@/pages/CfoMarketingPage';
 import ChatPage from '@/pages/ChatPage';
 import GlobalOverview from '@/pages/GlobalOverview';
+import CommandCenterPage from '@/pages/CommandCenterPage';
+import WarRoomPage from '@/pages/WarRoomPage';
 import CampaignDashboard from '@/pages/CampaignDashboard';
 import CampaignSettings from '@/pages/CampaignSettings';
 import { CampaignLayout } from '@/layouts/CampaignLayout';
@@ -137,7 +139,9 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<GlobalOverview />} />
+        <Route path="/" element={<WarRoomPage />} />
+        <Route path="/command-center" element={<CommandCenterPage />} />
+        <Route path="/legacy-dashboard" element={<GlobalOverview />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/domains" element={<DomainsPage />} />
         <Route path="/chat" element={<ChatPage />} />
