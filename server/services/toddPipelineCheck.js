@@ -91,7 +91,7 @@ function toddPipelineMonitor() {
               timestamp: now,
               footer: { text: 'Todd · Pipeline Commander' },
             }],
-          }).catch(() => {});
+          }).catch(e => console.warn('[Todd] notify failed:', e.message));
         }
 
         if (important.length > 0) {
@@ -103,7 +103,7 @@ function toddPipelineMonitor() {
               timestamp: now,
               footer: { text: 'Todd · Pipeline Commander' },
             }],
-          }).catch(() => {});
+          }).catch(e => console.warn('[Todd] notify failed:', e.message));
         }
       } catch {}
     }
@@ -213,7 +213,7 @@ function toddMorningBriefing() {
         timestamp: new Date().toISOString(),
         footer: { text: 'Todd · Pipeline Commander · ClawOps' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[Todd] notify failed:', e.message));
   } catch {}
 
   return { briefingText, monitor, kpis, pipeline };

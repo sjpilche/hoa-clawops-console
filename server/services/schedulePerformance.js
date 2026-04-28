@@ -172,7 +172,7 @@ function autoPauseSchedule(scheduleId, reason) {
         timestamp: new Date().toISOString(),
         footer: { text: 'SchedulePerformance · ClawOps' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[SchedulePerf] notify failed:', e.message));
   } catch {}
 
   console.warn(`[SchedulePerformance] Auto-paused schedule ${scheduleId}: ${reason}`);

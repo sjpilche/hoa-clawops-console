@@ -547,7 +547,7 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
           signal_source:   signalSource    || '',
           signal_fit_score: signalFitScore || 0,
         },
-      }).catch(() => {});
+      }).catch(e => console.warn('[CollectiveBrain] fire-and-forget failed:', e.message));
     },
     () => {
       writeFallbackEpisode({
@@ -578,7 +578,7 @@ function recordEpisode(agentName, { market, companyType, erpContext, contactTitl
           signal_source:   signalSource    || '',
           signal_fit_score: signalFitScore || 0,
         },
-      }).catch(() => {});
+      }).catch(e => console.warn('[CollectiveBrain] fire-and-forget failed:', e.message));
     }
   );
 }
@@ -831,7 +831,7 @@ async function runDistillation() {
           quality_score: 1.0,
           product:       o.source_agent === 'jake' ? 'jake' : 'cfo',
         },
-      }).catch(() => {});
+      }).catch(e => console.warn('[CollectiveBrain] fire-and-forget failed:', e.message));
     } else skipped++;
   }
 
@@ -868,7 +868,7 @@ async function runDistillation() {
           quality_score: 1.0,
           product:       c.source_agent === 'jake' ? 'jake' : 'cfo',
         },
-      }).catch(() => {});
+      }).catch(e => console.warn('[CollectiveBrain] fire-and-forget failed:', e.message));
     } else skipped++;
   }
 
@@ -931,7 +931,7 @@ async function runDistillation() {
           agent_name:      ep.agent_name,
           product:         ep.agent_name?.startsWith('hoa') ? 'hoa' : 'jake',
         },
-      }).catch(() => {});
+      }).catch(e => console.warn('[CollectiveBrain] fire-and-forget failed:', e.message));
       chromaBrain.addKnowledge({
         id:       `episode_${ep.id}`,
         content,
@@ -946,7 +946,7 @@ async function runDistillation() {
           outcome_score: ep.outcome_score,
           product:       ep.agent_name?.startsWith('hoa') ? 'hoa' : 'jake',
         },
-      }).catch(() => {});
+      }).catch(e => console.warn('[CollectiveBrain] fire-and-forget failed:', e.message));
     } else skipped++;
   }
 
@@ -1023,7 +1023,7 @@ async function getStats() {
  */
 async function buildAgentContext(agentName, sessionId, opts = {}) {
   // Opportunistically drain SQLite fallback rows to Azure (non-blocking if Azure down)
-  drainFallback().catch(() => {});
+  drainFallback().catch(e => console.warn('[CollectiveBrain] drainFallback failed:', e.message));
 
   // Determine workspace context — use explicit workspaceId or derive from agent name
   const workspaceId = opts.workspaceId || null;

@@ -190,7 +190,9 @@ async function testDatabaseConnection(domainId) {
         : 'wsl';
 
       return new Promise((resolve) => {
-        const cmd = `PGPASSWORD='${config.password || ''}' psql -h ${config.host} -p ${config.port || 5432} -U ${config.user || 'postgres'} -d ${config.database} -c 'SELECT 1' 2>&1 | head -1`;
+        // Shell-escape values to prevent command injection via config fields
+        const esc = (s) => String(s || '').replace(/'/g, "'\\''");
+        const cmd = `PGPASSWORD='${esc(config.password)}' psql -h '${esc(config.host)}' -p '${esc(config.port || 5432)}' -U '${esc(config.user || 'postgres')}' -d '${esc(config.database)}' -c 'SELECT 1' 2>&1 | head -1`;
 
         const proc = spawn(wslPath, ['bash', '-c', cmd], { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
         let output = '';

@@ -523,7 +523,7 @@ function upsertCompany(company, chapterId) {
       existing.id,
     ]);
     // Azure sync — fire-and-forget
-    azure.azureUpsertCompany({ id: existing.id, ...company, source: 'cai' }).catch(() => {});
+    azure.azureUpsertCompany({ id: existing.id, ...company, source: 'cai' }).catch(e => console.warn('[CaiScraper] Azure sync failed:', e.message));
     return 'updated';
   }
 
@@ -548,7 +548,7 @@ function upsertCompany(company, chapterId) {
     company.priority_tier || 'MEMBER',
   ]);
   // Azure sync — fire-and-forget
-  azure.azureUpsertCompany({ id, ...company, source: 'cai' }).catch(() => {});
+  azure.azureUpsertCompany({ id, ...company, source: 'cai' }).catch(e => console.warn('[CaiScraper] Azure sync failed:', e.message));
   return 'new';
 }
 

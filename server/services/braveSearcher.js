@@ -201,6 +201,7 @@ async function searchBrave(city, state = 'CA') {
           'Accept-Encoding': 'gzip',
           'X-Subscription-Token': BRAVE_API_KEY,
         },
+        signal: AbortSignal.timeout(CONFIG.REQUEST_TIMEOUT_MS),
       });
 
       if (!response.ok) {

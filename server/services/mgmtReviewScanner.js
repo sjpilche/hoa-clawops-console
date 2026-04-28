@@ -194,7 +194,7 @@ async function runReviewScanner(params = {}) {
       primary_issue: sr.primaryIssue,
       urgency: sr.urgency,
       scan_run_id: runId,
-    }).catch(() => {});
+    }).catch(e => console.warn('[ReviewScanner] Azure sync failed:', e.message));
   }
 
   // Step 4: Try to link unlinked signals to existing communities
@@ -238,7 +238,7 @@ async function runReviewScanner(params = {}) {
       google_review_count: totalReviews,
       company_health: companyHealth,
       switching_signals: switchingSignals,
-    }).catch(() => {});
+    }).catch(e => console.warn('[ReviewScanner] Azure sync failed:', e.message));
   }
 
   const duration = Math.round((Date.now() - startTime) / 1000);

@@ -439,7 +439,7 @@ async function scrapeGoogleMaps(query, options = {}) {
 async function extractListings(page) {
   try {
     // Wait for results panel to load
-    await page.waitForSelector('[role="feed"]', { timeout: 10000 }).catch(() => {});
+    await page.waitForSelector('[role="feed"]', { timeout: 10000 }).catch(e => console.warn('[MapsDiscovery] fire-and-forget failed:', e.message));
 
     const listings = await page.evaluate(() => {
       const results = [];
@@ -883,7 +883,7 @@ async function processGeoTarget(geoTargetId) {
               azureWriteLead(
                 { ...result, searchQuery: queryObj.query, geoTargetId: target.id },
                 azureRunId
-              ).catch(() => {});
+              ).catch(e => console.warn('[MapsDiscovery] fire-and-forget failed:', e.message));
             }
           } else if (outcome.action === 'updated') {
             stats.updated_communities++;

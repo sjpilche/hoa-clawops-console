@@ -403,7 +403,7 @@ async function computeAllStates(product = 'both') {
         timestamp: new Date().toISOString(),
         footer: { text: 'PipelineTracker · ClawOps' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[PipelineTracker] notify failed:', e.message));
   }
 
   return result;

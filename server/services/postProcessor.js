@@ -310,7 +310,7 @@ async function postProcessLLMOutput(agent, outputText, message, { runId } = {}) 
               description: summary,
               timestamp: new Date().toISOString(),
             }]
-          }).catch(() => {});
+          }).catch(e => console.warn('[PostProcessor] notify failed:', e.message));
         } catch {}
       }
     }

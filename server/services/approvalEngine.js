@@ -175,7 +175,7 @@ function notifyAutoSend(leadId, companyName, confidence, channel = 'email') {
       timestamp: new Date().toISOString(),
       footer: { text: 'ApprovalEngine · ClawOps' },
     }],
-  }).catch(() => {});
+  }).catch(e => console.warn('[ApprovalEngine] notify failed:', e.message));
 }
 
 /**

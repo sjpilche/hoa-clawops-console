@@ -160,7 +160,7 @@ async function runPortfolioScraper(params = {}) {
     `, [communities.length, mgmt_company_id]);
 
     // Azure sync — update pipeline flags
-    azure.azureUpdateCompanyPipeline(mgmt_company_id, { portfolio_scraped: true }).catch(() => {});
+    azure.azureUpdateCompanyPipeline(mgmt_company_id, { portfolio_scraped: true }).catch(e => console.warn('[PortfolioScraper] Azure sync failed:', e.message));
   }
 
   const duration = Math.round((Date.now() - startTime) / 1000);

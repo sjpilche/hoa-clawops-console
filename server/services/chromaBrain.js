@@ -45,7 +45,7 @@ function notifyChromaError(context, err) {
         timestamp: new Date().toISOString(),
         footer: { text: 'ChromaBrain · ClawOps' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[ChromaBrain] fire-and-forget failed:', e.message));
   } catch {}
 }
 

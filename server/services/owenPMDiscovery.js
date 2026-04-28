@@ -165,8 +165,8 @@ async function runPMDiscovery({ region, limit = 100 } = {}) {
         const state = targetRegion.split(',')[1]?.trim() || null;
 
         run(`INSERT INTO cfo_leads (company_name, city, state, phone, source, source_agent,
-              pilot_fit_score, pilot_fit_reason, status, enrichment_status, attribution_source, revenue_stage)
-             VALUES (?, ?, ?, ?, 'maps_discovery', 'owen', ?, ?, 'new', 'pending', 'maps_discovery', 'discovered')`,
+              pilot_fit_score, pilot_fit_reason, status, enrichment_status, attribution_source, revenue_stage, workspace_id)
+             VALUES (?, ?, ?, ?, 'maps_discovery', 'owen', ?, ?, 'new', 'pending', 'maps_discovery', 'discovered', 3)`,
           [result.name, city, state, result.phone || null, score, reasons]);
 
         const inserted = get('SELECT id FROM cfo_leads WHERE company_name = ? COLLATE NOCASE', [result.name]);

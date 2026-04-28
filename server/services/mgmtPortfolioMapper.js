@@ -187,7 +187,7 @@ async function runPortfolioMapper(params = {}) {
     `, [discoveries.length, mgmt_company_id]);
 
     // Azure sync — update pipeline flags
-    azure.azureUpdateCompanyPipeline(mgmt_company_id, { portfolio_mapped: true }).catch(() => {});
+    azure.azureUpdateCompanyPipeline(mgmt_company_id, { portfolio_mapped: true }).catch(e => console.warn('[PortfolioMapper] Azure sync failed:', e.message));
   }
 
   const duration = Math.round((Date.now() - startTime) / 1000);

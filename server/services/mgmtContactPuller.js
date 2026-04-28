@@ -184,7 +184,7 @@ async function runContactPuller(params = {}) {
       contacts_pulled: true,
       has_vendor_program: vendorPathway.has_vendor_portal,
       outreach_priority: outreachPriority,
-    }).catch(() => {});
+    }).catch(e => console.warn('[ContactPuller] Azure sync failed:', e.message));
   }
 
   const duration = Math.round((Date.now() - startTime) / 1000);
@@ -460,7 +460,7 @@ function insertContact(contact, companyName, mgmtCompanyId) {
     linkedin_url: contact.linkedin || null,
     office_location: contact.location || null,
     source_url: null,
-  }).catch(() => {});
+  }).catch(e => console.warn('[ContactPuller] Azure sync failed:', e.message));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
