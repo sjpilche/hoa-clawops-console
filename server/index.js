@@ -72,6 +72,8 @@ const stripeWebhookRoutes    = require('./routes/stripeWebhook');
 const commandCenterRoutes    = require('./routes/commandCenter');
 const dreamTeamRoutes        = require('./routes/dreamTeam');
 const autoApprovalRoutes     = require('./routes/autoApproval');
+const fenceOutreachRoutes    = require('./routes/fenceOutreach');
+const fenceQuoteRoutes       = require('./routes/fenceQuote');
 
 // SECURITY: Only load test routes in development
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -90,8 +92,19 @@ async function startServer() {
     // Initialize database (creates tables on first run)
     await initDatabase();
 
-    // Ensure campaign-specific tables exist for all active campaigns
-    const { all } = require('./db/connection');
+    // Auto-seed agents + schedules if DB is underpopulated
+    const { get: dbGet, all } = require('./db/connection');
+    const agentCount = dbGet('SELECT COUNT(*) as n FROM agents')?.n || 0;
+    if (agentCount < 50) {
+      console.log(`[Startup] Only ${agentCount} agents found — auto-seeding...`);
+      try {
+        await require('../scripts/seed-inline')();
+        const newCount = dbGet('SELECT COUNT(*) as n FROM agents')?.n || 0;
+        console.log(`[Startup] ✓ Seeded to ${newCount} agents`);
+      } catch (seedErr) {
+        console.warn('[Startup] Auto-seed failed (non-fatal):', seedErr.message);
+      }
+    }
     const campaignTableManager = require('./services/campaignTableManager');
 
     console.log('[Startup] Checking campaign tables...');
@@ -181,7 +194,7 @@ async function startServer() {
     // SECURITY: Different size limits for different route types
     app.use('/api/chat', express.json({ limit: '1mb' })); // Chat messages: 1MB
     app.use('/api/agents', express.json({ limit: '500kb' })); // Agent configs: 500KB
-    app.use('/api/webhooks', express.json({ limit: '2mb' })); // SendGrid webhooks: 2MB (email bodies)
+    app.use('/api/webhooks', express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } })); // SendGrid webhooks: 2MB (preserve raw body for signature verification)
     app.use('/api/webhooks', express.urlencoded({ extended: true, limit: '2mb' })); // Inbound Parse multipart fallback
     app.use('/api', express.json({ limit: '100kb' })); // Everything else: 100KB
 
@@ -198,13 +211,60 @@ async function startServer() {
       res.sendFile(path.join(__dirname, 'public', 'jake-cfo.html'));
     });
 
+    // Data Rehab homepage
+    app.get('/data-rehab', (_req, res) => {
+      res.sendFile(path.join(__dirname, 'public', 'data-rehab.html'));
+    });
+
+    // Data Rehab offer sheet (printable one-pager)
+    app.get('/data-rehab/offers', (_req, res) => {
+      res.sendFile(path.join(__dirname, 'public', 'data-rehab-offers.html'));
+    });
+
+    // Data Rehab outreach message library
+    app.get('/data-rehab/outreach', (_req, res) => {
+      res.sendFile(path.join(__dirname, 'public', 'data-rehab-outreach-library.html'));
+    });
+
+    // ── Public endpoint validation helpers ──
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    function sanitizeStr(str, maxLen) {
+      if (!str || typeof str !== 'string') return null;
+      return str.trim().slice(0, maxLen);
+    }
+    function validatePublicInput(body) {
+      const errors = [];
+      if (!body.companyName || typeof body.companyName !== 'string' || body.companyName.trim().length < 2) errors.push('Company name is required (min 2 chars)');
+      if (!body.contactEmail || !EMAIL_RE.test(body.contactEmail)) errors.push('A valid email address is required');
+      if (body.companyName && body.companyName.length > 200) errors.push('Company name too long');
+      if (body.contactEmail && body.contactEmail.length > 254) errors.push('Email too long');
+      if (body.contactName && body.contactName.length > 150) errors.push('Contact name too long');
+      if (body.website && body.website.length > 500) errors.push('Website too long');
+      return errors;
+    }
+
+    // Rate limit public endpoints: 10 submissions per 15 minutes per IP
+    const publicFormLimiter = require('express-rate-limit').rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 10,
+      message: { error: 'Too many submissions. Please try again later.' },
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
     // Public audit submission endpoint (no auth — landing page form)
-    app.post('/api/data-audit/public', async (req, res) => {
+    app.post('/api/data-audit/public', publicFormLimiter, async (req, res) => {
       try {
-        const { companyName, contactName, contactEmail, website, industry, erpSystem } = req.body;
-        if (!companyName || !contactEmail) {
-          return res.status(400).json({ error: 'Company name and email are required' });
-        }
+        const errors = validatePublicInput(req.body);
+        if (errors.length > 0) return res.status(400).json({ error: errors.join('; ') });
+
+        const companyName = sanitizeStr(req.body.companyName, 200);
+        const contactName = sanitizeStr(req.body.contactName, 150);
+        const contactEmail = sanitizeStr(req.body.contactEmail, 254);
+        const website = sanitizeStr(req.body.website, 500);
+        const industry = sanitizeStr(req.body.industry, 100);
+        const erpSystem = sanitizeStr(req.body.erpSystem, 100);
+
         const { createAndRunAudit } = require('./services/dataAuditService');
         const result = await createAndRunAudit({
           companyName, contactName, contactEmail, website, industry, erpSystem,
@@ -218,17 +278,24 @@ async function startServer() {
     });
 
     // Jake CFO public intake endpoint (no auth — landing page form)
-    app.post('/api/jake/public-intake', async (req, res) => {
+    app.post('/api/jake/public-intake', publicFormLimiter, async (req, res) => {
       try {
-        const { companyName, contactName, contactEmail, phone, annualRevenue, erpSystem, biggestPain } = req.body;
-        if (!companyName || !contactEmail) {
-          return res.status(400).json({ error: 'Company name and email are required' });
-        }
+        const errors = validatePublicInput(req.body);
+        if (errors.length > 0) return res.status(400).json({ error: errors.join('; ') });
+
+        const companyName = sanitizeStr(req.body.companyName, 200);
+        const contactName = sanitizeStr(req.body.contactName, 150);
+        const contactEmail = sanitizeStr(req.body.contactEmail, 254);
+        const phone = sanitizeStr(req.body.phone, 30);
+        const annualRevenue = sanitizeStr(req.body.annualRevenue, 50);
+        const erpSystem = sanitizeStr(req.body.erpSystem, 100);
+        const biggestPain = sanitizeStr(req.body.biggestPain, 1000);
+
         const { run } = require('./db/connection');
         // Insert as a new lead into cfo_leads
         run(`INSERT INTO cfo_leads (company_name, contact_name, contact_email, phone, erp_type, revenue_range, source_agent, source, status, enrichment_status, notes, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, 'jake', 'landing_page', 'new', 'enriched', ?, datetime('now'), datetime('now'))`,
-          [companyName, contactName || null, contactEmail, phone || null, erpSystem || null, annualRevenue || null, `Pain: ${biggestPain || 'none'}`]);
+          [companyName, contactName, contactEmail, phone, erpSystem, annualRevenue, `Pain: ${biggestPain || 'none'}`]);
         // Auto-activate cadence since we already have their email
         const lead = require('./db/connection').get('SELECT id FROM cfo_leads WHERE contact_email = ? ORDER BY created_at DESC LIMIT 1', [contactEmail]);
         if (lead) {
@@ -292,6 +359,8 @@ async function startServer() {
     app.use('/api/command-center', commandCenterRoutes);
     app.use('/api/dream-team', dreamTeamRoutes);
     app.use('/api/auto-approval', autoApprovalRoutes);
+    app.use('/api/fence', fenceOutreachRoutes);
+    app.use('/api/fence/quotes', fenceQuoteRoutes);
 
     // Workspaces API (lightweight inline route)
     const { Router: WsRouter } = require('express');
@@ -391,6 +460,11 @@ async function startServer() {
       } else {
         console.log('[Providers] ✓ All email provider keys configured');
       }
+
+      // --- Initialize CRM connection (Azure SQL — leads, outreach, cadence) ---
+      require('./db/crmConnection').initCrm().catch(err =>
+        console.warn('[CRM] Init warning (non-fatal, SQLite fallback active):', err.message)
+      );
 
       // --- Initialize Collective Brain (Azure SQL tables) ---
       require('./services/collectiveBrain').ensureTables().catch(err =>

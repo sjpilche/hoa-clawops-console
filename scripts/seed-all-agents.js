@@ -54,6 +54,7 @@ const AGENT_FLEET = [
   { name: 'jake-lead-scout', description: 'National lead scout — finds named finance contacts at construction SMBs via LinkedIn/Facebook/web (rotates through 60 US markets)', group: 'jake-marketing', special_handler: 'jake_lead_scout' },
   { name: 'jake-contact-enricher', description: 'Playwright web scraper — finds emails for leads ($0/run)', group: 'jake-marketing', special_handler: 'jake_contact_enricher' },
   { name: 'jake-construction-discovery', description: 'Google Maps GC scraper — bulk construction company discovery across 60 national markets ($0/run, 50-150 companies per run)', group: 'jake-marketing', special_handler: 'jake_construction_discovery' },
+  { name: 'apollo-lead-miner', description: 'Apollo API lead miner — 3 construction CFO lists (core_cfos, tinkerer_cfos, data_pain). CRAP scoring + dedup. Apollo credits only.', group: 'jake-marketing', special_handler: 'apollo_lead_miner' },
   { name: 'jake-social-scheduler', description: 'Converts approved Jake content into 1 LinkedIn + 1 Twitter post per piece. Output: cfo_content_pieces with channel=social. Scorecard: posts scheduled per content piece.', group: 'jake-marketing' },
   { name: 'jake-analytics-monitor', description: 'Reports daily pipeline stats: new leads, emails sent, replies, cost. Output: Discord embed + audit_log entry. Scorecard: report accuracy, anomaly detection.', group: 'jake-marketing' },
   { name: 'jake-offer-proof-builder', description: 'Writes 1 case study or ROI calculator per closed pilot. Output: cfo_content_pieces with pillar=pilot_proof. Scorecard: pieces created per pilot.', group: 'jake-marketing' },
@@ -122,6 +123,8 @@ const AGENT_FLEET = [
   { name: 'pipeline-state-tracker', description: 'Computes pipeline_stage for all active leads (New→Enriched→Dossiered→Outreached→Replied→…). Flags stalled. $0/run.', group: 'jake-marketing', special_handler: 'pipeline_state_tracker' },
   { name: 'pipeline-director', description: 'Claw Director — reads next_action queue and dispatches enrich/dossier/outreach/follow-up actions for ready leads. Runs 6:30 AM M-F.', group: 'jake-marketing', special_handler: 'pipeline_director' },
   { name: 'tenacity-cadence-engine', description: 'Adaptive multi-touch persistence (12 touches, 3 channels). Queues cadence touches for Jake + HOA leads. Brain v2 adjusts timing/tone from winning episodes. $0/run.', group: 'jake-marketing', special_handler: 'tenacity_cadence' },
+  { name: 'outreach-batch-drafter', description: 'Batch LLM email drafter — 10+ personalized cold emails per call. Ralph QA + auto-approval gate. GPT-4o-mini.', group: 'jake-marketing', special_handler: 'outreach_batch_drafter' },
+  { name: 'lead-auto-warmup', description: 'Activates enriched leads into cadence. Reactivates stale leads. $0/run — pure SQL.', group: 'jake-marketing', special_handler: 'lead_auto_warmup' },
 
   // ── Opportunity Engine ──
   { name: 'opportunity-scanner', description: 'Scans 10 free internet sources (Reddit, HN, PH, GitHub, etc.) for pain signals, classifies via Ollama ($0), clusters semantically. Daily 3 AM.', group: 'opportunity-engine', special_handler: 'opportunity_scanner' },
@@ -141,6 +144,10 @@ const AGENT_FLEET = [
 
   // ── Dream Team Nightly ──
   { name: 'dream-team-nightly', description: 'Nightly cycle — deterministic scorecards (Operations/Pipeline/Outreach), system diagnostics, Todd overnight actions, morning report. $0/night.', group: 'core', special_handler: 'dream_team_nightly' },
+
+  // ── Terrapin Station Community Services ──
+  { name: 'fence-outreach-agent', description: 'Builds outreach sequences for Terrapin fence + fire leads. Routes cold_mgmt/cold_board/warm/fire_wui. $0/run.', group: 'terrapin', special_handler: 'fence_outreach_builder' },
+  { name: 'fence-outreach-sender', description: 'Sends approved Terrapin outreach emails via SendGrid (adam@terrapinstationfences.com). $0/run.', group: 'terrapin', special_handler: 'fence_outreach_sender' },
 
   // ── Outreach Delivery ──
   { name: 'outreach-sender', description: 'Sends approved outreach emails via SendGrid. Daily 10 AM. Urgency-ranked. Tracks delivery. $0/run.', group: 'core', special_handler: 'outreach_sender' },
@@ -240,4 +247,10 @@ async function main() {
   console.log(`Database now has ${count.n} agents`);
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+// Export fleet for use by seed-inline.js
+module.exports = { AGENT_FLEET };
+
+// Run main only when executed directly (not when required)
+if (require.main === module) {
+  main().catch(err => { console.error(err); process.exit(1); });
+}

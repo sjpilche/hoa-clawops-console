@@ -49,10 +49,17 @@ const SCHEDULES = [
     message: '{}',
   },
   {
-    name: 'Urgency Scorer — Monday 6 AM',
+    name: 'Lead Auto-Warmup — Daily 5 AM',
+    description: 'Activates enriched leads into cadence. Reactivates stale leads. $0/run.',
+    agent_name: 'lead-auto-warmup',
+    cron: '0 5 * * 1-5',
+    message: '{}',
+  },
+  {
+    name: 'Urgency Scorer — Daily 5:30 AM',
     description: 'Scores all leads 0-100. Dual-product. $0/run.',
     agent_name: 'urgency-scorer',
-    cron: '0 6 * * 1',
+    cron: '30 5 * * 1-5',
     message: '{"limit":500,"product":"both"}',
   },
   {
@@ -68,6 +75,48 @@ const SCHEDULES = [
     agent_name: 'daily-debrief',   // piggyback until brain agent is separate
     cron: '0 2 * * *',
     message: '{"mode":"distillation_only"}',
+  },
+  {
+    name: 'Outreach Batch Drafter — Daily 9 AM',
+    description: 'Jake batch drafter — construction finance outreach. ~$0.01/run.',
+    agent_name: 'outreach-batch-drafter',
+    cron: '0 9 * * 1-5',
+    message: '{"limit":25,"persona":"jake","sourceAgent":"jake"}',
+  },
+  {
+    name: 'HOA Batch Drafter — Daily 9:15 AM',
+    description: 'HOA batch drafter — project funding outreach for property managers. ~$0.01/run.',
+    agent_name: 'outreach-batch-drafter',
+    cron: '15 9 * * 1-5',
+    message: '{"limit":25,"persona":"hoa","sourceAgent":"hoa"}',
+  },
+  {
+    name: 'Owen Batch Drafter — Daily 9:30 AM',
+    description: 'Owen batch drafter — PM finance outreach (shares HOA lead pool). ~$0.01/run.',
+    agent_name: 'outreach-batch-drafter',
+    cron: '30 9 * * 1-5',
+    message: '{"limit":25,"persona":"owen","sourceAgent":"owen"}',
+  },
+  {
+    name: 'Data Rehab Batch Drafter — Daily 9:45 AM',
+    description: 'Data Rehab batch drafter — data cleanup outreach. ~$0.01/run.',
+    agent_name: 'outreach-batch-drafter',
+    cron: '45 9 * * 1-5',
+    message: '{"limit":10,"persona":"data_rehab","sourceAgent":"data-rehab"}',
+  },
+  {
+    name: 'Terrapin — Outreach Builder — Daily 9:50 AM',
+    description: 'Builds outreach sequences for new Terrapin leads (fence + fire). $0/run.',
+    agent_name: 'fence-outreach-agent',
+    cron: '50 9 * * 1-5',
+    message: '{"sender_name":"Adam Weir"}',
+  },
+  {
+    name: 'Terrapin — Outreach Sender — Daily 10:15 AM',
+    description: 'Sends all approved Terrapin outreach emails via SendGrid. $0/run.',
+    agent_name: 'fence-outreach-sender',
+    cron: '15 10 * * 1-5',
+    message: '{}',
   },
   {
     name: 'Outreach Sender — Daily 10 AM',
@@ -101,6 +150,13 @@ const SCHEDULES = [
   // ═══════════════════════════════════════════════════════════════
   // JAKE CFO — Construction Finance
   // ═══════════════════════════════════════════════════════════════
+  {
+    name: 'Apollo Lead Miner — Mon/Wed/Fri 6:30 AM',
+    description: 'Apollo API lead miner. Cycles through 3 CFO lists. CRAP scoring + dedup.',
+    agent_name: 'apollo-lead-miner',
+    cron: '30 6 * * 1,3,5',
+    message: '{"list":"core_cfos","pages":2}',
+  },
   {
     name: 'Jake — Construction Discovery — Mon/Thu 6 AM',
     description: 'Google Maps GC scraper. 50-150 companies per run. $0/run.',
@@ -266,11 +322,11 @@ const SCHEDULES = [
   },
 
   // ═══════════════════════════════════════════════════════════════
-  // DATA REHAB — Foot-in-Door Data Cleaning (FROZEN — reactivate when data audit product launches)
+  // DATA REHAB — Entry Point to Full CFO + AI Stack
   // ═══════════════════════════════════════════════════════════════
   {
     name: 'Data Rehab — Scout — Mon/Wed 8 AM',
-    description: 'Finds SMBs with data chaos signals: QB+Excel mix, ERP migrations, hiring accountants.',
+    description: 'Finds SMBs with data chaos signals: QB+Excel mix, ERP migrations, hiring accountants. Entry point to full CFO + automation offering.',
     agent_name: 'data-rehab-scout',
     cron: '0 8 * * 1,3',
     message: '{"limit":10}',
@@ -278,7 +334,7 @@ const SCHEDULES = [
   },
   {
     name: 'Data Rehab — Outreach — Tue/Thu 11 AM',
-    description: 'Low-risk data audit cold email offer. Bridges to Jake/Owen upsell.',
+    description: '$4,997 Data Autopsy cold email — foot-in-door to fractional CFO + AI automation practice.',
     agent_name: 'data-rehab-outreach',
     cron: '0 11 * * 2,4',
     message: '{"limit":10}',
@@ -286,7 +342,7 @@ const SCHEDULES = [
   },
   {
     name: 'Data Rehab — Content Engine — Wed 8 AM',
-    description: 'GIGO content, hidden cost of messy data, AI-readiness education.',
+    description: 'Data-first content: why clean data is prerequisite to automation, hidden cost of messy data, AI-readiness education.',
     agent_name: 'data-rehab-content',
     cron: '0 8 * * 3',
     message: '{"output_count":2}',
