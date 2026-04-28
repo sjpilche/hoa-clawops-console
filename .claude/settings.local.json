@@ -133,10 +133,41 @@
       "Bash(git rm:*)",
       "WebSearch",
       "Bash(claude --version)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(python seed_supplement_suppliers.py)",
+      "Bash(nslookup -type=TXT jakecfo.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT hoaprojectfunding.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT _dmarc.jakecfo.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT _dmarc.hoaprojectfunding.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT owencfo.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT getdatarehab.com 8.8.8.8)",
+      "Bash(database)",
+      "Bash(sql)",
+      "Bash(postgres)",
+      "Bash(mongo\" | head -10 && echo \"---\" && cat \"c:UserssteveCodepackaging-deal-hunterbackend.env.local\" 2>/dev/null | grep -i \"azure)",
+      "Bash(mongo \")",
+      "Bash(node -e \"process.stdin.on\\(''''data'''',d=>console.log\\(d.toString\\(\\).substring\\(0,200\\)\\)\\)\")",
+      "Bash(nslookup -type=TXT terrapinstationfences.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME s1._domainkey.terrapinstationfences.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME s2._domainkey.terrapinstationfences.com 8.8.8.8)",
+      "Bash(nslookup -type=TXT _dmarc.terrapinstationfences.com 8.8.8.8)",
+      "Bash(nslookup -type=MX terrapinstationfences.com 8.8.8.8)",
+      "Bash(nslookup terrapinstationfences.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME s1._domainkey.owencfo.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME s2._domainkey.owencfo.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME s1._domainkey.getdatarehab.com 8.8.8.8)",
+      "Bash(nslookup -type=CNAME s2._domainkey.getdatarehab.com 8.8.8.8)",
+      "Bash(npm ls:*)",
+      "Bash(node -e \"require\\(''./server/services/sendgrid''\\)\")",
+      "Bash(node -e \"require\\(''./server/services/braveSearcher''\\)\")",
+      "Bash(node -e \"require\\(''./server/services/apolloEnricher''\\)\")",
+      "Bash(node -e \"require\\(''./server/services/dcIntel''\\)\")",
+      "Bash(node -e \"require\\(''./server/routes/sendgridWebhook''\\)\")",
+      "Bash(npx vitest:*)"
     ],
     "additionalDirectories": [
-      "c:\\Users\\SPilcher\\OpenClaw2.0 for linux - Copy"
+      "c:\\Users\\SPilcher\\OpenClaw2.0 for linux - Copy",
+      "c:\\Users\\steve\\Code\\packaging-deal-hunter\\backend"
     ]
   }
 }

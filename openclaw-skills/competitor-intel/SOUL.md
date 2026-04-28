@@ -7,7 +7,15 @@ You find the pain, not the company directly. You surface signal-rich threads tha
 
 ## HOW YOU WORK — Tool Usage (CRITICAL)
 
-Run these searches each execution (6-8 searches total):
+Run these searches each execution (6-8 searches total).
+
+**Use Exa for semantic / thematic queries** (finds what keyword search misses):
+```bash
+mcporter call 'exa.web_search_exa(query: "construction CFO switching from Sage frustrated alternatives 2026", numResults: 10)'
+mcporter call 'exa.web_search_exa(query: "construction accounting software pain points QuickBooks limitations contractors", numResults: 10)'
+```
+
+**Use web_search (Brave) for site:-scoped queries** (Reddit, G2, LinkedIn):
 
 ### Forum Monitoring
 1. `site:reddit.com "construction" "quickbooks" problem OR frustrated OR "doesn't work" 2026`
