@@ -36,24 +36,10 @@ function todayStr() {
 }
 
 // ---------------------------------------------------------------------------
-// Trading lane — reads from trader-brain.sqlite via sql.js
+// Trading lane — calls trader service HTTP API (port 3002)
 // ---------------------------------------------------------------------------
 
-function getTraderBrainDb() {
-  try {
-    const initSqlJs = require('sql.js');
-    const traderDbPath = path.resolve(__dirname, '../../services/trader-service/data/trader-brain.sqlite');
-    if (!fs.existsSync(traderDbPath)) return null;
-
-    // sql.js is async init — but we can cache the SQL module
-    // For simplicity in a sync route we'll use a cached promise pattern.
-    // However, since the main DB already loaded sql.js, require('sql.js')
-    // returns the same module. We need to init it though.
-    return { path: traderDbPath };
-  } catch {
-    return null;
-  }
-}
+const TRADER_URL = process.env.TRADER_URL || 'http://localhost:3002';
 
 async function getTradingLane() {
   const result = {
@@ -65,59 +51,22 @@ async function getTradingLane() {
   };
 
   try {
-    const traderDbPath = path.resolve(__dirname, '../../services/trader-service/data/trader-brain.sqlite');
-    if (!fs.existsSync(traderDbPath)) return result;
+    const [healthRes, perfRes] = await Promise.all([
+      fetch(`${TRADER_URL}/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null),
+      fetch(`${TRADER_URL}/api/performance/summary`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+    ]);
 
-    const initSqlJs = require('sql.js');
-    const SQL = await initSqlJs();
-    const fileBuffer = fs.readFileSync(traderDbPath);
-    const traderDb = new SQL.Database(fileBuffer);
+    if (!healthRes || !healthRes.ok) return result;
+    result.status = 'paper';
 
-    // Helper to query trader DB
-    function tGet(sql, params = []) {
-      const stmt = traderDb.prepare(sql);
-      stmt.bind(params);
-      if (stmt.step()) {
-        const row = stmt.getAsObject();
-        stmt.free();
-        return row;
-      }
-      stmt.free();
-      return null;
+    if (perfRes && perfRes.ok) {
+      const perf = await perfRes.json();
+      result.totalPnl = perf.totalPnl || 0;
+      result.sharpe = perf.sharpeRatio || 0;
+      result.fundReady = result.sharpe >= 1.5 && result.totalPnl > 0;
     }
-
-    result.status = 'paper'; // If DB exists, at minimum paper trading
-
-    // Daily PnL — sum of today's fills
-    const today = todayStr();
-    try {
-      const pnl = tGet(
-        "SELECT COALESCE(SUM(realized_pnl), 0) as daily FROM trades WHERE DATE(filled_at) = ?",
-        [today]
-      );
-      if (pnl) result.dailyPnl = pnl.daily || 0;
-    } catch {}
-
-    // Total PnL
-    try {
-      const total = tGet("SELECT COALESCE(SUM(realized_pnl), 0) as total FROM trades");
-      if (total) result.totalPnl = total.total || 0;
-    } catch {}
-
-    // Sharpe ratio from brain metrics
-    try {
-      const sharpe = tGet(
-        "SELECT value FROM brain_metrics WHERE key = 'sharpe_ratio' ORDER BY updated_at DESC LIMIT 1"
-      );
-      if (sharpe) result.sharpe = parseFloat(sharpe.value) || 0;
-    } catch {}
-
-    // Fund readiness: sharpe > 1.5 and total PnL positive for 30+ days
-    result.fundReady = result.sharpe >= 1.5 && result.totalPnl > 0;
-
-    traderDb.close();
   } catch {
-    // Trader DB unreadable — leave as inactive
+    // Trader service unreachable — leave as inactive
   }
 
   return result;

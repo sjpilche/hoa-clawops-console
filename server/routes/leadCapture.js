@@ -161,7 +161,7 @@ router.post('/lead', (req, res) => {
         ].filter(Boolean),
         timestamp: new Date().toISOString(),
         footer: { text: 'Lead Capture — Inbound' },
-      }).catch(() => {});
+      }).catch(e => console.warn('[LeadCapture] notify failed:', e.message));
     } catch {}
 
     console.log(`[LeadCapture] New inbound lead: ${email} (${company || 'no company'}) via ${source || 'form'}`);

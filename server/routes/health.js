@@ -109,65 +109,20 @@ function checkDiskSpace() {
   try {
     const dataDir = path.resolve('./data');
 
-    // Ensure data directory exists
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    // Get disk usage (platform-specific)
-    let availableGB = 0;
-    let totalGB = 0;
-    let usedPercent = 0;
+    const stats = fs.statfsSync(dataDir);
+    const totalBytes = stats.blocks * stats.bsize;
+    const availableBytes = stats.bavail * stats.bsize;
+    const totalGB = parseFloat((totalBytes / 1024 ** 3).toFixed(2));
+    const availableGB = parseFloat((availableBytes / 1024 ** 3).toFixed(2));
+    const usedPercent = parseFloat((((totalBytes - availableBytes) / totalBytes) * 100).toFixed(1));
 
-    if (process.platform === 'win32') {
-      // Windows: Use wmic
-      try {
-        const drive = path.parse(dataDir).root;
-        const output = execSync(`wmic logicaldisk where "DeviceID='${drive.replace('\\', '')}'" get Size,FreeSpace /format:csv`, {
-          timeout: 3000,
-          encoding: 'utf-8',
-        });
-
-        const lines = output.split('\n').filter(line => line.trim() && !line.startsWith('Node'));
-        if (lines.length > 0) {
-          const parts = lines[0].split(',');
-          if (parts.length >= 3) {
-            const freeSpace = parseInt(parts[1]);
-            const totalSpace = parseInt(parts[2]);
-            availableGB = (freeSpace / (1024 ** 3)).toFixed(2);
-            totalGB = (totalSpace / (1024 ** 3)).toFixed(2);
-            usedPercent = (((totalSpace - freeSpace) / totalSpace) * 100).toFixed(1);
-          }
-        }
-      } catch (error) {
-        // Fallback: Just report that we couldn't get disk info
-        availableGB = 'unknown';
-        totalGB = 'unknown';
-        usedPercent = 'unknown';
-      }
-    } else {
-      // Linux/macOS: Use df
-      const output = execSync(`df -BG "${dataDir}" | tail -1`, {
-        timeout: 3000,
-        encoding: 'utf-8',
-      });
-
-      const parts = output.trim().split(/\s+/);
-      totalGB = parseFloat(parts[1].replace('G', ''));
-      const usedGB = parseFloat(parts[2].replace('G', ''));
-      availableGB = parseFloat(parts[3].replace('G', ''));
-      usedPercent = parseFloat(parts[4].replace('%', ''));
-    }
-
-    // Determine status based on available space
     let status = 'healthy';
-    if (typeof availableGB === 'number') {
-      if (availableGB < 1) {
-        status = 'critical';
-      } else if (availableGB < 5) {
-        status = 'warning';
-      }
-    }
+    if (availableGB < 1) status = 'critical';
+    else if (availableGB < 5) status = 'warning';
 
     return {
       status,

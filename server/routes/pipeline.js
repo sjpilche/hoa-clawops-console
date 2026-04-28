@@ -228,7 +228,7 @@ router.post('/blitz', async (req, res, next) => {
         timestamp: new Date().toISOString(),
         footer: { text: 'PipelineBlitz · ClawOps' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[Pipeline] notify failed:', e.message));
 
     // Emit socket.io event so PipelineHealth page refreshes live
     try {

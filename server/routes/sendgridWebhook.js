@@ -45,6 +45,19 @@ const router = Router();
 // Multer for multipart/form-data from SendGrid Inbound Parse (no file storage needed)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+// ── SendGrid Event Webhook signature verification ────────────────────────
+// Set SENDGRID_WEBHOOK_VERIFICATION_KEY in .env.local to enable.
+// Get this from: SendGrid → Settings → Mail Settings → Event Webhook → Verification Key
+let verifySignature;
+try {
+  const EventWebhook = require('@sendgrid/eventwebhook').EventWebhook;
+  const ew = new EventWebhook();
+  verifySignature = (publicKey, payload, signature, timestamp) => {
+    const ecKey = ew.convertPublicKeyToECDSA(publicKey);
+    return ew.verifySignature(ecKey, payload, signature, timestamp);
+  };
+} catch { verifySignature = null; }
+
 // ════════════════════════════════════════════════════════════════════════════
 // 1. EVENT WEBHOOK — bounce, delivered, open, click, spamreport
 // ════════════════════════════════════════════════════════════════════════════
@@ -61,6 +74,25 @@ function retroUpdateFromSequence(seqId, outcomeType, outcomeScore, outcome) {
 }
 
 router.post('/sendgrid', (req, res) => {
+  // ── Verify SendGrid signature if verification key is configured ──
+  const verificationKey = process.env.SENDGRID_WEBHOOK_VERIFICATION_KEY;
+  if (verificationKey && verifySignature) {
+    const signature = req.headers['x-twilio-email-event-webhook-signature'] || '';
+    const timestamp = req.headers['x-twilio-email-event-webhook-timestamp'] || '';
+    try {
+      const payload = req.rawBody || JSON.stringify(req.body);
+      if (!verifySignature(verificationKey, payload, signature, timestamp)) {
+        console.warn('[SendGrid Webhook] Signature verification FAILED — rejecting request');
+        return res.status(403).json({ error: 'Invalid signature' });
+      }
+    } catch (verifyErr) {
+      console.warn('[SendGrid Webhook] Signature verification error:', verifyErr.message);
+      return res.status(403).json({ error: 'Signature verification failed' });
+    }
+  } else if (!verificationKey) {
+    // Log once per startup would be better, but this is low-volume enough
+    // console.debug('[SendGrid Webhook] No SENDGRID_WEBHOOK_VERIFICATION_KEY set — skipping signature check');
+  }
   const events = Array.isArray(req.body) ? req.body : [req.body];
 
   let processed = 0;

@@ -138,7 +138,7 @@ router.get('/leads/stats', (req, res, next) => {
 router.put('/leads/:id', (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, notes, contact_name, contact_title, contact_email, contact_linkedin, erp_type, website, phone, cadence_active, next_touch_due, last_touch_number, pipeline_stage } = req.body;
+    const { status, notes, contact_name, contact_title, contact_email, contact_linkedin, erp_type, website, phone, cadence_active, next_touch_due, last_touch_number, pipeline_stage, enrichment_status } = req.body;
 
     const existing = get('SELECT id FROM cfo_leads WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
@@ -159,6 +159,7 @@ router.put('/leads/:id', (req, res, next) => {
     if (next_touch_due !== undefined) { updates.push('next_touch_due = ?'); params.push(next_touch_due); }
     if (last_touch_number !== undefined) { updates.push('last_touch_number = ?'); params.push(last_touch_number); }
     if (pipeline_stage !== undefined) { updates.push('pipeline_stage = ?'); params.push(pipeline_stage); }
+    if (enrichment_status !== undefined) { updates.push('enrichment_status = ?'); params.push(enrichment_status); }
 
     if (updates.length === 0) return res.json({ message: 'No changes' });
 
@@ -490,7 +491,7 @@ router.post('/leads/bulk-enrich', async (req, res, next) => {
 
     const remainingLimit = limit - apolloResults.enriched;
     const { enrichMultipleLeads } = require('../services/jakeContactEnricher');
-    const playwrightResult = await enrichMultipleLeads({ limit: remainingLimit, min_score });
+    const playwrightResult = await enrichMultipleLeads({ limit: remainingLimit, min_score, status_filter: 'all_unenriched' });
 
     // Merge results
     const combined = {
@@ -530,25 +531,40 @@ router.post('/outreach/bulk-send', async (req, res, next) => {
 
     let sent = 0;
     let failed = 0;
+    let blocked = 0;
     const details = [];
 
     const sg = require('../services/sendgrid');
+    const outreachGuard = require('../services/outreachGuard');
     const sgStatus = sg.status();
     if (!sgStatus.configured) {
       return res.status(500).json({ error: 'SendGrid not configured — set SENDGRID_API_KEY in .env.local' });
     }
 
     for (const seq of sequences) {
+      // ── Outreach guard: null-email, dedup, throttle, subject-flood ──
+      const check = outreachGuard.canSend(seq.contact_email, seq.id, seq.source_agent || 'jake', seq.email_subject);
+      if (!check.allowed) {
+        blocked++;
+        run("UPDATE cfo_outreach_sequences SET status = 'cancelled', delivery_error = ? WHERE id = ?", [check.reason, seq.id]);
+        details.push({ id: seq.id, company: seq.company_name, email: seq.contact_email, status: 'blocked', reason: check.reason });
+        console.warn(`[BulkSend] ${check.reason}`);
+        continue;
+      }
+
       try {
         const bodyText = seq.email_body || '';
+        const persona = seq.source_agent || 'jake';
         const html = sg.wrapInBrandedShell(
-          bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join('')
+          bodyText.split('\n').map(p => p.trim() ? `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#374151;">${p}</p>` : '').join(''),
+          { persona }
         );
         const result = await sg.send({
           to: seq.contact_email,
           subject: seq.email_subject || 'Hello',
           html,
           text: bodyText,
+          persona: seq.source_agent || 'jake',
         });
 
         if (result.success) {
@@ -573,7 +589,7 @@ router.post('/outreach/bulk-send', async (req, res, next) => {
       }
     }
 
-    res.json({ sent, failed, total: sequences.length, details });
+    res.json({ sent, failed, blocked, total: sequences.length, details });
   } catch (err) {
     next(err);
   }
