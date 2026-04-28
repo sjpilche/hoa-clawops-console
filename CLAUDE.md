@@ -54,8 +54,8 @@ Node.js 24 · Express · Vite/React 19 · SQLite3 · OpenClaw CLI v2026.3.12 · 
 pm2 start ecosystem.config.cjs        # Start server (3001) + client (5174)
 # Trader service is separate: cd ../openclaw-trader && pm2 start ecosystem.config.cjs
 pm2 status / pm2 logs / pm2 restart all
-node scripts/seed-all-agents.js        # Sync 66 active agents (6 ghost CFOs + 1 unbuilt HOA cut in 2026-03-14 audit)
-node scripts/seed-all-schedules.js --clean  # Sync 59 schedules (8 frozen Owen/DataRehab disabled)
+node scripts/seed-all-agents.js        # Sync 111 agents from AGENT_FLEET (+3 agent-reach agents seeded by migration 055 = 114 total)
+node scripts/seed-all-schedules.js --clean  # Sync 94 schedules (8 frozen: 5 Owen + 3 old Data Rehab — frozen until product/offer ready)
 ```
 
 ### Dream Team (5 leadership agents)
@@ -78,7 +78,7 @@ YouTube creators → transcripts → scored signals → ranked business ideas �
 - Routes: `/api/rse` · UI: `/rse` (10-tab dashboard)
 - Services: `server/services/rse*.js`
 
-### 66 Active Agents · Org chart: `org/agent_org_chart.md`
+### 114 Active Agents · Org chart: `org/agent_org_chart.md`
 (6 ghost CFO duplicates + 1 unbuilt HOA agent cut in 2026-03-14 compliance audit. 8 Owen/DataRehab schedules frozen.)
 
 ### Critical patterns
@@ -86,8 +86,9 @@ YouTube creators → transcripts → scored signals → ranked business ideas �
 - **Runs table** uses `result_data`, NOT `output`.
 - **Special handlers** registered in `runs.js` SPECIAL_HANDLERS object.
 - **Agent UUIDs** = MD5 hash of name. Idempotent seeding.
-- **Outreach emails require human confirmation** — scheduled `outreach_sender` is preview-only. Steve must confirm via Console or `POST /api/cfo-marketing/outreach/send-confirmed` before any email leaves the system.
-- **Meeting booker runs are `status=pending`** — auto-queued by reply classifier but require manual confirmation before execution. This is the human gate for meeting emails.
+- **Outreach emails require human confirmation** — scheduled `outreach_sender` is preview-only (`autoSendCap = 0` at `server/routes/runs.js`). Steve must confirm via Console or `POST /api/cfo-marketing/outreach/send-confirmed`, or send `confirmed=true` in the trigger message, before any email leaves the system. Bounce guard pauses sender at >5% bounce rate over the last 100 sends (≥10-send sample).
+- **Meeting booker drafts are `status=draft`** — auto-queued by reply classifier; the outreach sender only picks up sequences at `status='approved'`, so a human must approve in the UI before the meeting email ships.
+- **Auto-approval engine is OPT-IN** — `auto_approval_enabled='false'` by default in the `settings` table. Even when enabled, autoApprovalEngine has its own 5% bounce circuit breaker and a 50-email/day cap.
 - **Destructive scripts require `--yes` flag or interactive confirmation** — `cleanup-dbpr-leads.js`, `reset-enrichment.js`, etc. Support `--dry-run` to preview.
 
 ### Login
