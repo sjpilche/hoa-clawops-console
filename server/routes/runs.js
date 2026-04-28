@@ -59,6 +59,15 @@ function markRunFailed(runId, agentId, errorMsg) {
      updated_at=datetime('now') WHERE id=?`,
     [agentId, agentId]
   );
+
+  // ── Failure alerts — fire-and-forget, never block the caller ──
+  try {
+    const agent = get('SELECT name FROM agents WHERE id=?', [agentId]);
+    const agentName = agent?.name || agentId;
+    require('../services/discordNotifier').notifyRunCompleted({
+      agentName, status: 'failed', errorMsg, runId,
+    });
+  } catch { /* non-fatal */ }
 }
 
 function buildResultData(runId, message, outputText, extra = {}) {
@@ -914,6 +923,47 @@ const SPECIAL_HANDLERS = {
     return { outputText, durationMs, extra: { enrichResult: result, hitRate, methodDist } };
   },
 
+  apollo_lead_miner: async ({ message, runId, agent }) => {
+    // Apollo API lead miner — 3 construction CFO lists, CRAP scoring, dedup
+    const { mineAndScore } = require('../services/apolloLeadMiner');
+    const brain = require('../services/collectiveBrain');
+    const startTime = Date.now();
+    const params = parseMessageParams(message);
+
+    const listType = params.list || 'core_cfos';
+    const pages = parseInt(params.pages) || 1;
+    const minScore = parseInt(params.min_score) || 35;
+
+    const result = await mineAndScore(listType, { pages, minScore });
+
+    const durationMs = Date.now() - startTime;
+    const outputText = [
+      `Apollo Lead Miner [${listType}]: ${result.mined} mined, ${result.scored} scored, ${result.inserted} inserted, ${result.skipped} below threshold, ${result.duplicates} duplicates`,
+      `  Duration: ${(durationMs / 1000).toFixed(1)}s | Credits used: ${result.creditsUsed || pages}`,
+      result.inserted > 0
+        ? `  ${result.inserted} new leads in cfo_leads — run jake-contact-enricher or outreach-batch-drafter next`
+        : `  No new leads inserted (all below min score ${minScore} or already in DB)`,
+      result.topLeads && result.topLeads.length > 0
+        ? `  Top lead: ${result.topLeads[0].name} @ ${result.topLeads[0].company} (score: ${result.topLeads[0].score})`
+        : '',
+    ].filter(Boolean).join('\n');
+
+    // Collective Brain: log discovery observation
+    if (result.inserted > 0) {
+      try {
+        const sessionId = `apollo-miner-${listType}-${new Date().toISOString().slice(0, 10)}`;
+        brain.observe(sessionId, 'apollo-lead-miner', 'lead_discovery', {
+          subject: listType,
+          content: `Mined ${result.mined} people from Apollo [${listType}], inserted ${result.inserted} new leads (CRAP score >= ${minScore}).`,
+          confidence: 1.0,
+          metadata: { listType, pages, mined: result.mined, inserted: result.inserted, duplicates: result.duplicates },
+        });
+      } catch {}
+    }
+
+    return { outputText, durationMs, extra: { ...result } };
+  },
+
   jake_construction_discovery: async ({ message, runId, agent }) => {
     // Google Maps GC scraper — bulk company discovery, $0/run
     // Finds 50-150 construction companies per market; enricher finds contacts.
@@ -980,7 +1030,7 @@ const SPECIAL_HANDLERS = {
 
     const result = await runBatchDraft({
       limit: parseInt(params.limit) || 10,
-      sourceAgent: params.source_agent || null,
+      sourceAgent: params.sourceAgent || params.source_agent || params.persona || null,
       persona: params.persona || 'jake',
     });
 
@@ -1561,17 +1611,18 @@ const SPECIAL_HANDLERS = {
     const isConfirmed = params.confirmed === true || params.confirmed === 'true';
 
     // ── BOUNCE RATE GUARD — prevent further domain damage ─────────────────
-    // Check bounce rate over last 100 sends. If > 10%, pause all sending.
+    // Check bounce rate over last 100 sends. If > 5%, pause all sending.
+    // SendGrid recommends keeping bounce rate under 5% to protect domain reputation.
     const recentSends = dbAll(`
       SELECT status, delivery_status FROM cfo_outreach_sequences
       WHERE sent_at IS NOT NULL AND status NOT IN ('cancelled', 'draft')
       ORDER BY sent_at DESC LIMIT 100
     `);
-    if (recentSends.length >= 20) { // need at least 20 sends for meaningful rate
+    if (recentSends.length >= 10) { // need at least 10 sends for meaningful rate
       const bounced = recentSends.filter(r => r.status === 'bounced' || r.delivery_status === 'bounced').length;
       const bounceRate = (bounced / recentSends.length * 100).toFixed(1);
-      if (bounceRate > 10) {
-        const msg = `Outreach Sender: PAUSED — bounce rate ${bounceRate}% on last ${recentSends.length} sends exceeds 10% safety threshold. Fix email quality before resuming.`;
+      if (bounceRate > 5) {
+        const msg = `Outreach Sender: PAUSED — bounce rate ${bounceRate}% on last ${recentSends.length} sends exceeds 5% safety threshold. Fix email quality before resuming.`;
         console.warn(`[OutreachSender] ${msg}`);
         try {
           const discord = require('../services/discordNotifier');
@@ -1624,15 +1675,17 @@ const SPECIAL_HANDLERS = {
       return { outputText: 'Outreach Sender: No approved sequences with contact emails ready to send', durationMs: Date.now() - startTime, costUsd: 0 };
     }
 
-    // ── SMART PREVIEW MODE (default for scheduled runs) ────────────────────
-    // Evaluates each sequence through the approval engine.
-    // High-confidence leads auto-send. The rest preview for Steve's confirmation.
+    // ── PREVIEW MODE (default for scheduled runs) ─────────────────────────
+    // Per CLAUDE.md Rule #5: scheduled outreach_sender is preview-only.
+    // Confidence is still scored so Discord can rank the preview, but nothing
+    // sends without an explicit confirmed=true (manual trigger or !send).
+    // To re-enable auto-send, set autoSendCap above 0 AND update CLAUDE.md.
     if (!isConfirmed) {
       const approval = require('../services/approvalEngine');
       const autoSendList = [];
       const previewList = [];
       const skipList = [];
-      const autoSendCap = 20; // Max auto-sends per scheduled run
+      const autoSendCap = 0; // Locked: no auto-sends without confirmed=true
 
       for (const seq of sequences) {
         const lead = dbGet('SELECT * FROM cfo_leads WHERE id = ?', [seq.lead_id]);
@@ -1650,9 +1703,16 @@ const SPECIAL_HANDLERS = {
         }
       }
 
-      // Auto-send high-confidence leads
+      // Auto-send high-confidence leads (with guard checks)
+      const outreachGuard = require('../services/outreachGuard');
       let autoSent = 0;
       for (const { seq, lead, confidence } of autoSendList) {
+        const check = outreachGuard.canSend(seq.contact_email, seq.id, seq.source_agent || 'hoa', seq.email_subject);
+        if (!check.allowed) {
+          console.warn(`[OutreachSender] Auto-send blocked: ${check.reason}`);
+          skipList.push(seq);
+          continue;
+        }
         try {
           const bodyText = seq.email_body || '';
           const html = sg.wrapInBrandedShell(
@@ -1664,6 +1724,7 @@ const SPECIAL_HANDLERS = {
             subject: seq.email_subject || 'Quick question',
             html,
             text: bodyText,
+            persona: seq.source_agent || 'hoa',
             customArgs: { leadId: String(seq.lead_id), agentId: seq.source_agent || 'outreach-sender' },
           });
           if (result.success) {
@@ -1735,7 +1796,20 @@ const SPECIAL_HANDLERS = {
     let failed = 0;
     const results = [];
 
+    const outreachGuard = require('../services/outreachGuard');
+    let blocked = 0;
+
     for (const seq of sequences) {
+      // ── Outreach guard: null-email, dedup, throttle, subject-flood ──
+      const check = outreachGuard.canSend(seq.contact_email, seq.id, seq.source_agent || 'hoa', seq.email_subject);
+      if (!check.allowed) {
+        blocked++;
+        dbRun("UPDATE cfo_outreach_sequences SET status = 'cancelled', delivery_error = ? WHERE id = ?", [check.reason, seq.id]);
+        results.push({ company: seq.company_name, email: seq.contact_email, status: 'blocked', reason: check.reason });
+        console.warn(`[OutreachSender] ${check.reason}`);
+        continue;
+      }
+
       try {
         const bodyText = seq.email_body || '';
         const html = sg.wrapInBrandedShell(
@@ -1747,6 +1821,7 @@ const SPECIAL_HANDLERS = {
           subject: seq.email_subject || 'Quick question',
           html,
           text: bodyText,
+          persona: seq.source_agent || 'hoa',
           customArgs: {
             leadId: String(seq.lead_id),
             runId: runId || '',
@@ -1817,8 +1892,8 @@ const SPECIAL_HANDLERS = {
     }
 
     const durationMs = Date.now() - startTime;
-    const outputText = `Outreach Sender: ${sent} sent, ${failed} failed (of ${sequences.length} confirmed) in ${(durationMs / 1000).toFixed(1)}s`;
-    return { outputText, durationMs, costUsd: 0, extra: { mode: 'confirmed', sent, failed, results } };
+    const outputText = `Outreach Sender: ${sent} sent, ${failed} failed, ${blocked} blocked by guard (of ${sequences.length} confirmed) in ${(durationMs / 1000).toFixed(1)}s`;
+    return { outputText, durationMs, costUsd: 0, extra: { mode: 'confirmed', sent, failed, blocked, results } };
   },
 
   brain_distillation: async ({ message, runId, agent }) => {
@@ -4031,7 +4106,7 @@ const SPECIAL_HANDLERS = {
     const { runRevenueScan, formatForDiscord } = require('../services/revenueRadar');
     const startTime = Date.now();
 
-    const scan = runRevenueScan();
+    const scan = await runRevenueScan();
     const durationMs = Date.now() - startTime;
 
     // Discord notification with top money moves
@@ -4096,15 +4171,17 @@ const SPECIAL_HANDLERS = {
   },
 
   // ── Pending Run Executor — fires cadence follow-ups that were queued ──
+  // Delegates to scheduleRunner.processPendingCadenceRuns() which already
+  // handles both special-handler and LLM execution paths correctly.
   pending_run_executor: async ({ message, runId, agent }) => {
-    const { all: dbAll, get: dbGet, run: dbRun } = require('../db/connection');
+    const { all: dbAll } = require('../db/connection');
     const startTime = Date.now();
     const params = parseMessageParams(message);
     const limit = parseInt(params.limit) || 10;
 
-    // Find pending cadence runs
+    // Count pending runs first (for reporting)
     const pendingRuns = dbAll(`
-      SELECT r.id, r.agent_id, r.result_data, a.name as agent_name, a.config
+      SELECT r.id, a.name as agent_name
       FROM runs r
       JOIN agents a ON a.id = r.agent_id
       WHERE r.status = 'pending'
@@ -4117,30 +4194,17 @@ const SPECIAL_HANDLERS = {
       return { outputText: 'Pending Run Executor: No pending cadence/follow-up runs to process', durationMs: Date.now() - startTime, costUsd: 0 };
     }
 
-    console.log(`[PendingRunExecutor] Processing ${pendingRuns.length} pending runs...`);
-    let executed = 0, failed = 0, skipped = 0;
-
-    for (const pendingRun of pendingRuns) {
-      try {
-        // Confirm the run (changes status from pending to running)
-        dbRun("UPDATE runs SET status = 'approved', confirmed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'", [pendingRun.id]);
-
-        // The actual execution will be picked up by the confirm endpoint logic
-        // For now, we just mark them as approved so the next manual/scheduled trigger picks them up
-        console.log(`[PendingRunExecutor] Approved: ${pendingRun.agent_name} (run ${pendingRun.id})`);
-        executed++;
-      } catch (err) {
-        console.error(`[PendingRunExecutor] Failed: ${pendingRun.id} — ${err.message}`);
-        failed++;
-      }
-    }
+    // Use the scheduleRunner's processPendingCadenceRuns which actually executes
+    // (marks running -> runs handler/LLM -> marks completed/failed)
+    const { processPendingCadenceRuns } = require('../services/scheduleRunner');
+    await processPendingCadenceRuns();
 
     const durationMs = Date.now() - startTime;
     return {
-      outputText: `Pending Run Executor: ${executed} approved, ${failed} failed, ${skipped} skipped (of ${pendingRuns.length} pending)`,
+      outputText: `Pending Run Executor: ${pendingRuns.length} pending runs processed`,
       durationMs,
       costUsd: 0,
-      extra: { executed, failed, skipped, total: pendingRuns.length },
+      extra: { total: pendingRuns.length },
     };
   },
 
@@ -4201,6 +4265,399 @@ SPECIAL_HANDLERS.dc_intel_distress_scanner = dcIntel.dcIntelDistressScanner;
 SPECIAL_HANDLERS.dc_intel_meta_reviewer = dcIntel.dcIntelMetaReviewer;
 SPECIAL_HANDLERS.dc_intel_weekly_digest = dcIntel.dcIntelWeeklyDigest;
 SPECIAL_HANDLERS.dc_intel_dominion_monitor = dcIntel.dcIntelDominionMonitor;
+
+// ── Agent-Reach powered handlers (RSS, YouTube, Exa) ────────────────────────
+
+/**
+ * RSS Feed Digest — polls construction, HOA, and DC Intel feeds.
+ * Scores articles by keyword relevance, sends Discord digest.
+ * Schedule: daily at 9am ("0 9 * * *")
+ * Cost: $0
+ */
+SPECIAL_HANDLERS.rss_feed_digest = async ({ message, runId, agent }) => {
+  const startTime = Date.now();
+  const params = parseMessageParams(message);
+
+  const { scanFeeds, formatDigest } = require('../services/rssFeedMonitor');
+  const categories = params.categories || null; // null = all categories
+  const minScore = params.minScore || 0.3;
+
+  const items = await scanFeeds({ categories, minScore });
+
+  // Send Discord digest
+  try {
+    const discord = require('../services/discordNotifier');
+    if (items.length > 0) {
+      const digest = formatDigest(items);
+      discord.sendEmbed({
+        title: `📡 RSS Feed Digest — ${items.length} items`,
+        color: 0xff6600,
+        description: digest.slice(0, 4000),
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Agent-Reach RSS Monitor' },
+      }).catch(() => {});
+    }
+  } catch {}
+
+  // Brain observation
+  try {
+    const brain = require('../services/collectiveBrain');
+    brain.observe(
+      `rss-digest-${new Date().toISOString().slice(0, 10)}`,
+      'rss-feed-digest', 'market_insight',
+      {
+        subject: `RSS Feed Scan — ${items.length} relevant articles`,
+        content: items.slice(0, 5).map(i => `${i.label}: ${i.title}`).join('\n'),
+        confidence: 1.0,
+        metadata: { itemCount: items.length, categories: [...new Set(items.map(i => i.category))] },
+      }
+    );
+  } catch {}
+
+  const durationMs = Date.now() - startTime;
+  const outputText = items.length > 0
+    ? `RSS Digest: ${items.length} relevant articles found.\n\n` +
+      items.slice(0, 10).map(i => `• [${i.label}] ${i.title} (score: ${(i.relevanceScore * 100).toFixed(0)}%)\n  ${i.link}`).join('\n')
+    : 'RSS Digest: No new relevant articles found.';
+
+  return { outputText, durationMs, costUsd: 0, extra: { itemCount: items.length } };
+};
+
+/**
+ * YouTube Intel Scanner — mines transcripts from DC Intel / construction channels.
+ * Extracts auto-generated subtitles, scores for relevance, creates intel notes.
+ * Schedule: weekly on Monday 8am ("0 8 * * 1")
+ * Cost: $0
+ */
+SPECIAL_HANDLERS.youtube_intel_scan = async ({ message, runId, agent }) => {
+  const startTime = Date.now();
+  const params = parseMessageParams(message);
+
+  const { scanForIntel, DC_INTEL_SEARCHES, CONSTRUCTION_SEARCHES } = require('../services/youtubeIntel');
+  const searchType = params.type || 'dc_intel'; // 'dc_intel' or 'construction'
+  const searches = searchType === 'construction' ? CONSTRUCTION_SEARCHES : DC_INTEL_SEARCHES;
+  const maxVideos = params.maxVideos || 3;
+  const minScore = params.minScore || 0.3;
+
+  const notes = await scanForIntel({ searches, maxVideos, minScore });
+
+  // Post high-relevance notes to DC Intel API (if dc_intel type).
+  // Bails after 2 consecutive failures — if DC API is offline, don't spend 15s × N notes timing out.
+  let notesPosted = 0;
+  if (searchType === 'dc_intel' && notes.length > 0) {
+    const DC_API = process.env.DC_SITE_INTEL_URL || 'http://localhost:8095';
+    const DC_SECRET = process.env.DC_SITE_INTEL_SECRET || '';
+    let consecutiveFailures = 0;
+    for (const note of notes) {
+      if (consecutiveFailures >= 2) {
+        console.warn(`[YouTubeIntel] DC API unreachable — skipping ${notes.length - notesPosted} remaining notes`);
+        break;
+      }
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (DC_SECRET) headers['X-OpenClaw-Secret'] = DC_SECRET;
+        await fetch(`${DC_API}/webhooks/openclaw/intel-note`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            note_type: note.note_type,
+            content: note.content,
+            confidence: note.confidence,
+            source_url: note.source_url,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        notesPosted++;
+        consecutiveFailures = 0;
+      } catch (err) {
+        consecutiveFailures++;
+        console.warn(`[YouTubeIntel] Failed to post note: ${err.message}`);
+      }
+    }
+  }
+
+  // Discord notification
+  try {
+    const discord = require('../services/discordNotifier');
+    if (notes.length > 0) {
+      discord.sendEmbed({
+        title: `📺 YouTube Intel — ${notes.length} insights found`,
+        color: 0xff0000,
+        description: notes.slice(0, 3).map(n => n.content.slice(0, 300)).join('\n\n---\n\n'),
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Agent-Reach YouTube Intel' },
+      }).catch(() => {});
+    }
+  } catch {}
+
+  // Brain observation
+  try {
+    const brain = require('../services/collectiveBrain');
+    brain.observe(
+      `youtube-intel-${new Date().toISOString().slice(0, 10)}`,
+      'youtube-intel-scan', 'market_insight',
+      {
+        subject: `YouTube transcript mining — ${notes.length} intel notes`,
+        content: notes.slice(0, 3).map(n => n.metadata?.title || '').join(', '),
+        confidence: 1.0,
+        metadata: { noteCount: notes.length, notesPosted, searchType },
+      }
+    );
+  } catch {}
+
+  const durationMs = Date.now() - startTime;
+  const outputText = notes.length > 0
+    ? `YouTube Intel: ${notes.length} insights extracted, ${notesPosted} posted to DC Intel.\n\n` +
+      notes.slice(0, 5).map(n => `• ${n.metadata?.title} (${(n.metadata?.relevance_score * 100).toFixed(0)}% relevant)\n  ${n.source_url}`).join('\n')
+    : 'YouTube Intel: No relevant transcripts found this scan.';
+
+  return { outputText, durationMs, costUsd: 0, extra: { notesFound: notes.length, notesPosted } };
+};
+
+/**
+ * Exa Competitor Intel — semantic search for competitive signals.
+ * Finds thematic competitors and market moves that keyword search misses.
+ * Schedule: weekly on Wednesday 10am ("0 10 * * 3")
+ * Cost: $0
+ */
+SPECIAL_HANDLERS.exa_competitor_intel = async ({ message, runId, agent }) => {
+  const startTime = Date.now();
+  const params = parseMessageParams(message);
+
+  const { exaSearch } = require('../services/exaSearcher');
+  const focus = params.focus || 'all'; // 'hoa', 'jake', 'dc', or 'all'
+
+  const COMPETITOR_QUERIES = {
+    hoa: [
+      'HOA reserve fund financing alternative to special assessment 2026',
+      'community association capital improvement lending platform',
+      'HOA loan technology startup funding',
+    ],
+    jake: [
+      'construction accounting software for contractors alternative',
+      'construction CFO technology financial management automation',
+      'general contractor back office software startup',
+    ],
+    dc: [
+      'data center site selection AI tool platform',
+      'commercial real estate land acquisition technology data center',
+      'utility infrastructure investment intelligence platform',
+    ],
+  };
+
+  const queries = focus === 'all'
+    ? [...COMPETITOR_QUERIES.hoa, ...COMPETITOR_QUERIES.jake, ...COMPETITOR_QUERIES.dc]
+    : (COMPETITOR_QUERIES[focus] || []);
+
+  const allResults = [];
+  const seenUrls = new Set();
+
+  for (const query of queries) {
+    try {
+      const results = await exaSearch(query, 5);
+      for (const r of results) {
+        if (!seenUrls.has(r.url)) {
+          seenUrls.add(r.url);
+          allResults.push({ ...r, query });
+        }
+      }
+      console.log(`[ExaCompetitor] "${query.slice(0, 50)}..." → ${results.length} results`);
+    } catch (err) {
+      console.warn(`[ExaCompetitor] Query failed: ${err.message}`);
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  // Discord notification
+  try {
+    const discord = require('../services/discordNotifier');
+    if (allResults.length > 0) {
+      discord.sendEmbed({
+        title: `🔍 Competitor Intel — ${allResults.length} signals`,
+        color: 0x5865f2,
+        description: allResults.slice(0, 5).map(r =>
+          `**${r.title?.slice(0, 80)}**\n${r.url}\n_Query: ${r.query.slice(0, 60)}_`
+        ).join('\n\n'),
+        timestamp: new Date().toISOString(),
+        footer: { text: 'Agent-Reach Exa Competitor Intel' },
+      }).catch(() => {});
+    }
+  } catch {}
+
+  // Brain observation
+  try {
+    const brain = require('../services/collectiveBrain');
+    brain.observe(
+      `exa-competitor-${new Date().toISOString().slice(0, 10)}`,
+      'exa-competitor-intel', 'competitor_signal',
+      {
+        subject: `Exa competitor scan — ${allResults.length} signals across ${queries.length} queries`,
+        content: allResults.slice(0, 5).map(r => r.title).join(', '),
+        confidence: 1.0,
+        metadata: { signalCount: allResults.length, focus, queryCount: queries.length },
+      }
+    );
+  } catch {}
+
+  const durationMs = Date.now() - startTime;
+  const outputText = allResults.length > 0
+    ? `Competitor Intel: ${allResults.length} signals from ${queries.length} semantic queries.\n\n` +
+      allResults.slice(0, 10).map(r => `• ${r.title?.slice(0, 80)}\n  ${r.url}`).join('\n')
+    : 'Competitor Intel: No new competitor signals found.';
+
+  return { outputText, durationMs, costUsd: 0, extra: { signalCount: allResults.length, queriesRun: queries.length } };
+};
+
+// ── Terrapin Station Community Services — fence + fire outreach ──────────
+SPECIAL_HANDLERS.fence_outreach_builder = async ({ message, runId, agent }) => {
+  const { all: dbAll, get: dbGet, run: dbRun } = require('../db/connection');
+  const { buildFenceEmail, getMaxSteps } = require('../services/fenceEmailTemplate');
+  const startTime = Date.now();
+  const params = parseMessageParams(message);
+  const senderName = params.sender_name || 'Adam Weir';
+
+  // ── Sync new CO HOA leads from CRM into fence_leads ──
+  // Terrapin pulls from the same lead database as everyone else
+  try {
+    const existingEmails = new Set(dbAll('SELECT contact_email FROM fence_leads').map(r => r.contact_email?.toLowerCase()).filter(Boolean));
+    const WUI_CITIES = ['ken caryl', 'castle pines', 'roxborough', 'highlands ranch', 'evergreen', 'conifer', 'golden', 'morrison', 'parker', 'castle rock'];
+    const newCrmLeads = dbAll(`
+      SELECT * FROM cfo_leads
+      WHERE source_agent = 'hoa' AND state = 'CO'
+        AND contact_email IS NOT NULL AND contact_email != ''
+        AND enrichment_status = 'enriched'
+      ORDER BY created_at DESC LIMIT 100
+    `);
+    let synced = 0;
+    for (const lead of newCrmLeads) {
+      if (existingEmails.has(lead.contact_email?.toLowerCase())) continue;
+      const city = (lead.city || '').toLowerCase().trim();
+      const isMgmt = /property manag|community manag|regional|portfolio|associa|realmanage|vesta|firstservice|sentry|castle group|cushman|management/i.test((lead.contact_title || '') + ' ' + (lead.company_name || ''));
+      const isWui = WUI_CITIES.some(w => city.includes(w));
+      const leadType = isMgmt ? 'mgmt_company' : 'board_president';
+      const tier = isMgmt ? 1 : isWui ? 2 : 3;
+      dbRun(
+        `INSERT INTO fence_leads (lead_type, tier, company_name, community_name, contact_name, contact_email, contact_title, source, status, notes, wui_zone)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'crm', 'new', ?, ?)`,
+        [leadType, tier, lead.company_name, lead.company_name, lead.contact_name, lead.contact_email, lead.contact_title, 'Auto-synced from CRM #' + lead.id, isWui ? 1 : 0]
+      );
+      synced++;
+    }
+    if (synced > 0) console.log(`[Terrapin] Synced ${synced} new CO leads from CRM`);
+  } catch (err) {
+    console.warn('[Terrapin] CRM sync warning:', err.message);
+  }
+
+  // Find new fence leads that need sequences built
+  const leads = dbAll("SELECT * FROM fence_leads WHERE status = 'new' LIMIT 50");
+  if (leads.length === 0) {
+    return { outputText: 'Terrapin Builder: No new leads to process', durationMs: Date.now() - startTime, costUsd: 0 };
+  }
+
+  let created = 0, skipped = 0;
+  for (const lead of leads) {
+    // Routing logic from SOUL.md
+    let seqType;
+    if (lead.previous_project_type || lead.lead_type === 'warm_contact') {
+      seqType = 'warm';
+    } else if (lead.wui_zone === 1 && lead.community_name) {
+      seqType = 'fire_wui';
+    } else if (lead.lead_type === 'mgmt_company') {
+      seqType = 'cold_mgmt';
+    } else if (lead.lead_type === 'board_president') {
+      if (!lead.community_name) { skipped++; continue; }
+      seqType = 'cold_board';
+    } else { skipped++; continue; }
+
+    // Skip if sequences already exist
+    const existing = dbGet('SELECT COUNT(*) as cnt FROM fence_outreach_sequences WHERE lead_id = ?', [lead.id]);
+    if (existing.cnt > 0) { skipped++; continue; }
+
+    const maxSteps = getMaxSteps(seqType);
+    for (let step = 1; step <= maxSteps; step++) {
+      const email = buildFenceEmail(lead, seqType, step, senderName);
+      const scheduledDate = new Date();
+      scheduledDate.setDate(scheduledDate.getDate() + email.dayOffset);
+      dbRun(
+        `INSERT INTO fence_outreach_sequences (lead_id, sequence_type, sequence_step, email_subject, email_body_html, email_body_text, status, scheduled_send_date)
+         VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)`,
+        [lead.id, seqType, step, email.subject, email.body_html, email.body_text, scheduledDate.toISOString()]
+      );
+      created++;
+    }
+    dbRun("UPDATE fence_leads SET status = 'contacted', updated_at = datetime('now') WHERE id = ?", [lead.id]);
+  }
+
+  return {
+    outputText: `Terrapin Builder: ${created} emails built for ${leads.length} leads (${skipped} skipped)`,
+    durationMs: Date.now() - startTime, costUsd: 0,
+    extra: { created, skipped, leads: leads.length },
+  };
+};
+
+SPECIAL_HANDLERS.fence_outreach_sender = async ({ message, runId, agent }) => {
+  const { all: dbAll, get: dbGet, run: dbRun } = require('../db/connection');
+  const startTime = Date.now();
+
+  // Find approved emails that are due to send
+  const approved = dbAll(
+    `SELECT s.*, l.contact_email, l.contact_name, l.company_name, l.community_name
+     FROM fence_outreach_sequences s
+     JOIN fence_leads l ON s.lead_id = l.id
+     WHERE s.status = 'approved' AND s.scheduled_send_date <= datetime('now')
+     ORDER BY s.scheduled_send_date ASC`
+  );
+
+  if (approved.length === 0) {
+    return { outputText: 'Terrapin Sender: No approved emails ready to send', durationMs: Date.now() - startTime, costUsd: 0 };
+  }
+
+  const sg = require('../services/sendgrid');
+  let sent = 0, failed = 0;
+
+  for (const item of approved) {
+    try {
+      const result = await sg.send({
+        to: item.contact_email,
+        subject: item.email_subject,
+        html: item.email_body_html,
+        text: item.email_body_text,
+        persona: 'terrapin',
+      });
+
+      if (result.success) {
+        dbRun(
+          "UPDATE fence_outreach_sequences SET status='sent', sent_at=datetime('now'), delivery_status='delivered', sendgrid_msg_id=? WHERE id=?",
+          [result.messageId || null, item.id]
+        );
+        sent++;
+      } else {
+        dbRun("UPDATE fence_outreach_sequences SET delivery_status='failed', delivery_error=? WHERE id=?",
+          [result.error || 'Unknown', item.id]);
+        failed++;
+      }
+    } catch (err) {
+      dbRun("UPDATE fence_outreach_sequences SET delivery_status='failed', delivery_error=? WHERE id=?",
+        [err.message, item.id]);
+      failed++;
+    }
+  }
+
+  // Update daily metrics
+  const today = new Date().toISOString().split('T')[0];
+  const existing = dbGet('SELECT id FROM fence_metrics WHERE date = ?', [today]);
+  if (existing) {
+    dbRun('UPDATE fence_metrics SET emails_sent = emails_sent + ? WHERE date = ?', [sent, today]);
+  } else {
+    dbRun('INSERT INTO fence_metrics (date, emails_sent) VALUES (?, ?)', [today, sent]);
+  }
+
+  return {
+    outputText: `Terrapin Sender: ${sent} sent, ${failed} failed (of ${approved.length} approved)`,
+    durationMs: Date.now() - startTime, costUsd: 0,
+    extra: { sent, failed, total: approved.length },
+  };
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 // ROUTES
@@ -4345,7 +4802,6 @@ router.post('/:id/confirm', validateParams(runIdParamSchema), async (req, res, n
         console.error(`[Runs] ${agentConfig.special_handler} error:`, handlerError.message);
         markRunFailed(runId, agent.id, handlerError.message);
         emitLog(`${agentConfig.special_handler} failed: ${handlerError.message}`);
-        try { require('../services/discordNotifier').notifyRunCompleted({ agentName: agent.name, status: 'failed', errorMsg: handlerError.message, runId }); } catch {}
         throw new AppError(`${agentConfig.special_handler} failed: ${handlerError.message}`, 'HANDLER_ERROR', 500);
       }
     }

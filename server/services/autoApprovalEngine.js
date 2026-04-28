@@ -15,7 +15,7 @@
  * Safety rails:
  *   - Opt-in: auto_approval_enabled defaults to 'false'
  *   - Daily send cap (default 50)
- *   - Bounce rate circuit breaker (>10% in 7d → pause all)
+ *   - Bounce rate circuit breaker (>5% in 7d → pause all)
  *   - Full audit trail in audit_log
  *   - Discord alerts on first 5 auto-sends per day and on circuit breaker trips
  *
@@ -64,7 +64,7 @@ function getDailyCap() {
 }
 
 function getBounceThreshold() {
-  return parseFloat(getSetting('auto_approval_bounce_threshold', '0.10'));
+  return parseFloat(getSetting('auto_approval_bounce_threshold', '0.05'));
 }
 
 // ── Circuit breakers ────────────────────────────────────────────────────────────
@@ -274,6 +274,15 @@ async function sendOutreachEmail(sequenceId) {
   const lead = get('SELECT id, contact_email, contact_name, company_name FROM cfo_leads WHERE id = ?', [seq.lead_id]);
   if (!lead?.contact_email) return { success: false, error: 'No contact email — enrich the lead first' };
 
+  // ── Outreach guard: null-email, dedup, throttle, subject-flood ──
+  const outreachGuard = require('./outreachGuard');
+  const check = outreachGuard.canSend(lead.contact_email, sequenceId, seq.source_agent || 'jake', seq.email_subject);
+  if (!check.allowed) {
+    console.warn(`[AutoApproval] Send blocked for #${sequenceId}: ${check.reason}`);
+    run("UPDATE cfo_outreach_sequences SET status = 'cancelled', delivery_error = ? WHERE id = ?", [check.reason, sequenceId]);
+    return { success: false, error: check.reason };
+  }
+
   try {
     const sg = require('./sendgrid');
     const subject = seq.email_subject || 'Hello';
@@ -287,6 +296,7 @@ async function sendOutreachEmail(sequenceId) {
       subject,
       html,
       text: bodyText,
+      persona: seq.source_agent || 'jake',
     });
 
     if (result.success) {
@@ -337,7 +347,7 @@ function pauseAutoApproval(reason) {
         timestamp: new Date().toISOString(),
         footer: { text: 'AutoApprovalEngine · ClawOps' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[AutoApproval] notify failed:', e.message));
   } catch {}
 
   console.warn(`[AutoApproval] PAUSED: ${reason}`);
