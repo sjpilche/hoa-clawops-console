@@ -1,10 +1,12 @@
 // =============================================================================
 // OpenClaw Fleet — pm2 Ecosystem Config
 // =============================================================================
-// Keeps the entire OpenClaw army running 24/7:
+// Keeps the ClawOps army running 24/7:
 //   1. ClawOps Server (Express, port 3001) — agent ops, schedules, brain
 //   2. ClawOps Client (Vite, port 5174) — dashboard UI
-//   3. Trader Service (Express, port 3002) — AI panel, brain, Alpaca
+//
+// Trader Service lives in its own repo: openclaw-trader (port 3002)
+//   → cd ../openclaw-trader && pm2 start ecosystem.config.cjs
 //
 // Usage:
 //   pm2 start ecosystem.config.cjs        — Start all
@@ -45,7 +47,9 @@ module.exports = {
       max_memory_restart: '500M',
 
       watch: false,
-      kill_timeout: 10000,
+      kill_timeout: 15000,
+      listen_timeout: 15000,
+      wait_ready: false,
     },
 
     // -----------------------------------------------------------------
@@ -73,38 +77,8 @@ module.exports = {
       max_memory_restart: '300M',
 
       watch: false,
-      kill_timeout: 5000,
+      kill_timeout: 8000,
     },
 
-    // -----------------------------------------------------------------
-    // 3. Trader Service — AI panel, recursive brain, Alpaca paper trading
-    // -----------------------------------------------------------------
-    {
-      name: 'openclaw-trader',
-      cwd: ROOT + '\\services\\trader-service',
-      script: 'src/server.ts',
-      interpreter: 'node',
-      interpreter_args: '--import tsx',
-      instances: 1,
-      exec_mode: 'fork',
-
-      // Logging
-      error_file: './logs/error.log',
-      out_file: './logs/out.log',
-      log_file: './logs/combined.log',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      merge_logs: true,
-      max_size: '50M',
-
-      // Restart
-      autorestart: true,
-      max_restarts: 50,
-      min_uptime: '10s',
-      restart_delay: 10000,
-      max_memory_restart: '500M',
-
-      watch: false,
-      kill_timeout: 10000,
-    },
   ],
 };

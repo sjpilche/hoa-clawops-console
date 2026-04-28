@@ -51,7 +51,8 @@ Node.js 24 · Express · Vite/React 19 · SQLite3 · OpenClaw CLI v2026.3.12 · 
 
 ### Commands
 ```bash
-pm2 start ecosystem.config.cjs        # Start server (3001) + client (5174) + trader (3002)
+pm2 start ecosystem.config.cjs        # Start server (3001) + client (5174)
+# Trader service is separate: cd ../openclaw-trader && pm2 start ecosystem.config.cjs
 pm2 status / pm2 logs / pm2 restart all
 node scripts/seed-all-agents.js        # Sync 66 active agents (6 ghost CFOs + 1 unbuilt HOA cut in 2026-03-14 audit)
 node scripts/seed-all-schedules.js --clean  # Sync 59 schedules (8 frozen Owen/DataRehab disabled)

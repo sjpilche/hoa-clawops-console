@@ -369,24 +369,41 @@ async function maybeRunBrainCouncil() {
 }
 
 // ── Schedule drift detection ──────────────────────────────────────────────────
-// Checks if any schedule that should have fired in the last tick window was missed.
-const DRIFT_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+// A "miss" means: the cron's previous expected fire-time came and went, but
+// last_run_at is older than that fire-time. Naively comparing "drift > 65min"
+// flagged every daily/weekly schedule as missed because their natural cadence
+// is wider than the threshold. Use cron-parser to compute the real expected
+// previous fire-time and compare against that.
+const cronParser = require('cron-parser');
+const DRIFT_GRACE_MS = 5 * 60 * 1000; // last_run_at can be up to 5 min before expected prev-fire (clock skew, slow tick)
+
+function previousExpectedFire(cronExpr, fromDate = new Date()) {
+  try {
+    const parser = cronParser.CronExpressionParser || cronParser; // support both old and new APIs
+    const it = parser.parse ? parser.parse(cronExpr, { currentDate: fromDate }) : cronParser.parseExpression(cronExpr, { currentDate: fromDate });
+    return it.prev().toDate();
+  } catch {
+    return null;
+  }
+}
 
 function checkScheduleDrift(schedules) {
   const now = Date.now();
   for (const schedule of schedules) {
     if (!schedule.last_run_at || !schedule.enabled) continue;
-    // Only check schedules that are currently due (should be running now)
     if (!isDue(schedule.cron_expression)) continue;
 
+    const expectedPrev = previousExpectedFire(schedule.cron_expression);
+    if (!expectedPrev) continue;
+    const expectedPrevMs = expectedPrev.getTime();
     const lastRun = new Date(schedule.last_run_at).getTime();
-    const drift = now - lastRun;
 
-    // If last run was more than 65 minutes ago AND the schedule is due now,
-    // it means we missed the last fire window
-    if (drift > 65 * 60 * 1000) {
-      const driftMinutes = Math.round(drift / 60000);
-      console.warn(`[ScheduleDrift] "${schedule.name}" — last ran ${driftMinutes}m ago, due now. Possible missed fire.`);
+    // Missed only if last_run_at is older than the previous expected fire (with grace).
+    // For a daily 9am cron checked at 9am today, expectedPrev = 9am yesterday. If
+    // last_run_at is yesterday 9am, no drift. If last_run_at is two days ago, drift.
+    if (lastRun < expectedPrevMs - DRIFT_GRACE_MS) {
+      const driftMinutes = Math.round((expectedPrevMs - lastRun) / 60000);
+      console.warn(`[ScheduleDrift] "${schedule.name}" — missed expected fire at ${expectedPrev.toISOString()} (last_run ${driftMinutes}m before that).`);
 
       // Log to audit_log for tracking
       try {
@@ -510,11 +527,49 @@ async function processPendingCadenceRuns() {
   }
 }
 
+// ── Stale-run reaper — marks zombie runs as failed ──────────────────────────
+// Runs every 30 minutes. Catches runs stuck in 'running' for 2+ hours
+// (e.g. OpenClaw CLI hung, process killed, unhandled promise rejection).
+let _lastReapMinute = -1;
+
+function reapStaleRuns() {
+  const now = new Date();
+  const minute = now.getHours() * 60 + now.getMinutes();
+  if (minute === _lastReapMinute) return;
+  if (minute % 30 !== 0) return; // Only run on :00 and :30
+  _lastReapMinute = minute;
+
+  try {
+    const stale = all(`
+      SELECT r.id, a.name as agent_name, r.created_at
+      FROM runs r LEFT JOIN agents a ON a.id = r.agent_id
+      WHERE r.status = 'running' AND r.created_at < datetime('now', '-2 hours')
+    `);
+    if (stale.length === 0) return;
+
+    for (const s of stale) {
+      run(
+        "UPDATE runs SET status='failed', error_msg='Timeout: no heartbeat after 2 hours', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=?",
+        [s.id]
+      );
+      console.warn(`[StaleRunReaper] Marked as failed: ${s.agent_name || 'unknown'} (created ${s.created_at})`);
+    }
+    // Reset any agents stuck in 'running' status
+    run("UPDATE agents SET status='idle', updated_at=datetime('now') WHERE status='running'");
+    console.log(`[StaleRunReaper] Reaped ${stale.length} stale runs`);
+  } catch (err) {
+    console.error('[StaleRunReaper] Error:', err.message);
+  }
+}
+
 // ── Main tick ─────────────────────────────────────────────────────────────────
 async function tick() {
   if (_checkRunning) return;
   _checkRunning = true;
   try {
+    // Reap zombie runs before processing new schedules
+    reapStaleRuns();
+
     const schedules = all('SELECT * FROM schedules WHERE enabled = 1 ORDER BY created_at ASC');
 
     // Check for schedule drift before executing
@@ -553,10 +608,10 @@ async function tick() {
     maybeRunPerformanceEval();
 
     // Nightly brain distillation at 02:00 AM
-    maybeRunDistillation().catch(() => {});
+    maybeRunDistillation().catch(e => console.warn('[ScheduleRunner] nightly task failed:', e.message));
 
     // Brain Council Discord summary at 02:30 AM (after distillation)
-    maybeRunBrainCouncil().catch(() => {});
+    maybeRunBrainCouncil().catch(e => console.warn('[ScheduleRunner] nightly task failed:', e.message));
   } catch (err) {
     console.error('[ScheduleRunner] Tick error:', err.message);
   } finally {
@@ -593,4 +648,4 @@ function stopScheduleRunner() {
   if (_timer) { clearInterval(_timer); _timer = null; }
 }
 
-module.exports = { startScheduleRunner, stopScheduleRunner };
+module.exports = { startScheduleRunner, stopScheduleRunner, processPendingCadenceRuns };
