@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Rehab | Get Control of Cash, AR, and Reporting in 2-3 Weeks</title>
+  <meta name="description" content="Data Rehab helps growing service businesses clean up AR, improve cash visibility, and fix messy reporting fast — without a giant ERP or consulting project.">
+  <meta property="og:title" content="Data Rehab — Fast Financial Clarity for Messy Service Businesses">
+  <meta property="og:description" content="Fix the numbers that are slowing down your business. Short, practical sprints focused on AR recovery, cash visibility, and reporting leadership can actually trust.">
+  <meta property="og:type" content="website">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.7; }
+    a { color: #a78bfa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Nav */
+    nav { max-width: 900px; margin: 0 auto; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    nav .logo { font-size: 1.25rem; font-weight: 700; color: #f8fafc; }
+    nav .logo span { color: #a78bfa; }
+    nav .nav-cta { padding: 0.5rem 1.25rem; border-radius: 0.5rem; background: #7c3aed; color: #fff; font-size: 0.875rem; font-weight: 600; text-decoration: none; transition: background 0.15s; }
+    nav .nav-cta:hover { background: #6d28d9; text-decoration: none; }
+
+    /* Hero */
+    .hero { max-width: 800px; margin: 0 auto; padding: 3rem 2rem 2.5rem; text-align: center; }
+    .hero h1 { font-size: 2.75rem; font-weight: 800; margin-bottom: 1.5rem; color: #f8fafc; line-height: 1.15; }
+    .hero h1 em { font-style: normal; color: #a78bfa; }
+    .hero .subtitle { font-size: 1.2rem; color: #94a3b8; margin-bottom: 2.5rem; max-width: 640px; margin-left: auto; margin-right: auto; }
+    .hero-ctas { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .hero-ctas a { padding: 0.875rem 1.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 1rem; transition: transform 0.15s; }
+    .hero-ctas a:hover { transform: translateY(-1px); text-decoration: none; }
+    .btn-primary { background: #7c3aed; color: #fff; }
+    .btn-secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+
+    /* Who it's for */
+    .audience { max-width: 800px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .audience h2 { font-size: 1.5rem; text-align: center; margin-bottom: 0.5rem; color: #f8fafc; }
+    .audience .sub { text-align: center; color: #64748b; margin-bottom: 1.5rem; font-size: 0.95rem; }
+    .audience-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; }
+    .audience-tags span { padding: 0.5rem 1rem; background: #1e293b; border-radius: 2rem; font-size: 0.875rem; color: #94a3b8; border: 1px solid #334155; }
+
+    /* Pain section */
+    .pain { max-width: 700px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .pain h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .pain-list { list-style: none; display: grid; gap: 1rem; }
+    .pain-list li { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem 1.25rem; background: #1e293b; border-radius: 0.75rem; border-left: 3px solid #7c3aed; }
+    .pain-list li .text { font-size: 0.95rem; }
+    .pain-list li .text strong { color: #f8fafc; }
+
+    /* Offers */
+    .offers { max-width: 800px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .offers h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .offer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .offer-card { padding: 2rem; background: #1e293b; border-radius: 1rem; border: 1px solid #334155; }
+    .offer-card h3 { font-size: 1.25rem; color: #a78bfa; margin-bottom: 0.75rem; }
+    .offer-card p { font-size: 0.95rem; color: #94a3b8; margin-bottom: 1rem; }
+    .offer-card .scope { font-size: 0.85rem; color: #64748b; border-top: 1px solid #334155; padding-top: 1rem; }
+    .offer-card .offer-cta { display: inline-block; margin-top: 1rem; padding: 0.625rem 1.25rem; border-radius: 0.5rem; background: #7c3aed; color: #fff; font-weight: 600; font-size: 0.875rem; }
+    .offer-card .offer-cta:hover { background: #6d28d9; text-decoration: none; }
+
+    /* How it works */
+    .how { max-width: 700px; margin: 0 auto 3rem; padding: 0 2rem; }
+    .how h2 { font-size: 1.5rem; text-align: center; margin-bottom: 1.5rem; color: #f8fafc; }
+    .how-steps { display: grid; gap: 1rem; }
+    .how-step { display: flex; gap: 1rem; align-items: flex-start; padding: 1rem 1.25rem; background: #1e293b; border-radius: 0.75rem; }
+    .how-step .num { font-size: 1.5rem; font-weight: 800; color: #7c3aed; min-width: 2.5rem; text-align: center; flex-shrink: 0; }
+    .how-step .text strong { color: #f8fafc; display: block; margin-bottom: 0.25rem; }
+    .how-step .text { font-size: 0.95rem; color: #94a3b8; }
+
+    /* Identity */
+    .identity { max-width: 700px; margin: 0 auto 3rem; padding: 2rem; background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(167,139,250,0.08)); border: 1px solid rgba(124,58,237,0.3); border-radius: 1rem; text-align: center; }
+    .identity blockquote { font-size: 1.35rem; font-weight: 700; color: #f8fafc; font-style: italic; margin-bottom: 0.75rem; }
+    .identity .attribution { font-size: 0.9rem; color: #64748b; }
+
+    /* CTA */
+    .final-cta { max-width: 600px; margin: 0 auto 3rem; padding: 2.5rem 2rem; background: #1e293b; border-radius: 1rem; border: 1px solid #334155; text-align: center; }
+    .final-cta h2 { font-size: 1.75rem; margin-bottom: 0.75rem; color: #f8fafc; }
+    .final-cta p { color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
+    .final-cta .cta-btn { display: inline-block; padding: 1rem 2rem; border-radius: 0.5rem; background: #7c3aed; color: #fff; font-weight: 700; font-size: 1.1rem; }
+    .final-cta .cta-btn:hover { background: #6d28d9; text-decoration: none; }
+    .final-cta .cta-sub { margin-top: 0.75rem; font-size: 0.8rem; color: #64748b; }
+
+    footer { text-align: center; padding: 2rem; color: #475569; font-size: 0.8rem; border-top: 1px solid #1e293b; }
+
+    @media (max-width: 700px) {
+      .hero h1 { font-size: 2rem; }
+      .offer-grid { grid-template-columns: 1fr; }
+      .hero-ctas { flex-direction: column; align-items: center; }
+      .pain, .offers, .how, .identity, .final-cta, .audience { margin-left: 1rem; margin-right: 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="logo">data<span>rehab</span></div>
+    <a href="#diagnostic" class="nav-cta">Book a Diagnostic</a>
+  </nav>
+
+  <div class="hero">
+    <h1>Get control of cash, AR, and reporting in <em>2-3 weeks.</em></h1>
+    <p class="subtitle">Data Rehab helps growing service businesses clean up messy finance operations through short, practical sprints focused on collections, cash visibility, and reporting leadership can actually trust.</p>
+    <div class="hero-ctas">
+      <a href="#diagnostic" class="btn-primary">Book a Diagnostic</a>
+      <a href="#ar-sprint" class="btn-secondary">See the AR Recovery Sprint</a>
+      <a href="#cash-sprint" class="btn-secondary">See the Cash + Reporting Sprint</a>
+    </div>
+  </div>
+
+  <div class="audience">
+    <h2>Built for service businesses where operations outpaced finance.</h2>
+    <p class="sub">Best fit:</p>
+    <div class="audience-tags">
+      <span>Roofing &amp; Exteriors</span>
+      <span>Restoration</span>
+      <span>HVAC</span>
+      <span>Plumbing</span>
+      <span>Electrical</span>
+      <span>Specialty Contractors</span>
+      <span>Field Service</span>
+    </div>
+  </div>
+
+  <div class="pain">
+    <h2>Stop guessing about cash, collections, and reporting.</h2>
+    <ul class="pain-list">
+      <li><span class="text"><strong>AR is messy.</strong> Aging is unreliable, follow-up is inconsistent, and nobody has a clean view of what's actually collectible vs. stuck.</span></li>
+      <li><span class="text"><strong>Cash keeps surprising you.</strong> Weekly cash position takes too long to build, and the answer still comes with caveats.</span></li>
+      <li><span class="text"><strong>Reporting is too manual.</strong> Finance spends more time stitching reports together than analyzing them. Same numbers rebuilt by hand every month.</span></li>
+      <li><span class="text"><strong>Sales, ops, and accounting all have pieces of the truth</strong> — but nobody has a clean picture leadership can act on.</span></li>
+    </ul>
+  </div>
+
+  <div class="offers" id="sprints">
+    <h2>Two sprints. Specific pain points. Done in weeks.</h2>
+    <div class="offer-grid">
+      <div class="offer-card" id="ar-sprint">
+        <h3>AR Recovery Sprint</h3>
+        <p>Clean up aging, identify what's collectible, surface what's stuck, and give leadership a practical system for follow-up and cash visibility.</p>
+        <div class="scope">
+          <strong style="color:#f8fafc;">What you get:</strong><br>
+          Clean aging report your team can trust<br>
+          Collectibility assessment on every open balance<br>
+          Follow-up priority system<br>
+          Cash recovery roadmap with dollar estimates
+        </div>
+        <a href="#diagnostic" class="offer-cta">Book a Diagnostic</a>
+      </div>
+      <div class="offer-card" id="cash-sprint">
+        <h3>Cash + Reporting Sprint</h3>
+        <p>Build a cleaner weekly view of cash, KPIs, and management reporting so owners and finance leads can stop rebuilding the same answers every month.</p>
+        <div class="scope">
+          <strong style="color:#f8fafc;">What you get:</strong><br>
+          Weekly cash position that builds itself<br>
+          KPI dashboard leadership actually uses<br>
+          Management reporting package<br>
+          Reduced manual rebuild cycle
+        </div>
+        <a href="#diagnostic" class="offer-cta">Book a Diagnostic</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="how">
+    <h2>How it works</h2>
+    <div class="how-steps">
+      <div class="how-step">
+        <span class="num">1</span>
+        <div class="text"><strong>Diagnostic call (30 min, free)</strong>We look at what systems you're running, where the pain is, and whether a sprint makes sense. If it doesn't, we'll tell you.</div>
+      </div>
+      <div class="how-step">
+        <span class="num">2</span>
+        <div class="text"><strong>Sprint kickoff</strong>We plug into your systems, map the mess, and start cleaning up the specific pain point. No six-month project plan. No committee.</div>
+      </div>
+      <div class="how-step">
+        <span class="num">3</span>
+        <div class="text"><strong>Deliverables in 2-3 weeks</strong>You get clean outputs your team can use immediately — not a strategy deck. Usable reports, working systems, less manual grind.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="identity">
+    <blockquote>"I'm not selling advisory theater. I fix ugly finance problems fast."</blockquote>
+    <div class="attribution">Steve Pilcher — 9 years as CFO of a 20-division construction company. Built the tools. Now brings them to service businesses that need the same fix.</div>
+  </div>
+
+  <div class="final-cta" id="diagnostic">
+    <h2>Book a Diagnostic</h2>
+    <p>30 minutes. We'll look at your setup and tell you honestly whether a sprint would help. If it won't, we'll say so.</p>
+    <a href="mailto:steve@getdatarehab.com?subject=Data%20Rehab%20Diagnostic&body=Company:%0AName:%0ABiggest%20pain%20point:%0A" class="cta-btn">Book a Diagnostic Call</a>
+    <div class="cta-sub">Or email steve@getdatarehab.com directly.</div>
+  </div>
+
+  <footer>
+    <p>&copy; 2026 Data Rehab. Fast financial clarity for messy service businesses.</p>
+  </footer>
+
+</body>
+</html>
