@@ -75,6 +75,16 @@ const PAIN_LABELS = {
   'need funding':       'actively seeking funding',
   'loan':               'researching loans',
   'delinquent dues':    'delinquent dues problem',
+  // Unified CFO + AI + data signals
+  'multiple systems':   'disconnected systems — automation opportunity',
+  'manual process':     'manual processes burning staff hours',
+  'manual reconciliation': 'manual reconciliation — automation candidate',
+  'no visibility':      'no real-time financial visibility',
+  'growing fast':       'scaling without finance infrastructure',
+  'rapid growth':       'scaling without finance infrastructure',
+  'dual systems':       'running parallel systems — data cleanup needed',
+  'data migration':     'mid-migration — data integrity at risk',
+  'multi-entity':       'multi-entity complexity — automation opportunity',
 };
 
 function humanizeSignal(rawSignal) {
@@ -560,7 +570,7 @@ function notifyError(entityType, entityId, entityName, errorMsg) {
         timestamp: new Date().toISOString(),
         footer: { text: 'ClawOps · Lead Dossier Generator' },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[DossierGen] notify failed:', e.message));
   } catch {}
 }
 

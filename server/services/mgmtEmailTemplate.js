@@ -34,16 +34,17 @@ traditional bank loans take 90–180 days and often force difficult special asse
 </p>
 
 <p>
-Empire Capital is a tech-enabled HOA financing platform built specifically for homeowner
-associations nationwide. We provide streamlined loans typically from $25K to $2M for
-capital repairs, reconstruction, and reserve projects.
+I spent 9 years as CFO of a 20-division construction company. During that time I built
+AI agents that automate financial operations — AR monitoring, cash forecasting, reserve
+analysis. HOA Project Funding brings that same technology to community associations:
+streamlined loans from $25K to $2M, with the data infrastructure and financial oversight
+that most HOA financing lacks.
 </p>
 
 <p>
 Our underwriting is designed around how HOAs actually operate (reserves, delinquency rates,
-assessment structures, reserve studies, etc.). We're HOA specialists — not a consumer
-lender — and we integrate construction oversight through EmpireWorks so projects stay on
-track.
+assessment structures, reserve studies). We're HOA specialists — not a consumer lender —
+and the technology behind us means your boards get answers faster and with better terms.
 </p>
 
 <p>
@@ -54,16 +55,16 @@ We've made the next step ridiculously simple for your boards:<br/>
 
 <p>
 If it's helpful, I'd be glad to jump on a quick 10–15 minute call and walk you through
-exactly how it works so you can decide if this is something worth keeping in your toolkit
-for your communities. No pressure, no sales pitch — just another option to help your
-boards move faster.
+exactly how it works — the financing, the technology, and how other management companies
+are using it as a value-add for their communities. No pressure, no sales pitch — just
+another option to help your boards move faster.
 </p>
 
 <p>Looking forward to connecting,</p>
 
 <p>
 <strong>Steve Pilcher</strong><br/>
-Empire Capital | HOA Project Funding<br/>
+Pilcher Financial | HOA Project Funding<br/>
 Highlands Ranch, Colorado<br/>
 630-989-3887<br/>
 <a href="mailto:info@hoaprojectfunding.com" style="color:#1e40af;">info@hoaprojectfunding.com</a><br/>

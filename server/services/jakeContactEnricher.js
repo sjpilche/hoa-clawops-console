@@ -520,14 +520,18 @@ async function enrichLead(leadId) {
       const updates = [];
       const params = [];
 
-      if (email) { updates.push('contact_email = ?'); params.push(email); }
+      // Validate email format before saving — reject garbage data
+      const emailValid = email && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+        && !/(@example\.|@test\.|noreply|no-reply)/i.test(email);
+      if (emailValid) { updates.push('contact_email = ?'); params.push(email); }
+      else if (email) { console.warn(`[ContactEnricher] Invalid email rejected for ${lead.company_name}: ${email}`); }
       if (phone) { updates.push('phone = ?'); params.push(phone); }
       if (contactName && !lead.contact_name) { updates.push('contact_name = ?'); params.push(contactName); }
       if (contactTitle && !lead.contact_title) { updates.push('contact_title = ?'); params.push(contactTitle); }
       if (linkedin) { updates.push('contact_linkedin = ?'); params.push(linkedin); }
       if (website && !lead.website) { updates.push('website = ?'); params.push(website); }
 
-      updates.push("enrichment_status = ?"); params.push(email ? 'enriched' : 'partial');
+      updates.push("enrichment_status = ?"); params.push(emailValid ? 'enriched' : 'partial');
       updates.push("enrichment_method = ?"); params.push(method || 'mixed');
       updates.push("enriched_at = datetime('now')");
       updates.push("updated_at = datetime('now')");
@@ -537,8 +541,8 @@ async function enrichLead(leadId) {
 
       console.log(`[ContactEnricher]   ✅ ${lead.company_name}: email=${email || '—'}, phone=${phone || '—'}, contact=${contactName || '—'}`);
 
-      // Auto-warmup: activate cadence for newly enriched leads with email
-      if (email) {
+      // Auto-warmup: activate cadence for newly enriched leads with valid email
+      if (emailValid) {
         try {
           run(`UPDATE cfo_leads
                SET cadence_active = 1,

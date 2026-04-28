@@ -64,7 +64,8 @@ async function apolloFetch(method, path, { body = null, params = null, _retried 
     'Accept': 'application/json',
   };
 
-  const opts = { method, headers };
+  const APOLLO_TIMEOUT_MS = 30000; // 30s timeout
+  const opts = { method, headers, signal: AbortSignal.timeout(APOLLO_TIMEOUT_MS) };
   if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
     opts.body = JSON.stringify(body);
   }
@@ -254,7 +255,7 @@ async function enrichLead(lead) {
   try {
     // ── Step 1: People search by company + location + title ──
     const location = [lead.city, lead.state || 'Florida'].filter(Boolean).join(', ');
-    const people = await searchPeople({
+    const people = await searchAndReveal({
       companyName: lead.company_name,
       location: location || undefined,
       titles: DEFAULT_TITLES,
@@ -290,7 +291,7 @@ async function enrichLead(lead) {
             first_name: nameParts[0],
             last_name: nameParts[nameParts.length - 1],
             organization_name: lead.company_name,
-            reveal_personal_emails: false,
+            reveal_personal_emails: true,
           },
         });
 
@@ -321,7 +322,11 @@ async function enrichLead(lead) {
       const updates = [];
       const params = [];
 
-      if (email) { updates.push('contact_email = ?'); params.push(email); }
+      // Validate email format before saving — reject garbage data
+      const emailValid = email && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+        && !/(@example\.|@test\.|noreply|no-reply)/i.test(email);
+      if (emailValid) { updates.push('contact_email = ?'); params.push(email); }
+      else if (email) { console.warn(`[ApolloEnricher] Invalid email rejected for ${lead.company_name}: ${email}`); }
       if (phone) { updates.push('phone = ?'); params.push(phone); }
       if (contactName && !lead.contact_name) { updates.push('contact_name = ?'); params.push(contactName); }
       if (contactTitle && !lead.contact_title) { updates.push('contact_title = ?'); params.push(contactTitle); }
@@ -329,7 +334,7 @@ async function enrichLead(lead) {
       if (companyData.employees) { updates.push('employee_count = ?'); params.push(companyData.employees); }
       if (companyData.erp) { updates.push('erp_type = ?'); params.push(companyData.erp); }
 
-      updates.push('enrichment_status = ?'); params.push(email ? 'enriched' : 'partial');
+      updates.push('enrichment_status = ?'); params.push(emailValid ? 'enriched' : 'partial');
       updates.push("enrichment_method = 'apollo'");
       updates.push("enriched_at = datetime('now')");
       updates.push("updated_at = datetime('now')");
@@ -339,8 +344,8 @@ async function enrichLead(lead) {
 
       console.log(`[ApolloEnricher] Enriched ${lead.company_name}: ${email || 'no email'} (${contactTitle || 'no title'})`);
 
-      // Auto-warmup: activate cadence for newly enriched leads with email
-      if (email) {
+      // Auto-warmup: activate cadence for newly enriched leads with valid email
+      if (emailValid) {
         try {
           run(`UPDATE cfo_leads
                SET cadence_active = 1,

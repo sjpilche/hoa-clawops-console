@@ -138,7 +138,7 @@ async function runWarmupCycle() {
         { name: 'Stale Leads Reactivated', value: String(results.reactivated), inline: true },
       ],
       timestamp: new Date().toISOString(),
-    }).catch(() => {});
+    }).catch(e => console.warn('[LeadAutoWarmup] notify failed:', e.message));
   }
 
   return results;

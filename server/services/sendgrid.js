@@ -3,14 +3,17 @@
  * @description Shared SendGrid email service — single source of truth for all email sending
  * in ClawOps Console. Used for outreach campaigns, digests, and transactional emails.
  *
- * STANDARD ENV VARS (same across all projects):
- *   SENDGRID_API_KEY      — SG.xxx API key from sendgrid.com/settings/api_keys
- *   SENDGRID_FROM_EMAIL   — verified sender address (e.g. info@hoaprojectfunding.com)
- *   SENDGRID_FROM_NAME    — display name (e.g. "HOA Project Funding")
+ * SENDER IDENTITIES (per persona):
+ *   hoa   → Steve Pilcher <spilcher@hoaprojectfunding.com>
+ *   jake  → Jim McGuire <JimMcGuire@jakecfo.com>
+ *   owen  → Jim McGuire <JimMcGuire@owencfo.com>
+ *
+ * Fallback uses SENDGRID_FROM_EMAIL / SENDGRID_FROM_NAME env vars.
  *
  * USAGE:
  *   const sg = require('../services/sendgrid');
  *   await sg.send({ to, subject, html, text });
+ *   await sg.send({ to, subject, html, persona: 'jake' });
  *   await sg.sendBulk(messages);
  */
 
@@ -26,12 +29,61 @@ function init() {
     return;
   }
   sgMail.setApiKey(key);
+  sgMail.setTimeout(30000); // 30s timeout — prevents hangs if SendGrid is slow
   initialized = true;
   console.log('[SendGrid] Initialized');
 }
 
 // Call init immediately so it's ready when the module loads
 init();
+
+/**
+ * Persona → sender identity mapping.
+ * Each persona sends from a different verified email address.
+ */
+const SENDER_IDENTITIES = {
+  hoa: {
+    email: 'spilcher@hoaprojectfunding.com',
+    name: 'Steve Pilcher',
+  },
+  jake: {
+    email: 'JimMcGuire@jakecfo.com',
+    name: 'Jim McGuire',
+  },
+  owen: {
+    email: 'JimMcGuire@owencfo.com',
+    name: 'Jim McGuire',
+  },
+  data_rehab: {
+    email: 'JimMcguire@getdatarehab.com',
+    name: 'Jim McGuire',
+  },
+  terrapin: {
+    email: 'adam@terrapinstationfences.com',
+    name: 'Adam Weir',
+  },
+  fence: {
+    email: 'adam@terrapinstationfences.com',
+    name: 'Adam Weir',
+  },
+};
+
+/**
+ * Resolve the from address for an email.
+ * Priority: explicit from/fromName > persona lookup > env vars > fallback
+ */
+function resolveFrom({ from, fromName, persona }) {
+  if (from) {
+    return { email: from, name: fromName || from };
+  }
+  if (persona && SENDER_IDENTITIES[persona]) {
+    return SENDER_IDENTITIES[persona];
+  }
+  return {
+    email: process.env.SENDGRID_FROM_EMAIL || 'spilcher@hoaprojectfunding.com',
+    name: process.env.SENDGRID_FROM_NAME || 'Steve Pilcher',
+  };
+}
 
 /**
  * Send a single email.
@@ -43,20 +95,20 @@ init();
  * @param {string}          [opts.text]     — Plain text fallback
  * @param {string}          [opts.from]     — Override from address
  * @param {string}          [opts.fromName] — Override from name
+ * @param {string}          [opts.persona]  — Persona key (hoa, jake, owen) → auto-resolves sender
  * @returns {{ success: boolean, messageId?: string, error?: string }}
  */
-async function send({ to, subject, html, text, from, fromName }) {
+async function send({ to, subject, html, text, from, fromName, persona }) {
   if (!process.env.SENDGRID_API_KEY) {
     console.warn('[SendGrid] Skipping send — SENDGRID_API_KEY not configured');
     return { success: false, reason: 'not_configured' };
   }
 
+  const sender = resolveFrom({ from, fromName, persona });
+
   const msg = {
     to,
-    from: {
-      email: from || process.env.SENDGRID_FROM_EMAIL || 'info@hoaprojectfunding.com',
-      name: fromName || process.env.SENDGRID_FROM_NAME || 'HOA Project Funding',
-    },
+    from: sender,
     subject,
     html: html || text || '',
     text: text || stripHtml(html || ''),
@@ -65,7 +117,7 @@ async function send({ to, subject, html, text, from, fromName }) {
   try {
     const [response] = await sgMail.send(msg);
     const msgId = response?.headers?.['x-message-id'] || null;
-    console.log(`[SendGrid] Sent to ${Array.isArray(to) ? to.join(', ') : to}: "${subject}"`);
+    console.log(`[SendGrid] Sent to ${Array.isArray(to) ? to.join(', ') : to} from ${sender.name} <${sender.email}>: "${subject}"`);
     return { success: true, messageId: msgId };
   } catch (err) {
     const errMsg = err?.response?.body?.errors?.[0]?.message || err.message;
@@ -79,7 +131,7 @@ async function send({ to, subject, html, text, from, fromName }) {
  * SendGrid allows up to 1000 personalizations per API call.
  * We batch in groups of 100 to stay well within limits.
  *
- * @param {Array<{ to, subject, html, text, from?, fromName? }>} messages
+ * @param {Array<{ to, subject, html, text, from?, fromName?, persona? }>} messages
  * @returns {{ sent: number, failed: number, results: Array }}
  */
 async function sendBulk(messages) {
@@ -98,7 +150,8 @@ async function sendBulk(messages) {
     const batch = messages.slice(i, i + BATCH_SIZE);
 
     // Send each in the batch (parallel within batch, serial between batches)
-    const batchResults = await Promise.all(
+    // Use allSettled so one failure doesn't crash the entire batch
+    const settled = await Promise.allSettled(
       batch.map(async (msg) => {
         const result = await send(msg);
         if (result.success) sent++;
@@ -106,7 +159,10 @@ async function sendBulk(messages) {
         return { to: msg.to, subject: msg.subject, ...result };
       })
     );
-    results.push(...batchResults);
+    for (const s of settled) {
+      if (s.status === 'fulfilled') results.push(s.value);
+      else { failed++; results.push({ error: s.reason?.message || 'Unknown error' }); }
+    }
 
     // Small delay between batches to avoid rate limits
     if (i + BATCH_SIZE < messages.length) {
@@ -120,13 +176,14 @@ async function sendBulk(messages) {
 
 /**
  * Check if SendGrid is configured and ready.
- * @returns {{ configured: boolean, from: string|null }}
+ * @returns {{ configured: boolean, from: string|null, identities: Object }}
  */
 function status() {
   return {
     configured: !!process.env.SENDGRID_API_KEY,
     from: process.env.SENDGRID_FROM_EMAIL || null,
     fromName: process.env.SENDGRID_FROM_NAME || null,
+    identities: SENDER_IDENTITIES,
   };
 }
 
@@ -147,21 +204,68 @@ function stripHtml(html) {
 }
 
 /**
- * Branded HTML email shell — HOA Project Funding style.
+ * Persona-aware branding config for email shells.
+ * Each persona gets its own header, footer, and color scheme.
+ */
+const BRAND_SHELLS = {
+  hoa: {
+    title: 'HOA Project Funding',
+    url: 'hoaprojectfunding.com',
+    gradient: 'linear-gradient(135deg,#1e40af,#3b82f6)',
+    footer: 'HOA Project Funding',
+    footerNote: 'You received this email because your community was identified as a potential fit for our services.',
+  },
+  jake: {
+    title: 'Pilcher Financial — Fractional CFO + AI',
+    url: 'jakecfo.com',
+    gradient: 'linear-gradient(135deg,#b45309,#f59e0b)',
+    footer: 'Pilcher Financial Consulting',
+    footerNote: 'You received this email because your company was identified as a potential fit for our construction CFO services.',
+  },
+  owen: {
+    title: 'Pilcher Financial — PM Finance',
+    url: 'owencfo.com',
+    gradient: 'linear-gradient(135deg,#0e7490,#22d3ee)',
+    footer: 'Pilcher Financial Consulting',
+    footerNote: 'You received this email because your company was identified as a potential fit for our property management CFO services.',
+  },
+  data_rehab: {
+    title: 'Privium Data Services',
+    url: 'getdatarehab.com',
+    gradient: 'linear-gradient(135deg,#7c3aed,#a78bfa)',
+    footer: 'Privium Data Services',
+    footerNote: 'You received this email because your company was identified as a potential fit for our data services.',
+  },
+  terrapin: {
+    title: 'Terrapin Station Community Services',
+    url: 'terrapinstationfences.com',
+    gradient: 'linear-gradient(135deg,#15803d,#4ade80)',
+    footer: 'Terrapin Station Community Services',
+    footerNote: 'You received this email because your community was identified as a potential fit for our services.',
+  },
+};
+// Alias
+BRAND_SHELLS.fence = BRAND_SHELLS.terrapin;
+BRAND_SHELLS.cfo = BRAND_SHELLS.jake;
+
+/**
+ * Branded HTML email shell — persona-aware.
  * Pass your body content as an HTML string.
  *
  * @param {string} bodyHtml — Inner HTML content (paragraphs, etc.)
  * @param {Object} [opts]
  * @param {string} [opts.preheader] — Preview text shown in email client
+ * @param {string} [opts.persona]  — Persona key (hoa, jake, data_rehab, etc.) for brand-specific shell
  * @returns {string} Full HTML email
  */
-function wrapInBrandedShell(bodyHtml, { preheader = '' } = {}) {
+function wrapInBrandedShell(bodyHtml, { preheader = '', persona = 'hoa' } = {}) {
+  const brand = BRAND_SHELLS[persona] || BRAND_SHELLS.hoa;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HOA Project Funding</title>
+  <title>${brand.title}</title>
   <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 </head>
 <body style="margin:0;padding:0;background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
@@ -173,9 +277,9 @@ function wrapInBrandedShell(bodyHtml, { preheader = '' } = {}) {
 
           <!-- Header -->
           <tr>
-            <td style="background:linear-gradient(135deg,#1e40af,#3b82f6);border-radius:8px 8px 0 0;padding:28px 32px;">
-              <div style="font-size:22px;font-weight:700;color:#ffffff;">HOA Project Funding</div>
-              <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-top:4px;">hoaprojectfunding.com</div>
+            <td style="background:${brand.gradient};border-radius:8px 8px 0 0;padding:28px 32px;">
+              <div style="font-size:22px;font-weight:700;color:#ffffff;">${brand.title}</div>
+              <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-top:4px;">${brand.url}</div>
             </td>
           </tr>
 
@@ -190,10 +294,10 @@ function wrapInBrandedShell(bodyHtml, { preheader = '' } = {}) {
           <tr>
             <td style="background:#f9fafb;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:20px 32px;">
               <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
-                HOA Project Funding &bull; <a href="https://hoaprojectfunding.com" style="color:#6b7280;text-decoration:none;">hoaprojectfunding.com</a>
+                ${brand.footer} &bull; <a href="https://${brand.url}" style="color:#6b7280;text-decoration:none;">${brand.url}</a>
               </p>
               <p style="margin:8px 0 0;font-size:11px;color:#9ca3af;text-align:center;">
-                You received this email because your company was identified as a HOA management firm.
+                ${brand.footerNote}
                 To opt out, reply with "unsubscribe" in the subject line.
               </p>
             </td>
@@ -207,4 +311,4 @@ function wrapInBrandedShell(bodyHtml, { preheader = '' } = {}) {
 </html>`;
 }
 
-module.exports = { send, sendBulk, status, wrapInBrandedShell, stripHtml };
+module.exports = { send, sendBulk, status, wrapInBrandedShell, stripHtml, SENDER_IDENTITIES, BRAND_SHELLS, resolveFrom };

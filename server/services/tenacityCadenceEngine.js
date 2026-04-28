@@ -295,9 +295,9 @@ async function buildCadenceMessage(leadId, product = 'jake', touchNumber) {
       pilotOffer = 'close_acceleration'; // Upsell for known ERP users on later touches
     }
     const offerDetails = {
-      spend_leak: { name: 'Spend Leak Finder', price: '$490', duration: '7 days', hook: 'We find duplicate payments, recurring overcharges, and vendor consolidation opportunities' },
-      close_acceleration: { name: 'Close Acceleration', price: '$950', duration: '10 days', hook: 'Streamline your month-end close — most clients cut 3-5 days off their cycle' },
-      get_paid_faster: { name: 'Get Paid Faster', price: '$750', duration: '14 days', hook: 'AR analysis that identifies stuck invoices and accelerates cash collection' },
+      spend_leak: { name: 'Spend Leak Finder', price: '$490', duration: '7 days', hook: 'A real CFO and AI agents dig into your data for 7 days — we find duplicate payments, recurring overcharges, and vendor consolidation opportunities that your team is too busy to catch' },
+      close_acceleration: { name: 'Close Acceleration', price: '$950', duration: '10 days', hook: 'We bring the CFO brain and the automation — most clients cut 3-5 days off their month-end close because the agents handle the reconciliation work that used to take your team all week' },
+      get_paid_faster: { name: 'AR Acceleration', price: '$750', duration: '14 days', hook: 'AI agents hunt your stuck invoices every morning while a real CFO fixes the process underneath — clients typically recover 15-30% of aged AR in the first two weeks' },
     };
     const offer = offerDetails[pilotOffer];
     pilotContext = `\n\nPILOT OFFER — Include this naturally in the email:\n  Offer: ${offer.name} (${offer.price}, ${offer.duration})\n  Hook: "${offer.hook}"\n  Tone: Position as a low-risk diagnostic, not a sales pitch. Make it feel like a favor, not an ask.`;
@@ -418,7 +418,7 @@ async function runCadenceCycle(product = 'both') {
               color: 0xff3333,
               footer: { text: 'TenacityCadenceEngine · ClawOps' },
             }],
-          }).catch(() => {});
+          }).catch(e => console.warn('[Cadence] notify failed:', e.message));
         } catch {}
       }
     }
@@ -470,7 +470,7 @@ async function runCadenceCycle(product = 'both') {
               color: 0xff3333,
               footer: { text: 'TenacityCadenceEngine · ClawOps' },
             }],
-          }).catch(() => {});
+          }).catch(e => console.warn('[Cadence] notify failed:', e.message));
         } catch {}
       }
     }
@@ -510,7 +510,7 @@ async function runCadenceCycle(product = 'both') {
         timestamp: new Date().toISOString(),
         footer: { text: `TenacityCadenceEngine · ${(durationMs / 1000).toFixed(1)}s` },
       }],
-    }).catch(() => {});
+    }).catch(e => console.warn('[Cadence] notify failed:', e.message));
   } catch {}
 
   const summary = [
