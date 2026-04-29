@@ -26,7 +26,9 @@ const { chat: llmChat, pingOllama } = require('./llmClient');
 
 const DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'llama3.2:3b';
 const CODER_MODEL = process.env.OLLAMA_CODER_MODEL || 'deepseek-coder-v2:16b';
-const TIMEOUT_MS = 120000;
+// Ollama on CPU-only hardware (no usable VRAM) routinely needs 3-10 min
+// per call for 14B+ models. Override via OLLAMA_TIMEOUT_MS env var.
+const TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS) || 600000;
 
 // ── Check if Ollama is reachable ──────────────────────────────────────────────
 async function ping() {
