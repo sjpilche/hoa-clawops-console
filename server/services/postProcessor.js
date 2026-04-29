@@ -334,7 +334,7 @@ async function postProcessLLMOutput(agent, outputText, message, { runId } = {}) 
           }
           const email = lead.contact_email && lead.contact_email !== 'unknown' ? lead.contact_email : null;
           const enrichStatus = email ? 'enriched' : 'pending';
-          run(
+          const insertResult = run(
             `INSERT INTO cfo_leads (company_name, revenue_range, contact_name, contact_title, contact_email, contact_linkedin, website, employee_count, erp_type, pilot_fit_score, pilot_fit_reason, state, city, enrichment_status, source, source_agent, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'lead_scout', 'jake', 'new')`,
             [
               lead.company_name,
@@ -353,6 +353,16 @@ async function postProcessLLMOutput(agent, outputText, message, { runId } = {}) 
               enrichStatus,
             ]
           );
+          // Revenue attribution: record discovery for LLM-scouted leads
+          try {
+            if (insertResult.lastInsertRowid) {
+              require('./revenueTracker').recordEvent(insertResult.lastInsertRowid, 'discovered', {
+                agent: agent?.name || 'lead-scout',
+                channel: 'llm_scout',
+                metadata: { score: lead.qualification_score || lead.pilot_fit_score || 0 },
+              });
+            }
+          } catch (err) { console.warn('[PostProcessor] revenue.recordEvent failed:', err.message); }
         }
       }
     }

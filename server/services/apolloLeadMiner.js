@@ -331,7 +331,7 @@ async function mineAndScore(listType = 'core_cfos', opts = {}) {
       const techStack = (org.technologies || []).join(', ');
       const erpType = detectErp(org.technologies || []);
 
-      run(`INSERT INTO cfo_leads (
+      const insertResult = run(`INSERT INTO cfo_leads (
         company_name, contact_name, contact_title, contact_email, contact_linkedin,
         employee_count, revenue_range, erp_type, city, state, website,
         pilot_fit_score, urgency_score, enrichment_status, source, source_agent,
@@ -354,6 +354,17 @@ async function mineAndScore(listType = 'core_cfos', opts = {}) {
           `CRAP score: ${scoreResult.score}/100 | ${scoreResult.reasons.join(', ')} | Tech: ${techStack || 'unknown'} | List: ${config.name}`,
         ]
       );
+
+      // Revenue attribution: record discovery event so the funnel can count this lead
+      try {
+        if (insertResult.lastInsertRowid) {
+          require('./revenueTracker').recordEvent(insertResult.lastInsertRowid, 'discovered', {
+            agent: 'apollo-lead-miner',
+            channel: 'apollo_api',
+            metadata: { listType: config.name, score: scoreResult.score },
+          });
+        }
+      } catch (err) { console.warn('[ApolloMiner] revenue.recordEvent failed:', err.message); }
 
       inserted++;
       topLeads.push({

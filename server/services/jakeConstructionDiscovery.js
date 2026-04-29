@@ -346,7 +346,7 @@ async function runConstructionDiscovery(params = {}) {
         region,
       ].filter(Boolean).join(' | ');
 
-      run(
+      const insertResult = run(
         `INSERT INTO cfo_leads
            (company_name, phone, city, state,
             pilot_fit_score, pilot_fit_reason,
@@ -365,6 +365,17 @@ async function runConstructionDiscovery(params = {}) {
       );
 
       stats.inserted++;
+
+      // Revenue attribution: record discovery event
+      try {
+        if (insertResult.lastInsertRowid) {
+          require('./revenueTracker').recordEvent(insertResult.lastInsertRowid, 'discovered', {
+            agent: 'jake-construction-discovery',
+            channel: 'google_maps',
+            metadata: { region, score },
+          });
+        }
+      } catch (err) { console.warn('[ConstructionDiscovery] revenue.recordEvent failed:', err.message); }
 
       // Track for Apollo enrichment
       const insertedLead = get('SELECT id, company_name, city, state FROM cfo_leads WHERE LOWER(company_name) = LOWER(?)', [name]);

@@ -250,13 +250,24 @@ async function runLeadScout(params = {}) {
       const { score, reason } = scoreLead(name, licTypeCode, county, co.status, co.is_company);
       if (score < 45) continue;
 
-      run(
+      const insertResult = run(
         `INSERT INTO cfo_leads
          (company_name, erp_type, state, website, pilot_fit_score, pilot_fit_reason, status, source, notes)
          VALUES (?, 'Unknown', 'FL', null, ?, ?, 'new', 'dbpr_scrape', ?)`,
         [name, score, reason, co.license_num ? `${co.license_num} | ${co.county} county` : `${co.county} county`]
       );
       stats.inserted++;
+
+      // Revenue attribution
+      try {
+        if (insertResult.lastInsertRowid) {
+          require('./revenueTracker').recordEvent(insertResult.lastInsertRowid, 'discovered', {
+            agent: 'cfo-lead-scout',
+            channel: 'dbpr_scrape',
+            metadata: { county: co.county, score },
+          });
+        }
+      } catch (err) { console.warn('[LeadScout] revenue.recordEvent failed:', err.message); }
     }
 
     await browser.close();
