@@ -209,15 +209,17 @@ function getDb() {
 function run(sql, params = []) {
   const database = getDb();
   database.run(sql, params);
-  saveDatabase();
-  // Capture lastInsertRowid for INSERTs (sql.js exposes it via the special function)
+  // Capture lastInsertRowid + changes BEFORE saveDatabase(), because
+  // sql.js export() resets the rowid/rowsModified counters.
+  const changes = database.getRowsModified();
   let lastInsertRowid = null;
   try {
     const stmt = database.prepare('SELECT last_insert_rowid() AS id');
     if (stmt.step()) lastInsertRowid = stmt.getAsObject().id;
     stmt.free();
   } catch { /* non-fatal */ }
-  return { changes: database.getRowsModified(), lastInsertRowid };
+  saveDatabase();
+  return { changes, lastInsertRowid };
 }
 
 /**

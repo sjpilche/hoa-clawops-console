@@ -215,8 +215,10 @@ async function executeSchedule(schedule) {
         enrichedMessage = enrichedMessage.slice(0, 6000) + '\n[... message truncated ...]';
       }
 
-      // Pass agent.name as agentId (matches OpenClaw registration slug), NOT the UUID
-      const ollamaModel = get("SELECT value FROM settings WHERE key='ollama_model'")?.value || 'llama3.2:3b';
+      // Pass agent.name as agentId (matches OpenClaw registration slug), NOT the UUID.
+      // Per-agent ollama_model in config wins over the global default.
+      const globalOllamaModel = get("SELECT value FROM settings WHERE key='ollama_model'")?.value || 'llama3.2:3b';
+      const ollamaModel = agentConfig.ollama_model || agentConfig.ollamaModel || globalOllamaModel;
       const bridgeResult = await bridge.runAgent(agent.name, {
         openclawId: agentConfig.openclaw_id || agent.name,
         message: enrichedMessage,

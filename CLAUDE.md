@@ -47,7 +47,14 @@ Preserve working systems unless there is a clear, material benefit to changing t
 ## System Reference
 
 ### Stack
-Node.js 24 · Express · Vite/React 19 · SQLite3 · OpenClaw CLI v2026.3.12 · GPT-4o · GPT-4o-mini · Ollama
+Node.js 24 · Express · Vite/React 19 · SQLite3 · OpenClaw CLI v2026.3.12 · GPT-4o · GPT-4o-mini · Ollama (gemma4:26b, qwen3:14b)
+
+### LLM routing (`scheduleRunner.js`)
+- **Global gate**: `settings.ollama_enabled` (currently `true`). Set to `false` to force every agent through OpenClaw/OpenAI.
+- **Per-agent opt-in**: agent's `config.use_ollama === true`. Without this flag, the agent uses OpenClaw/OpenAI even when Ollama is enabled.
+- **Per-agent model override**: `config.ollama_model` (e.g. `'gemma4:26b'`, `'qwen3:14b'`, `'llama3.1:8b'`). Falls back to `settings.ollama_model`.
+- **Currently tagged for Ollama** (7 agents): `jake-content-engine`, `hoa-content-writer`, `data-rehab-content`, `opportunity-scorer` → `gemma4:26b` (quality > speed); `jake-lead-scout`, `rse-signal-scorer`, `opportunity-scanner` → `qwen3:14b` (faster, batch volume).
+- **Outreach drafter stays on `gpt-4o-mini`** — per-lead quality matters and SendGrid bulk pricing dominates the cost.
 
 ### Commands
 ```bash
