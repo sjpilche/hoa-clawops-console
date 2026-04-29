@@ -47,6 +47,10 @@ const OLLAMA_DEFAULT_MODEL = process.env.OLLAMA_DEFAULT_MODEL || 'llama3.2:3b';
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const DEFAULT_TIMEOUT = 120000;
+// Ollama on CPU-only hardware (no GPU) is much slower than cloud providers.
+// Big models (gemma4:26b, qwen3:14b) routinely need 3-10 minutes per call.
+// Override with OLLAMA_TIMEOUT_MS env var.
+const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT_MS) || 600000; // 10 min
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_TEMPERATURE = 0.7;
 
@@ -176,7 +180,8 @@ async function callOllama(messages, opts) {
   };
 
   const startMs = Date.now();
-  const res = await httpPost(url, body, {}, opts.timeoutMs || DEFAULT_TIMEOUT);
+  // Ollama needs longer timeouts than cloud providers (CPU inference is slow).
+  const res = await httpPost(url, body, {}, opts.timeoutMs || OLLAMA_TIMEOUT);
   const durationMs = Date.now() - startMs;
 
   let parsed;
