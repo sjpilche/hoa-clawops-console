@@ -27,9 +27,7 @@ CEO: Steve Pilcher (Human — Final Authority on spend, send, pivot, legal)
         │     └── Feedback Loop             → rse-feedback-loop (3 AM Sun — trust score updates)
         │
         ├── ENGINEERING DEPARTMENT
-        │     ├── Code Builder              → rse-code-builder (on-demand via Steve + Claude Code)
-        │     ├── Tool Builder              [VACANT — needs agent]
-        │     └── Automation Engineer       [VACANT — needs agent]
+        │     └── Code Builder              → rse-code-builder (on-demand via Steve + Claude Code)
         │
         ├── MARKETING DEPARTMENT
         │     ├── Content Writer            → jake-content-engine / cfo-content-engine / hoa-content-writer
@@ -43,9 +41,7 @@ CEO: Steve Pilcher (Human — Final Authority on spend, send, pivot, legal)
         │     └── Content Repurposer        → content-repurposer
         │
         ├── FINANCE DEPARTMENT
-        │     ├── Opportunity Evaluator     → mgmt-review-scanner / urgency-scorer
-        │     ├── Pricing Analyzer          [VACANT — needs agent]
-        │     └── ROI Calculator            [VACANT — needs agent]
+        │     └── Opportunity Evaluator     → mgmt-review-scanner / urgency-scorer
         │
         └── OPERATIONS DEPARTMENT
               ├── Daily Debrief             → daily-debrief
@@ -54,9 +50,26 @@ CEO: Steve Pilcher (Human — Final Authority on spend, send, pivot, legal)
               ├── Pipeline State Tracker    → pipeline-state-tracker
               ├── Tenacity Cadence Engine   → tenacity-cadence
               ├── Memory Manager            → brain-distillation
-              ├── CRM Sync                  → jake-crm-sync
-              └── Workflow Optimizer        [VACANT — needs agent]
+              └── CRM Sync                  → jake-crm-sync
 ```
+
+### Considered-but-not-built roles
+
+These roles appeared in earlier drafts as "VACANT — needs agent" placeholders
+but remained vacant through 2026-Q1. Per Rule #3 (simplicity wins), they were
+removed from the active chart on 2026-04-28. Build them only with a clear
+brief and a measurable scorecard.
+
+- **Tool Builder** (Engineering) — generic dev-tool authoring; superseded
+  by Steve + Claude Code working directly in this repo.
+- **Automation Engineer** (Engineering) — overlaps Charlie (Dream Team
+  Engineering & Builder), pipeline-director, and tenacity-cadence-engine.
+- **Pricing Analyzer** (Finance) — pricing decisions are Steve-owned and
+  low-frequency; an agent here would mostly produce noise.
+- **ROI Calculator** (Finance) — already covered by revenueTracker +
+  /api/revenue/* + RevenueDashboard; no need for a separate LLM agent.
+- **Workflow Optimizer** (Operations) — Todd's nightly cycle already
+  scores performance and auto-pauses underperformers.
 
 ---
 
@@ -79,8 +92,6 @@ CEO: Steve Pilcher (Human — Final Authority on spend, send, pivot, legal)
 | Role | Mapped Agent(s) | Status |
 |------|-----------------|--------|
 | Code Builder (RSE) | `rse-code-builder` (build mode, on-demand) | ACTIVE |
-| Tool Builder | — | VACANT |
-| Automation Engineer | — | VACANT |
 
 ### Marketing Department
 
@@ -106,8 +117,7 @@ CEO: Steve Pilcher (Human — Final Authority on spend, send, pivot, legal)
 | Opportunity Evaluator | `mgmt-review-scanner`, `urgency-scorer` | ACTIVE |
 | Lead Dossier Generator | `lead-dossier-generator` | ACTIVE |
 | Idea Evaluator (RSE) | `rse-code-builder` (evaluate mode) | ACTIVE |
-| Pricing Analyzer | — | VACANT |
-| ROI Calculator | — | VACANT |
+| ROI Reporting | `revenueTracker` service + `/api/revenue/*` (no LLM agent) | ACTIVE |
 
 ### Operations Department
 
@@ -122,7 +132,8 @@ CEO: Steve Pilcher (Human — Final Authority on spend, send, pivot, legal)
 | CRM Sync | `jake-crm-sync` | ACTIVE |
 | Permit Scanner | `jake-permit-scanner` | ACTIVE |
 | Bid Scraper | `bid-result-scraper` | ACTIVE |
-| Workflow Optimizer | — | VACANT |
+| Performance Optimizer | `dream-team-nightly` (scorecard + auto-pause) | ACTIVE |
+| Schedule Drift / Zombie Reaper | `scheduleRunner` (cron-parser based) | ACTIVE |
 
 ---
 

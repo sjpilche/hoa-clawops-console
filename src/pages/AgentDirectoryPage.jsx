@@ -570,6 +570,15 @@ export default function AgentDirectoryPage() {
           <h1 className="text-xl font-semibold">Agent Directory</h1>
         </div>
         <div className="flex items-center gap-3">
+          <a
+            href="/api/health/agents/scorecard/report"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded text-xs font-medium bg-accent-primary/10 text-accent-primary border border-accent-primary/30 hover:bg-accent-primary/20 transition-colors"
+            title="Open the weekly 5-dimension portfolio scorecard report"
+          >
+            Weekly Scorecard
+          </a>
           <button onClick={fetchData} className="p-1.5 rounded hover:bg-bg-elevated transition-colors text-text-muted" title="Refresh">
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
