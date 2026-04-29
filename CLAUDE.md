@@ -47,14 +47,34 @@ Preserve working systems unless there is a clear, material benefit to changing t
 ## System Reference
 
 ### Stack
-Node.js 24 · Express · Vite/React 19 · SQLite3 · OpenClaw CLI v2026.3.12 · GPT-4o · GPT-4o-mini · Ollama (gemma4:26b, qwen3:14b)
+Node.js 24 · Express · Vite/React 19 · SQLite3 · OpenClaw CLI v2026.3.12 · GPT-4o · GPT-4o-mini · Ollama (currently disabled — see below)
 
 ### LLM routing (`scheduleRunner.js`)
-- **Global gate**: `settings.ollama_enabled` (currently `true`). Set to `false` to force every agent through OpenClaw/OpenAI.
-- **Per-agent opt-in**: agent's `config.use_ollama === true`. Without this flag, the agent uses OpenClaw/OpenAI even when Ollama is enabled.
-- **Per-agent model override**: `config.ollama_model` (e.g. `'gemma4:26b'`, `'qwen3:14b'`, `'llama3.1:8b'`). Falls back to `settings.ollama_model`.
-- **Currently tagged for Ollama** (7 agents): `jake-content-engine`, `hoa-content-writer`, `data-rehab-content`, `opportunity-scorer` → `gemma4:26b` (quality > speed); `jake-lead-scout`, `rse-signal-scorer`, `opportunity-scanner` → `qwen3:14b` (faster, batch volume).
-- **Outreach drafter stays on `gpt-4o-mini`** — per-lead quality matters and SendGrid bulk pricing dominates the cost.
+- **Global gate**: `settings.ollama_enabled` (currently **`false`**).
+- **Per-agent opt-in**: agent's `config.use_ollama === true` (currently no agents tagged).
+- **Per-agent model override**: `config.ollama_model` falls back to `settings.ollama_model`.
+- **Wiring is in place** but disabled. To re-enable: `UPDATE settings SET value='true' WHERE key='ollama_enabled'` and tag specific agents.
+
+### Ollama hardware verdict (tested 2026-04-28)
+This host has an **AMD Radeon 890M iGPU with 4GB shared VRAM** — none of the
+useful models fit (gemma4:26b=19.6GB, qwen3:14b=10.1GB, llama3.1:8b=5GB).
+Everything runs on CPU. Real-world test results:
+
+| Model | Workload | Result |
+|---|---|---|
+| `gemma4:26b` | 200-word blog post | TIMED OUT (>6 min) |
+| `qwen3:14b` | 200-word blog post | TIMED OUT (>15 min) |
+| `llama3.2:3b` | 1-token classification (under load) | 68 seconds |
+
+**Conclusion**: Ollama is non-viable on this hardware for any meaningful work.
+Stay on cloud (`gpt-4o-mini` for batch, `gpt-4o` for quality) until a real
+discrete GPU (RTX 3090/4090, 24GB VRAM) is available. The Ollama routing
+infrastructure is preserved so it can be re-enabled instantly when better
+hardware arrives or for very small models on a dedicated host.
+
+The two timeout fixes (`llmClient.js`, `ollamaBridge.js`) raised the
+budget from 120s to 600s — they stay in place so future Ollama use
+isn't immediately killed.
 
 ### Commands
 ```bash
