@@ -89,9 +89,9 @@ async function initDatabase() {
     }
   }
 
-  // Step 5: Migrations — add columns that may not exist in older databases
+  // Step 5: ALTER TABLE migrations — JS_MIGRATIONS is exported so tests can
+  // reuse the identical set against an in-memory DB.
   const migrations = [
-    // v1.0 migrations
     { sql: 'ALTER TABLE agents ADD COLUMN instructions TEXT DEFAULT ""', desc: 'instructions column' },
     // v2.0 migrations — multi-domain platform
     { sql: 'ALTER TABLE agents ADD COLUMN domain_id TEXT REFERENCES domains(id)', desc: 'domain_id column' },
@@ -267,6 +267,66 @@ function all(sql, params = []) {
   return rows;
 }
 
+/**
+ * Apply the same ALTER-TABLE column-add migrations against any sql.js DB.
+ * Used by tests to bring an in-memory DB to parity with production schema.
+ */
+function applyJsMigrations(targetDb) {
+  // Mirror of the inline list in initDatabase() Step 5. Keep in sync.
+  const migrations = [
+    'ALTER TABLE agents ADD COLUMN instructions TEXT DEFAULT ""',
+    'ALTER TABLE agents ADD COLUMN domain_id TEXT',
+    "ALTER TABLE agents ADD COLUMN extension_ids TEXT DEFAULT '[]'",
+    'ALTER TABLE agents ADD COLUMN layer INTEGER DEFAULT 0',
+    "ALTER TABLE agents ADD COLUMN orchestration_role TEXT DEFAULT 'worker'",
+    "ALTER TABLE blitz_runs ADD COLUMN domain TEXT DEFAULT 'all'",
+    "ALTER TABLE cfo_leads ADD COLUMN source_agent TEXT DEFAULT 'cfo'",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN source_agent TEXT DEFAULT 'cfo'",
+    "ALTER TABLE cfo_outreach_sequences ADD COLUMN source_agent TEXT DEFAULT 'cfo'",
+    "ALTER TABLE agent_skills ADD COLUMN promoted_from INTEGER",
+    "ALTER TABLE agent_skills ADD COLUMN source_activity TEXT",
+    "ALTER TABLE training_sessions ADD COLUMN activity_type TEXT DEFAULT 'youtube'",
+    "ALTER TABLE training_sessions ADD COLUMN queue_item_id INTEGER",
+    "ALTER TABLE cfo_leads ADD COLUMN deal_value_cents INTEGER",
+    "ALTER TABLE cfo_leads ADD COLUMN deal_closed_at TEXT",
+    "ALTER TABLE cfo_leads ADD COLUMN deal_closed_by TEXT",
+    "ALTER TABLE cfo_leads ADD COLUMN revenue_stage TEXT DEFAULT 'discovered'",
+    "ALTER TABLE cfo_leads ADD COLUMN revenue_stage_changed_at TEXT",
+    "ALTER TABLE cfo_leads ADD COLUMN days_to_first_reply INTEGER",
+    "ALTER TABLE cfo_leads ADD COLUMN days_to_close INTEGER",
+    "ALTER TABLE cfo_leads ADD COLUMN attributed_sequence_id INTEGER",
+    "ALTER TABLE cfo_leads ADD COLUMN attributed_touch_number INTEGER",
+    "ALTER TABLE cfo_leads ADD COLUMN engagement_score INTEGER DEFAULT 0",
+    "ALTER TABLE cfo_leads ADD COLUMN last_engaged_at TEXT",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN deal_value_cents INTEGER",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN deal_closed_at TEXT",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN deal_closed_by TEXT",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN revenue_stage TEXT DEFAULT 'discovered'",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN revenue_stage_changed_at TEXT",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN days_to_first_reply INTEGER",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN days_to_close INTEGER",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN attributed_sequence_id INTEGER",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN attributed_touch_number INTEGER",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN engagement_score INTEGER DEFAULT 0",
+    "ALTER TABLE lg_engagement_queue ADD COLUMN last_engaged_at TEXT",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN performance_score INTEGER",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN leads_generated INTEGER DEFAULT 0",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN email_clicks INTEGER DEFAULT 0",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN social_shares INTEGER DEFAULT 0",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN newsletter_clicks INTEGER DEFAULT 0",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN page_views INTEGER DEFAULT 0",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN scored_at TEXT",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN target_keyword TEXT",
+    "ALTER TABLE cfo_content_pieces ADD COLUMN calendar_id INTEGER",
+    "ALTER TABLE content_calendar ADD COLUMN performance_score INTEGER",
+    "ALTER TABLE content_calendar ADD COLUMN leads_generated INTEGER DEFAULT 0",
+    "ALTER TABLE content_calendar ADD COLUMN scored_at TEXT",
+  ];
+  for (const sql of migrations) {
+    try { targetDb.run(sql); } catch { /* column already exists */ }
+  }
+}
+
 module.exports = {
   initDatabase,
   getDb,
@@ -274,4 +334,5 @@ module.exports = {
   get,
   all,
   saveDatabase,
+  applyJsMigrations,
 };

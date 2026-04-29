@@ -34,35 +34,28 @@ export async function setupTestDb() {
   // Create fresh in-memory database
   db = new SQL.Database();
 
-  // Load base schema
+  // Load base schema — sql.js handles multi-statement SQL natively;
+  // the previous split-on-';' approach corrupted multi-line CREATE TABLEs.
   const schemaPath = path.resolve(__dirname, '../server/db/schema.sql');
   if (fs.existsSync(schemaPath)) {
-    const schema = fs.readFileSync(schemaPath, 'utf-8');
-    // sql.js db.run() only executes first statement — split and run each
-    const statements = schema
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('--'));
-    for (const stmt of statements) {
-      try { db.run(stmt + ';'); } catch (e) { /* skip if already exists or syntax issue */ }
-    }
+    try { db.run(fs.readFileSync(schemaPath, 'utf-8')); }
+    catch (e) { console.warn('[testDb] schema.sql warning:', e.message); }
   }
 
-  // Load migration CREATE TABLE statements
+  // Apply each migration file in order, exactly as production does.
   const migrationsDir = path.resolve(__dirname, '../server/db/migrations');
   if (fs.existsSync(migrationsDir)) {
     const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
     for (const file of files) {
-      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-      const stmts = sql
-        .split(';')
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.startsWith('--'));
-      for (const stmt of stmts) {
-        try { db.run(stmt + ';'); } catch { /* skip ALTER TABLE duplicates etc */ }
-      }
+      try { db.run(fs.readFileSync(path.join(migrationsDir, file), 'utf-8')); }
+      catch { /* migration may be partially applied or contain ALTER TABLE that already ran */ }
     }
   }
+
+  // Apply the in-process JS migrations (ALTER TABLE column adds) so the
+  // schema matches what server/index.js produces at boot.
+  const { applyJsMigrations } = require('../server/db/connection.js');
+  applyJsMigrations(db);
 
   // Mock the connection module so all services use our test DB
   vi.doMock('../server/db/connection', () => ({
